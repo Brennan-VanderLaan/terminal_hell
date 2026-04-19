@@ -61,6 +61,12 @@ pub struct Framebuffer {
     braille_dots: Vec<u8>,
     /// One color per terminal cell, applied when that cell renders as braille.
     braille_fg: Vec<Pixel>,
+    /// Additive bloom contributions, pixel-resolution. Flushed at resolve
+    /// time by adding into lit pixels and brightening adjacent dark
+    /// pixels. Sparse set: `bloom_seeds` records the origins so the
+    /// accumulate step only touches pixels near a seed.
+    bloom_accum: Vec<(u16, u16, u16)>, // (r, g, b) clamped at resolve
+    bloom_seeds: Vec<BloomSeed>,
     /// Optional ambient tint applied to every lit pixel at blit time.
     /// `(color, amount)` where amount is 0..1 (0 = no tint, 1 = replace).
     /// Used by the Corruption curve to amber-wash the arena.
@@ -70,6 +76,19 @@ pub struct Framebuffer {
     resolved: Vec<Cell>,
     force_full: bool,
 }
+
+/// A bloom source: pixel-resolution position, color, radius, strength.
+/// Radius is clamped to `BLOOM_MAX_RADIUS` at accumulation time.
+#[derive(Clone, Copy, Debug)]
+pub struct BloomSeed {
+    pub x: f32,
+    pub y: f32,
+    pub color: Pixel,
+    pub radius: u8,
+    pub strength: f32,
+}
+
+pub const BLOOM_MAX_RADIUS: u8 = 6;
 
 impl Framebuffer {
     pub fn new(cols: u16, rows: u16) -> Self {
@@ -81,11 +100,29 @@ impl Framebuffer {
             sex_pixels: vec![Pixel::BLACK; sex],
             braille_dots: vec![0u8; cells],
             braille_fg: vec![Pixel::BLACK; cells],
+            bloom_accum: vec![(0u16, 0u16, 0u16); sex],
+            bloom_seeds: Vec::new(),
             displayed: vec![Cell::empty(); cells],
             resolved: vec![Cell::empty(); cells],
             tint: None,
             force_full: true,
         }
+    }
+
+    /// Record a bloom seed for this frame. Applied additively during
+    /// resolve — brightens the seed pixel and nearby pixels within
+    /// `radius` with a falloff dictated by distance.
+    pub fn bloom_seed(&mut self, x: f32, y: f32, color: Pixel, radius: u8, strength: f32) {
+        if strength <= 0.0 {
+            return;
+        }
+        self.bloom_seeds.push(BloomSeed {
+            x,
+            y,
+            color,
+            radius: radius.min(BLOOM_MAX_RADIUS),
+            strength: strength.clamp(0.0, 2.0),
+        });
     }
 
     /// Enable an ambient post-resolve tint. Passing `None` or `amount <= 0`
@@ -126,6 +163,8 @@ impl Framebuffer {
         if cols == self.cols && rows == self.rows {
             return;
         }
+        // New Framebuffer includes a fresh bloom_accum sized to the
+        // new pixel grid, so a simple replace is correct.
         *self = Self::new(cols, rows);
     }
 
@@ -138,6 +177,59 @@ impl Framebuffer {
         }
         for c in &mut self.braille_fg {
             *c = Pixel::BLACK;
+        }
+        for b in &mut self.bloom_accum {
+            *b = (0, 0, 0);
+        }
+        self.bloom_seeds.clear();
+    }
+
+    /// Accumulate every recorded bloom seed into `bloom_accum`. Called
+    /// from `resolve` right before the tint+cell-resolve pass so the
+    /// bloom contributions survive into the final output. O(seeds × r²)
+    /// — cheap given the BLOOM_MAX_RADIUS cap.
+    fn accumulate_bloom(&mut self) {
+        let pw = self.pixel_width() as i32;
+        let ph = self.pixel_height() as i32;
+        for seed in &self.bloom_seeds {
+            let r = seed.radius as i32;
+            if r == 0 {
+                continue;
+            }
+            let cx = seed.x as i32;
+            let cy = seed.y as i32;
+            let r2 = (r * r) as f32;
+            for dy in -r..=r {
+                let py = cy + dy;
+                if py < 0 || py >= ph {
+                    continue;
+                }
+                for dx in -r..=r {
+                    let px = cx + dx;
+                    if px < 0 || px >= pw {
+                        continue;
+                    }
+                    let d2 = (dx * dx + dy * dy) as f32;
+                    if d2 > r2 {
+                        continue;
+                    }
+                    // Linear falloff by distance, times the seed's
+                    // strength.
+                    let falloff = 1.0 - (d2 / r2).sqrt();
+                    let amount = falloff * seed.strength;
+                    let idx = (py as usize) * (pw as usize) + (px as usize);
+                    let acc = &mut self.bloom_accum[idx];
+                    acc.0 = (acc.0 as u32
+                        + (seed.color.r as u32 * (amount * 255.0) as u32 / 255))
+                        .min(u16::MAX as u32) as u16;
+                    acc.1 = (acc.1 as u32
+                        + (seed.color.g as u32 * (amount * 255.0) as u32 / 255))
+                        .min(u16::MAX as u32) as u16;
+                    acc.2 = (acc.2 as u32
+                        + (seed.color.b as u32 * (amount * 255.0) as u32 / 255))
+                        .min(u16::MAX as u32) as u16;
+                }
+            }
         }
     }
 
@@ -178,6 +270,11 @@ impl Framebuffer {
     }
 
     fn resolve(&mut self) {
+        // Accumulate bloom first so it appears behind / alongside the
+        // other rendered pixels but before the tint pass.
+        if !self.bloom_seeds.is_empty() {
+            self.accumulate_bloom();
+        }
         let cols = self.cols as usize;
         let pw = self.pixel_width() as usize;
         let tint = self.tint;
@@ -185,12 +282,21 @@ impl Framebuffer {
             for col in 0..cols {
                 let base_x = col * 2;
                 let base_y = row * 3;
+                let bloom = !self.bloom_seeds.is_empty();
                 let mut p00 = self.sex_pixels[base_y * pw + base_x];
                 let mut p10 = self.sex_pixels[base_y * pw + base_x + 1];
                 let mut p01 = self.sex_pixels[(base_y + 1) * pw + base_x];
                 let mut p11 = self.sex_pixels[(base_y + 1) * pw + base_x + 1];
                 let mut p02 = self.sex_pixels[(base_y + 2) * pw + base_x];
                 let mut p12 = self.sex_pixels[(base_y + 2) * pw + base_x + 1];
+                if bloom {
+                    apply_bloom(&mut p00, self.bloom_accum[base_y * pw + base_x]);
+                    apply_bloom(&mut p10, self.bloom_accum[base_y * pw + base_x + 1]);
+                    apply_bloom(&mut p01, self.bloom_accum[(base_y + 1) * pw + base_x]);
+                    apply_bloom(&mut p11, self.bloom_accum[(base_y + 1) * pw + base_x + 1]);
+                    apply_bloom(&mut p02, self.bloom_accum[(base_y + 2) * pw + base_x]);
+                    apply_bloom(&mut p12, self.bloom_accum[(base_y + 2) * pw + base_x + 1]);
+                }
                 if let Some((tc, a)) = tint {
                     apply_tint(&mut p00, tc, a);
                     apply_tint(&mut p10, tc, a);
@@ -321,6 +427,18 @@ fn apply_tint(p: &mut Pixel, tint: Pixel, amount: f32) {
     p.r = ((p.r as f32) * inv + (tint.r as f32) * a).round() as u8;
     p.g = ((p.g as f32) * inv + (tint.g as f32) * a).round() as u8;
     p.b = ((p.b as f32) * inv + (tint.b as f32) * a).round() as u8;
+}
+
+/// Additive bloom blend. Adds the accumulated bloom contribution onto
+/// a pixel with saturating clamp, *including* pixels that started black —
+/// that's how a glowing substance lights up adjacent empty space.
+fn apply_bloom(p: &mut Pixel, bloom: (u16, u16, u16)) {
+    if bloom.0 == 0 && bloom.1 == 0 && bloom.2 == 0 {
+        return;
+    }
+    p.r = (p.r as u16).saturating_add(bloom.0).min(255) as u8;
+    p.g = (p.g as u16).saturating_add(bloom.1).min(255) as u8;
+    p.b = (p.b as u16).saturating_add(bloom.2).min(255) as u8;
 }
 
 fn resolve_sextant(pixels: &[Pixel; 6]) -> (char, Pixel, Pixel) {

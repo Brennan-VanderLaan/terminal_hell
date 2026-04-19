@@ -20,6 +20,10 @@ pub enum Archetype {
     Orb,
     // Shared miniboss
     Miniboss,
+    /// Emergent boss — spawns from rare necromantic-on-death interaction.
+    /// Walks corpse-to-corpse consuming them, grows thicker + angrier,
+    /// eventually rampages toward the nearest player.
+    Eater,
 }
 
 impl Archetype {
@@ -33,6 +37,7 @@ impl Archetype {
             6 => Archetype::Pmc,
             7 => Archetype::Swarmling,
             8 => Archetype::Orb,
+            9 => Archetype::Eater,
             _ => Archetype::Rusher,
         }
     }
@@ -47,7 +52,26 @@ impl Archetype {
             Archetype::Pmc => 6,
             Archetype::Swarmling => 7,
             Archetype::Orb => 8,
+            Archetype::Eater => 9,
         }
+    }
+
+    /// Snake-case content id → Archetype enum. Inverse of the lookup
+    /// used by `ContentDb::load_core`.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "rusher" => Archetype::Rusher,
+            "pinkie" => Archetype::Pinkie,
+            "charger" => Archetype::Charger,
+            "revenant" => Archetype::Revenant,
+            "marksman" => Archetype::Marksman,
+            "pmc" => Archetype::Pmc,
+            "swarmling" => Archetype::Swarmling,
+            "orb" => Archetype::Orb,
+            "miniboss" => Archetype::Miniboss,
+            "eater" => Archetype::Eater,
+            _ => return None,
+        })
     }
 }
 
@@ -71,6 +95,10 @@ pub struct Enemy {
     pub attack_cooldown: f32,
     pub tell_timer: f32,
     tell_target: (f32, f32),
+    /// Eater-specific: number of corpses consumed. Drives sprite scale
+    /// (visually thiccer per consumed) + aggro flip (→ players after N).
+    /// Zero on every other archetype.
+    pub consumed: u8,
 }
 
 impl Enemy {
@@ -92,6 +120,7 @@ impl Enemy {
             attack_cooldown: initial_attack_cooldown(archetype),
             tell_timer: 0.0,
             tell_target: (0.0, 0.0),
+            consumed: 0,
         }
     }
 
@@ -118,6 +147,7 @@ impl Enemy {
             Archetype::Swarmling => Pixel::rgb(255, 80, 40),
             Archetype::Orb => Pixel::rgb(200, 120, 255),
             Archetype::Miniboss => Pixel::rgb(255, 190, 60),
+            Archetype::Eater => Pixel::rgb(140, 30, 180),
         }
     }
 
@@ -132,6 +162,7 @@ impl Enemy {
             Archetype::Swarmling => Pixel::rgb(160, 40, 20),
             Archetype::Orb => Pixel::rgb(140, 70, 200),
             Archetype::Miniboss => Pixel::rgb(200, 120, 40),
+            Archetype::Eater => Pixel::rgb(100, 20, 140),
         }
     }
 
@@ -284,13 +315,13 @@ impl Enemy {
         0
     }
 
-    pub fn render(&self, fb: &mut Framebuffer, camera: &Camera) {
+    pub fn render(&self, fb: &mut Framebuffer, camera: &Camera, content: &crate::content::ContentDb) {
         let (sx, sy) = camera.world_to_screen((self.x, self.y));
         let center = (sx.round() as i32, sy.round() as i32);
 
         let mip = camera.mip_level();
         if mip.shows_sprite() {
-            let mut s = sprite::enemy_sprite(self.archetype);
+            let mut s = sprite::enemy_sprite_from_content(self.archetype, content);
             if self.hit_flash > 0.0 {
                 s.tint_toward(Pixel::rgb(255, 255, 255), self.hit_flash.min(0.75));
             } else if self.tell_timer > 0.0 {
@@ -307,7 +338,15 @@ impl Enemy {
             } else {
                 None
             };
-            s.blit_scaled_with_overlay(fb, center, camera.zoom, overlay.as_ref());
+            // Eater visibly bloats as it consumes — each corpse bumps
+            // the render scale so by the time it aggros, players can
+            // see the problem lumbering toward them.
+            let render_scale = if self.archetype == Archetype::Eater {
+                camera.zoom * (1.0 + self.consumed as f32 * 0.15)
+            } else {
+                camera.zoom
+            };
+            s.blit_scaled_with_overlay(fb, center, render_scale, overlay.as_ref());
         } else if matches!(mip, MipLevel::Blob) {
             // Blob keeps the signature color and picks up burn/tell
             // feedback via a flat fill color swap.

@@ -20,6 +20,7 @@
 
 use crate::camera::Camera;
 use crate::fb::{Framebuffer, Pixel};
+use crate::substance::{SubstanceId, SubstanceRegistry};
 use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
@@ -44,18 +45,22 @@ impl Material {
 }
 
 /// Ground-layer kind. Flat decoration; always passable. Replaced on
-/// ground-targeted writes (e.g., a corpse collapsing into a BloodPool
+/// ground-targeted writes (e.g., a corpse collapsing into blood pool
 /// overwrites whatever was underneath).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Ground {
     Floor,
     Carcosa,
     Rubble { material: Material },
-    /// Persistent blood decal. `shade` darkens as blood dries (0 = fresh
-    /// bright, 255 = faded). Spawned by the corpse/decal work.
-    BloodPool { shade: u8 },
-    /// Burn / explosion scorch. `intensity` 0..=255.
-    Scorch { intensity: u8 },
+    /// Data-driven substance decal: `id` indexes the `SubstanceRegistry`
+    /// in `ContentDb`, `state` is substance-specific state byte (shade
+    /// for blood, intensity for scorch, etc). Replaces the old fixed
+    /// `BloodPool` / `Scorch` variants so new substances can land as
+    /// pure TOML.
+    Substance {
+        id: crate::substance::SubstanceId,
+        state: u8,
+    },
 }
 
 /// Object-layer kind. Sits above the ground; never blocks movement in v1
@@ -294,8 +299,8 @@ impl Arena {
 
     /// Dominant-state view of (x, y). Used by the net TileUpdate encoder
     /// and by any legacy caller that just wants to know "is this a wall,
-    /// a floor, or debris." Blood / scorch decals fall through to
-    /// whatever structural state is present (or Floor if none).
+    /// a floor, or debris." Substance decals fall through to whatever
+    /// structural state is present (or Floor if none).
     #[inline]
     pub fn tile(&self, x: i32, y: i32) -> Tile {
         let s = self.stack(x, y);
@@ -309,9 +314,9 @@ impl Arena {
             Ground::Floor => Tile::Floor,
             Ground::Carcosa => Tile::Carcosa,
             Ground::Rubble { material } => Tile::Rubble { material },
-            // Decals don't change dominant state — legacy callers keep
-            // seeing Floor. Blood/scorch are surfaced via `ground()`.
-            Ground::BloodPool { .. } | Ground::Scorch { .. } => Tile::Floor,
+            // Substance decals don't change dominant state — legacy
+            // callers keep seeing Floor. Query `ground()` for detail.
+            Ground::Substance { .. } => Tile::Floor,
         }
     }
 
@@ -482,30 +487,31 @@ impl Arena {
         }
     }
 
-    /// Paint a blood pool into the ground layer, preserving whatever
-    /// structure / object sit above. If a fresher pool already exists,
-    /// keep the fresher (lower) shade.
-    pub fn set_blood_pool(&mut self, x: i32, y: i32, shade: u8) {
+    /// Paint a substance onto the ground layer, preserving whatever
+    /// structure / object sits above. If the same substance is already
+    /// there, the new state is combined via saturating add (so blood +
+    /// blood pools into a bigger stain; scorch + scorch deepens). A
+    /// different substance overwrites.
+    pub fn set_substance(&mut self, x: i32, y: i32, id: SubstanceId, state: u8) {
         if let Some(i) = self.idx(x, y) {
             let cur = self.stacks[i].ground;
-            let new_shade = match cur {
-                Ground::BloodPool { shade: s } => shade.min(s),
-                _ => shade,
+            let new_state = match cur {
+                Ground::Substance { id: cur_id, state: cur_state } if cur_id == id => {
+                    cur_state.saturating_add(state).min(255)
+                }
+                _ => state,
             };
-            self.stacks[i].ground = Ground::BloodPool { shade: new_shade };
+            self.stacks[i].ground = Ground::Substance { id, state: new_state };
         }
     }
 
-    /// Paint a scorch mark into the ground layer, preserving structure /
-    /// object. Intensifies if one is already there.
-    pub fn set_scorch(&mut self, x: i32, y: i32, intensity: u8) {
+    /// Clear any substance from the ground layer, reverting to Floor.
+    /// Structural state stays put.
+    pub fn clear_substance(&mut self, x: i32, y: i32) {
         if let Some(i) = self.idx(x, y) {
-            let cur = self.stacks[i].ground;
-            let new_i = match cur {
-                Ground::Scorch { intensity: s } => s.saturating_add(intensity).min(255),
-                _ => intensity,
-            };
-            self.stacks[i].ground = Ground::Scorch { intensity: new_i };
+            if matches!(self.stacks[i].ground, Ground::Substance { .. }) {
+                self.stacks[i].ground = Ground::Floor;
+            }
         }
     }
 
@@ -558,12 +564,12 @@ impl Arena {
                     });
                 }
                 if ground_differs(a.ground, b.ground) {
-                    if let Some((kind, data)) = encode_ground_decal(a.ground) {
+                    if let Ground::Substance { id, state } = a.ground {
                         ground_deltas.push(GroundDelta {
                             x: x as u16,
                             y: y as u16,
-                            kind,
-                            data,
+                            substance_id: id.0,
+                            state,
                         });
                     }
                 }
@@ -665,7 +671,7 @@ impl Arena {
         }
     }
 
-    pub fn render(&self, fb: &mut Framebuffer, camera: &Camera) {
+    pub fn render(&self, fb: &mut Framebuffer, camera: &Camera, subs: &SubstanceRegistry) {
         let (wx0, wy0, wx1, wy1) = camera.world_viewport();
         let ix0 = (wx0.floor() as i32).max(0);
         let iy0 = (wy0.floor() as i32).max(0);
@@ -678,9 +684,30 @@ impl Arena {
 
                 // Layer 1: ground. Floor is intentionally left black
                 // (so the braille layer can show through).
-                let ground_color = ground_color_at(wx, wy, stack.ground);
+                let ground_color = ground_color_at(wx, wy, stack.ground, subs);
                 if let Some(c) = ground_color {
                     fill_world_tile(fb, camera, wx, wy, c);
+                }
+
+                // Substance bloom: glowing decals bleed additive light
+                // onto nearby pixels via the framebuffer bloom seeds.
+                if let Ground::Substance { id, state } = stack.ground {
+                    if let Some(def) = subs.get(id) {
+                        if let Some(bloom) = def.bloom {
+                            let (sx, sy) =
+                                camera.world_to_screen((wx as f32 + 0.5, wy as f32 + 0.5));
+                            let t = match def.state_curve {
+                                crate::substance::StateCurve::FreshToDried => {
+                                    1.0 - (state as f32 / 255.0)
+                                }
+                                crate::substance::StateCurve::FaintToIntense => {
+                                    state as f32 / 255.0
+                                }
+                            };
+                            let strength = bloom.strength * t.max(0.15);
+                            fb.bloom_seed(sx, sy, bloom.color, bloom.radius, strength);
+                        }
+                    }
                 }
 
                 // Layer 2: object. Currently no objects are populated —
@@ -703,7 +730,7 @@ impl Arena {
     }
 }
 
-fn ground_color_at(wx: i32, wy: i32, g: Ground) -> Option<Pixel> {
+fn ground_color_at(wx: i32, wy: i32, g: Ground, subs: &SubstanceRegistry) -> Option<Pixel> {
     match g {
         Ground::Floor => None,
         Ground::Rubble { material } => Some(material.debris_color()),
@@ -715,25 +742,23 @@ fn ground_color_at(wx: i32, wy: i32, g: Ground) -> Option<Pixel> {
                 Pixel::rgb(110, 80, 10)
             })
         }
-        Ground::BloodPool { shade } => {
-            // shade 0 = fresh bright red; 255 = fully faded brown-black.
-            let t = shade as f32 / 255.0;
-            let r = lerp_u8(180, 40, t);
-            let g = lerp_u8(20, 12, t);
-            let b = lerp_u8(30, 16, t);
-            // Subtle checker so a big pool reads as texture, not a flat
-            // rectangle.
-            let jitter = ((wx.wrapping_mul(37) ^ wy.wrapping_mul(91)) & 1) == 0;
-            Some(if jitter {
-                Pixel::rgb(r, g, b)
+        Ground::Substance { id, state } => {
+            let def = subs.get(id)?;
+            let base = def.state_curve.resolve(state, def.fresh, def.dried);
+            if def.jitter > 0 {
+                let j = ((wx.wrapping_mul(37) ^ wy.wrapping_mul(91)) & 1) == 0;
+                Some(if j {
+                    base
+                } else {
+                    Pixel::rgb(
+                        base.r.saturating_sub(def.jitter.saturating_mul(10)),
+                        base.g,
+                        base.b,
+                    )
+                })
             } else {
-                Pixel::rgb(r.saturating_sub(30), g, b)
-            })
-        }
-        Ground::Scorch { intensity } => {
-            let t = intensity as f32 / 255.0;
-            let v = lerp_u8(70, 15, t);
-            Some(Pixel::rgb(v, v.saturating_sub(4), v.saturating_sub(8)))
+                Some(base)
+            }
         }
     }
 }
@@ -777,12 +802,6 @@ fn fill_world_tile(fb: &mut Framebuffer, camera: &Camera, wx: i32, wy: i32, colo
     }
 }
 
-fn lerp_u8(a: u8, b: u8, t: f32) -> u8 {
-    let t = t.clamp(0.0, 1.0);
-    let v = a as f32 + (b as f32 - a as f32) * t;
-    v.round().clamp(0.0, 255.0) as u8
-}
-
 fn place_block(a: &mut Arena, x: i32, y: i32, w: i32, h: i32) {
     for yy in y..(y + h) {
         for xx in x..(x + w) {
@@ -814,14 +833,14 @@ pub struct StructureDelta {
     pub hp: u8,
 }
 
-/// One tile's worth of ground-decal delta. `kind`: 0=BloodPool (shade in
-/// `data`), 1=Scorch (intensity in `data`).
+/// One tile's worth of ground-substance delta. `substance_id` indexes
+/// the substance registry; `state` is the substance's state byte.
 #[derive(Clone, Copy, Debug)]
 pub struct GroundDelta {
     pub x: u16,
     pub y: u16,
-    pub kind: u8,
-    pub data: u8,
+    pub substance_id: u16,
+    pub state: u8,
 }
 
 fn structure_differs(a: Option<Structure>, b: Option<Structure>) -> bool {
@@ -848,13 +867,3 @@ fn encode_structure(stack: TileStack) -> (u8, u8) {
     }
 }
 
-/// Only blood / scorch variants are round-tripped here — regular Floor /
-/// Carcosa / Rubble go through the structure delta since they're
-/// dominant-state changes, not decorative paint.
-fn encode_ground_decal(g: Ground) -> Option<(u8, u8)> {
-    match g {
-        Ground::BloodPool { shade } => Some((0, shade)),
-        Ground::Scorch { intensity } => Some((1, intensity)),
-        _ => None,
-    }
-}

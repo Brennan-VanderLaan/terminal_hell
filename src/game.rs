@@ -1,16 +1,20 @@
 use crate::arena::{Arena, Material, Tile};
+use crate::body_effect::ReactionRegistry;
 use crate::camera::Camera;
 use crate::carcosa::{Phantom, YellowSign};
 use crate::content::ContentDb;
 use crate::corpse::Corpse;
 use crate::enemy::{Archetype, Enemy};
 use crate::fb::{Framebuffer, Pixel};
+use crate::interaction::Reaction;
 use crate::mouse::Mouse;
 use crate::particle::{self, Particle};
 use crate::pickup::Pickup;
 use crate::player::Player;
 use crate::primitive::{Primitive, Rarity};
 use crate::projectile::{Projectile, ProjectileOutcome};
+use crate::substance::SubstanceId;
+use crate::tag::Tag;
 use crate::vote::VoteKiosk;
 use crate::waves::{WaveDirector, WaveEvent};
 use crate::weapon::Weapon;
@@ -141,9 +145,9 @@ pub struct Game {
     loot_rng: SmallRng,
     kiosk_rng: SmallRng,
     pub tick_tile_updates: Vec<(i32, i32, u8, u8)>,
-    /// Ground-layer paint events generated this tick: (x, y, kind, data).
-    /// Kind 0=BloodPool, 1=Scorch. Broadcast reliable. See net::proto::ServerMsg::GroundPaint.
-    pub tick_ground_paints: Vec<(i32, i32, u8, u8)>,
+    /// Substance paint events generated this tick: (x, y, substance_id,
+    /// state). Broadcast reliable. See ServerMsg::SubstancePaint.
+    pub tick_ground_paints: Vec<(i32, i32, u16, u8)>,
     /// Corpse hits generated this tick: (corpse_id, seed). Broadcast reliable.
     pub tick_corpse_hits: Vec<(u32, u64)>,
     pub tick_blasts: Vec<DestructionBlast>,
@@ -153,6 +157,17 @@ pub struct Game {
     /// reliable CorpseHit events.
     pub corpses: Vec<Corpse>,
     next_corpse_id: u32,
+    /// Body-on-death + body-on-interaction reaction lookup. Built-ins
+    /// install at startup; future pack / plugin code can append.
+    pub reactions: ReactionRegistry,
+    /// Tag-driven interaction rules (OnDeath, OnContact, ...). Any
+    /// module can append rules; firing a body event queries this book
+    /// for every tag the body carries.
+    pub interactions: crate::interaction::InteractionBook,
+    /// Body-effect events generated this tick for reliable broadcast.
+    /// `(reaction_name, x, y, seed)`. Currently host-only; the wire
+    /// path stays reserved for future use.
+    pub tick_body_reactions: Vec<(String, f32, f32, u64)>,
     /// Set by the client from incoming snapshots so the HUD can render the
     /// local player's loadout even though the client doesn't run the
     /// authoritative weapon sim.
@@ -214,6 +229,9 @@ impl Game {
             hitscans: Vec::new(),
             corpses: Vec::new(),
             next_corpse_id: 1,
+            reactions: ReactionRegistry::with_builtins(),
+            interactions: crate::interaction::InteractionBook::with_builtins(),
+            tick_body_reactions: Vec::new(),
             remote_weapons: Vec::new(),
             client_phase: None,
             client_phase_timer: 0.0,
@@ -685,6 +703,7 @@ impl Game {
             self.tick_blasts.clear();
             self.tick_ground_paints.clear();
             self.tick_corpse_hits.clear();
+            self.tick_body_reactions.clear();
             return;
         }
         self.tick_tile_updates.clear();
@@ -771,11 +790,35 @@ impl Game {
         });
         let positions: Vec<(u32, f32, f32)> =
             self.players.iter().map(|p| (p.id, p.x, p.y)).collect();
+        // Snapshot of corpse positions so Eaters can path toward them
+        // without mutably borrowing `self.corpses` while the enemy loop
+        // holds `self.enemies`.
+        let corpse_positions: Vec<(u32, f32, f32)> =
+            self.corpses.iter().map(|c| (c.id, c.x, c.y)).collect();
         let mut enemy_status_kills: Vec<usize> = Vec::new();
         let mut ranged_shots: Vec<(u32, crate::enemy::RangedShot)> = Vec::new();
         for (i, e) in self.enemies.iter_mut().enumerate() {
-            // Target: marked player if it exists, else nearest living player.
-            let target = marked_pos.or_else(|| {
+            // Eater behavior: while hungry (consumed < THRESHOLD), seek
+            // the nearest corpse instead of a player. Once fed, flips
+            // to normal aggro and charges survivors.
+            let eater_target = if e.archetype == Archetype::Eater
+                && e.consumed < EATER_HUNGER_THRESHOLD
+                && !corpse_positions.is_empty()
+            {
+                corpse_positions
+                    .iter()
+                    .min_by(|a, b| {
+                        let da = (a.1 - e.x).powi(2) + (a.2 - e.y).powi(2);
+                        let db = (b.1 - e.x).powi(2) + (b.2 - e.y).powi(2);
+                        da.partial_cmp(&db).unwrap()
+                    })
+                    .copied()
+            } else {
+                None
+            };
+
+            // Target: Eater's corpse fixation → marked → nearest player.
+            let target = eater_target.or(marked_pos).or_else(|| {
                 positions
                     .iter()
                     .min_by(|a, b| {
@@ -850,6 +893,62 @@ impl Game {
                 if is_miniboss {
                     self.drop_miniboss_loot(at.0, at.1);
                 }
+            }
+        }
+
+        // Eater consume pass: collect (enemy_idx, corpse_idx) pairs
+        // while we borrow immutably, then apply mutations afterward so
+        // the borrow checker lets us touch `self` freely for blasts +
+        // substance paints.
+        let mut consume_plan: Vec<(usize, usize)> = Vec::new();
+        let mut claimed_corpses: Vec<usize> = Vec::new();
+        for (ei, e) in self.enemies.iter().enumerate() {
+            if e.archetype != Archetype::Eater {
+                continue;
+            }
+            let mut best: Option<(usize, f32)> = None;
+            for (ci, c) in self.corpses.iter().enumerate() {
+                if claimed_corpses.contains(&ci) {
+                    continue;
+                }
+                let dx = c.x - e.x;
+                let dy = c.y - e.y;
+                let d2 = dx * dx + dy * dy;
+                if d2 <= EATER_CONSUME_RADIUS * EATER_CONSUME_RADIUS
+                    && best.map_or(true, |(_, bd)| d2 < bd)
+                {
+                    best = Some((ci, d2));
+                }
+            }
+            if let Some((ci, _)) = best {
+                claimed_corpses.push(ci);
+                consume_plan.push((ei, ci));
+            }
+        }
+        let blood_id = self.content.blood_pool_id;
+        for (ei, ci) in consume_plan.iter().copied() {
+            if ci >= self.corpses.len() || ei >= self.enemies.len() {
+                continue;
+            }
+            let (cx, cy) = (self.corpses[ci].x, self.corpses[ci].y);
+            let arch = self.corpses[ci].archetype;
+            let gib = crate::corpse::gib_color(arch);
+            {
+                let e = &mut self.enemies[ei];
+                e.hp += EATER_HP_PER_CONSUME;
+                e.consumed = e.consumed.saturating_add(1);
+            }
+            let seed = self.next_seed((cx as i32, cy as i32));
+            self.emit_blast((cx, cy), gib, seed, 2);
+            self.paint_substance(cx as i32, cy as i32, blood_id, 0);
+        }
+        // Remove corpses in reverse-index order so swap_remove stays stable.
+        let mut corpse_indices: Vec<usize> = consume_plan.iter().map(|(_, ci)| *ci).collect();
+        corpse_indices.sort();
+        corpse_indices.dedup();
+        for idx in corpse_indices.into_iter().rev() {
+            if idx < self.corpses.len() {
+                self.corpses.swap_remove(idx);
             }
         }
 
@@ -1008,11 +1107,12 @@ impl Game {
                 // Collapse into a blood-pool decal on the ground, then
                 // drop the corpse from the authoritative list.
                 let (tx, ty) = (pos.0 as i32, pos.1 as i32);
-                self.paint_blood_pool(tx, ty, 10);
+                let blood_id = self.content.blood_pool_id;
+                self.paint_substance(tx, ty, blood_id, 10);
                 // Splash a few neighboring tiles with lighter pools.
                 for (dx, dy) in &[(1, 0), (-1, 0), (0, 1), (0, -1)] {
                     if ((seed >> (dx + dy + 2)) & 1) == 1 {
-                        self.paint_blood_pool(tx + dx, ty + dy, 40);
+                        self.paint_substance(tx + dx, ty + dy, blood_id, 40);
                     }
                 }
                 self.corpses.swap_remove(*idx);
@@ -1053,6 +1153,41 @@ impl Game {
             self.spawn_corpse(arch, cx, cy);
             self.enemies.swap_remove(idx);
             self.kills += 1;
+            // Fire the archetype's body_on_death reaction (if any).
+            // Content-driven: archetype TOML names a reaction registered
+            // in the ReactionRegistry; the bind happens here.
+            if let Some(name) = self.content.stats(arch).body_on_death.clone() {
+                let seed = self.next_seed((cx as i32, cy as i32));
+                self.fire_body_reaction(&name, cx, cy, seed);
+            }
+            // Also fire tag-driven OnDeath rules from the interaction
+            // book — this is where emergent spawns (Corpse-Eater raise),
+            // explosive volatility etc. live. Every archetype tag gets
+            // checked; every matching rule rolls its chance.
+            let tag_strs = self
+                .content
+                .stats(arch)
+                .tags
+                .clone()
+                .unwrap_or_default();
+            if !tag_strs.is_empty() {
+                let mut rng = SmallRng::seed_from_u64(
+                    self.next_seed((cx as i32, cy as i32)).wrapping_mul(0xBF58_476D),
+                );
+                for tag_str in &tag_strs {
+                    let tag = Tag::new(tag_str);
+                    let rules: Vec<crate::interaction::InteractionRule> = self
+                        .interactions
+                        .event_rules(tag, crate::interaction::Event::OnDeath)
+                        .to_vec();
+                    for rule in rules {
+                        if rng.r#gen::<f32>() <= rule.chance {
+                            let seed = self.next_seed((cx as i32, cy as i32));
+                            self.apply_reaction(&rule.reaction, cx, cy, seed);
+                        }
+                    }
+                }
+            }
         }
 
         self.particles.retain_mut(|p| p.update(dt));
@@ -1102,7 +1237,8 @@ impl Game {
             } else {
                 90
             };
-            self.paint_scorch(tile.0, tile.1, base);
+            let scorch_id = self.content.scorch_id;
+            self.paint_substance(tile.0, tile.1, scorch_id, base);
         }
     }
 
@@ -1242,13 +1378,15 @@ impl Game {
         }
     }
 
-    /// Client-side handler for `ServerMsg::GroundPaint`. Touches only the
-    /// ground layer; structures + objects on top are preserved.
-    pub fn apply_ground_paint(&mut self, x: i32, y: i32, kind: u8, data: u8) {
-        match kind {
-            0 => self.arena.set_blood_pool(x, y, data),
-            _ => self.arena.set_scorch(x, y, data),
-        }
+    /// Client-side handler for `ServerMsg::SubstancePaint`. Touches only
+    /// the ground layer; structures + objects on top are preserved.
+    pub fn apply_substance_paint(&mut self, x: i32, y: i32, substance_id: u16, state: u8) {
+        self.arena.set_substance(
+            x,
+            y,
+            crate::substance::SubstanceId(substance_id),
+            state,
+        );
     }
 
     /// Client-side handler for `ServerMsg::CorpseHit`. Looks up the
@@ -1309,26 +1447,249 @@ impl Game {
         self.corpses.push(Corpse::new(id, archetype, x, y));
     }
 
-    /// Host-side ground paint: apply locally AND queue a GroundPaint
-    /// broadcast for all clients.
-    fn paint_blood_pool(&mut self, x: i32, y: i32, shade: u8) {
-        self.arena.set_blood_pool(x, y, shade);
-        self.tick_ground_paints.push((x, y, 0, shade));
+    /// Fire a named body reaction at `(x, y)`. Called on enemy death
+    /// with the archetype's `body_on_death` name. Applies the reaction
+    /// locally on the host and queues a reliable broadcast so clients
+    /// replay with the same seed → identical damage + substance paint
+    /// + visuals.
+    pub fn fire_body_reaction(&mut self, name: &str, x: f32, y: f32, seed: u64) {
+        // Resolve name → Reaction. Unknown names warn but don't crash
+        // — a content-pack typo shouldn't kill the run.
+        let reaction = match self.reactions.get(name).cloned() {
+            Some(r) => r,
+            None => {
+                tracing::warn!(name, "body reaction not registered");
+                return;
+            }
+        };
+        self.apply_reaction(&reaction, x, y, seed);
+        // We intentionally do NOT broadcast the reaction name — the
+        // visual + stateful consequences (substance paints, blasts,
+        // spawned enemies) all flow through their existing sync
+        // channels (SubstancePaint, Blast, snapshot). Replaying the
+        // reaction name on clients would dupe-apply.
+        let _ = name;
     }
 
-    #[allow(dead_code)]
-    fn paint_scorch(&mut self, x: i32, y: i32, intensity: u8) {
-        self.arena.set_scorch(x, y, intensity);
-        self.tick_ground_paints.push((x, y, 1, intensity));
+    /// Apply a reaction to the world at `(x, y)` using `seed` for any
+    /// RNG-driven decisions. Called on both host and client — host
+    /// originates, clients replay from the broadcast.
+    pub fn apply_reaction(&mut self, reaction: &Reaction, x: f32, y: f32, seed: u64) {
+        match reaction {
+            Reaction::SpawnSubstance { id, radius, state } => {
+                let sub_id = match self.content.substances.by_name(id) {
+                    Some(s) => s,
+                    None => {
+                        tracing::warn!(substance = id, "unknown substance in reaction");
+                        return;
+                    }
+                };
+                self.paint_substance_radius(x, y, sub_id, *state, *radius, seed);
+            }
+            Reaction::Explode { radius, damage } => {
+                self.apply_explode(x, y, *radius, *damage, seed);
+            }
+            Reaction::Ignite {
+                radius,
+                damage_per_sec,
+                ttl,
+            } => {
+                self.apply_ignite(x, y, *radius, *damage_per_sec, *ttl);
+            }
+            Reaction::Shock {
+                radius,
+                damage,
+                chain_count,
+            } => {
+                self.apply_shock(x, y, *radius, *damage, *chain_count);
+            }
+            Reaction::SpawnEnemy { archetype_id, count } => {
+                self.apply_spawn_enemy(archetype_id, x, y, *count, seed);
+            }
+            Reaction::ConsumeTrigger => {
+                // Resolution is caller-specific — no-op when dispatched
+                // abstractly. Custom handlers use this semantically.
+            }
+            Reaction::Custom { handler } => {
+                self.dispatch_custom_reaction(*handler, x, y, seed);
+            }
+        }
+    }
+
+    fn paint_substance_radius(
+        &mut self,
+        x: f32,
+        y: f32,
+        id: SubstanceId,
+        state: u8,
+        radius: f32,
+        seed: u64,
+    ) {
+        let cx = x as i32;
+        let cy = y as i32;
+        let r = radius.ceil() as i32;
+        let r2 = radius * radius;
+        // Seeded RNG so host + client paint the same tiles despite
+        // running independent sims.
+        let mut rng = SmallRng::seed_from_u64(seed);
+        for dy in -r..=r {
+            for dx in -r..=r {
+                let d2 = (dx * dx + dy * dy) as f32;
+                if d2 > r2 {
+                    continue;
+                }
+                // Center is guaranteed; outer ring paints probabilistically
+                // so radius-2 pools read as organic splatter, not circles.
+                let chance = (1.0 - d2.sqrt() / radius.max(0.001)).max(0.0);
+                if dx != 0 || dy != 0 {
+                    if rng.r#gen::<f32>() > chance {
+                        continue;
+                    }
+                }
+                self.paint_substance(cx + dx, cy + dy, id, state);
+            }
+        }
+    }
+
+    fn apply_explode(&mut self, x: f32, y: f32, radius: f32, damage: i32, seed: u64) {
+        let r2 = radius * radius;
+        // Enemies in radius eat damage.
+        let mut kills: Vec<usize> = Vec::new();
+        for (i, e) in self.enemies.iter_mut().enumerate() {
+            let dx = e.x - x;
+            let dy = e.y - y;
+            if dx * dx + dy * dy <= r2 && e.apply_damage(damage) {
+                kills.push(i);
+            }
+        }
+        // Players in radius eat damage too — friendly-fire explosions.
+        for p in &mut self.players {
+            let dx = p.x - x;
+            let dy = p.y - y;
+            if dx * dx + dy * dy <= r2 {
+                p.hp -= damage;
+                if p.hp < 0 {
+                    p.hp = 0;
+                }
+            }
+        }
+        // Corpses in radius punch holes + possibly collapse.
+        let mut i = 0;
+        while i < self.corpses.len() {
+            let dx = self.corpses[i].x - x;
+            let dy = self.corpses[i].y - y;
+            if dx * dx + dy * dy <= r2 {
+                let _ = self.corpses[i].apply_hit(seed.wrapping_add(i as u64));
+                if self.corpses[i].is_destroyed() {
+                    self.corpses.swap_remove(i);
+                    continue;
+                }
+            }
+            i += 1;
+        }
+        // Scorch the ground at the epicenter.
+        let scorch = self.content.scorch_id;
+        self.paint_substance_radius(x, y, scorch, 160, radius * 0.6, seed ^ 0xDEAD_F00D);
+        // Visual blast.
+        self.emit_blast((x, y), Pixel::rgb(255, 180, 60), seed, 2);
+        // Cleanup enemy kills in reverse.
+        kills.sort();
+        for idx in kills.into_iter().rev() {
+            if idx < self.enemies.len() {
+                self.enemies.swap_remove(idx);
+                self.kills += 1;
+            }
+        }
+    }
+
+    fn apply_ignite(&mut self, x: f32, y: f32, radius: f32, damage_per_sec: f32, ttl: f32) {
+        let r2 = radius * radius;
+        for e in &mut self.enemies {
+            let dx = e.x - x;
+            let dy = e.y - y;
+            if dx * dx + dy * dy <= r2 {
+                e.apply_burn(damage_per_sec, ttl);
+            }
+        }
+    }
+
+    fn apply_shock(&mut self, x: f32, y: f32, radius: f32, damage: i32, chain_count: u8) {
+        let r2 = radius * radius;
+        let mut hit = 0u8;
+        let mut kills: Vec<usize> = Vec::new();
+        for (i, e) in self.enemies.iter_mut().enumerate() {
+            let dx = e.x - x;
+            let dy = e.y - y;
+            if dx * dx + dy * dy <= r2 && hit < chain_count {
+                if e.apply_damage(damage) {
+                    kills.push(i);
+                }
+                hit = hit.saturating_add(1);
+            }
+        }
+        kills.sort();
+        for idx in kills.into_iter().rev() {
+            if idx < self.enemies.len() {
+                self.enemies.swap_remove(idx);
+                self.kills += 1;
+            }
+        }
+    }
+
+    fn apply_spawn_enemy(
+        &mut self,
+        archetype_id: &str,
+        x: f32,
+        y: f32,
+        count: u32,
+        _seed: u64,
+    ) {
+        let Some(arch) = crate::enemy::Archetype::from_name(archetype_id) else {
+            tracing::warn!(archetype = archetype_id, "unknown archetype in reaction");
+            return;
+        };
+        let stats = self.content.stats(arch);
+        for _ in 0..count {
+            self.enemies.push(Enemy::spawn(arch, stats, x, y));
+        }
+    }
+
+    /// Rust-coded reaction escape hatch. Handler names are interned
+    /// `Tag`s; custom behaviors slot in here.
+    fn dispatch_custom_reaction(&mut self, handler: Tag, _x: f32, _y: f32, _seed: u64) {
+        // Currently no custom handlers — the Corpse-Eater task will
+        // install `raise_eater` here.
+        let _ = handler;
+    }
+
+    /// Client-side handler for a `BodyReaction` broadcast. Looks up
+    /// the reaction by name and applies it with the same seed.
+    pub fn apply_body_reaction(&mut self, name: &str, x: f32, y: f32, seed: u64) {
+        if let Some(reaction) = self.reactions.get(name).cloned() {
+            self.apply_reaction(&reaction, x, y, seed);
+        }
+    }
+
+    /// Host-side substance paint: apply locally AND queue a
+    /// SubstancePaint broadcast for all clients.
+    pub fn paint_substance(
+        &mut self,
+        x: i32,
+        y: i32,
+        id: crate::substance::SubstanceId,
+        state: u8,
+    ) {
+        self.arena.set_substance(x, y, id, state);
+        self.tick_ground_paints.push((x, y, id.0, state));
     }
 
     pub fn render(&self, fb: &mut Framebuffer) {
         let camera = &self.camera;
-        self.arena.render(fb, camera);
+        self.arena.render(fb, camera, &self.content.substances);
         // Corpses render between ground and live entities — they sit
         // *on* the floor but standing enemies occlude them.
         for c in &self.corpses {
-            c.render(fb, camera);
+            c.render(fb, camera, &self.content);
         }
         for part in &self.particles {
             part.render(fb, camera);
@@ -1346,10 +1707,10 @@ impl Game {
             sign.render(fb, camera);
         }
         for phantom in &self.phantoms {
-            phantom.render(fb, camera);
+            phantom.render(fb, camera, &self.content);
         }
         for e in &self.enemies {
-            e.render(fb, camera);
+            e.render(fb, camera, &self.content);
         }
         for p in &self.projectiles {
             p.render(fb, camera);
@@ -1421,6 +1782,16 @@ impl Game {
         }
     }
 }
+
+/// How many corpses an Eater consumes before its aggro flips from
+/// corpse-seeking to player-charging. Keeps the boss predictable —
+/// a player sees it eating and knows the timer is real.
+pub const EATER_HUNGER_THRESHOLD: u8 = 5;
+/// Consume radius: how close the Eater has to get to a corpse to
+/// absorb it.
+pub const EATER_CONSUME_RADIUS: f32 = 4.5;
+/// HP + damage bonus per corpse consumed. Accumulates.
+pub const EATER_HP_PER_CONSUME: i32 = 40;
 
 /// Swept segment-vs-circle test. Returns the smallest t ∈ [0, 1] at
 /// which the segment `from → to` first enters a circle of radius `r`

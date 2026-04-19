@@ -267,7 +267,12 @@ pub fn run_serve(port: u16) -> Result<()> {
                         .collect();
                     let ground_deltas: Vec<GroundDeltaMsg> = grounds
                         .into_iter()
-                        .map(|d| GroundDeltaMsg { x: d.x, y: d.y, kind: d.kind, data: d.data })
+                        .map(|d| GroundDeltaMsg {
+                            x: d.x,
+                            y: d.y,
+                            substance_id: d.substance_id,
+                            state: d.state,
+                        })
                         .collect();
                     tracing::info!(
                         %client_id,
@@ -465,16 +470,27 @@ pub fn run_serve(port: u16) -> Result<()> {
                     proto::encode(&ServerMsg::TileUpdate { x, y, kind, hp }),
                 );
             }
-            for &(x, y, kind, data) in &game.tick_ground_paints {
+            for &(x, y, substance_id, state) in &game.tick_ground_paints {
                 server.broadcast_message(
                     DefaultChannel::ReliableOrdered,
-                    proto::encode(&ServerMsg::GroundPaint { x, y, kind, data }),
+                    proto::encode(&ServerMsg::SubstancePaint { x, y, substance_id, state }),
                 );
             }
             for &(id, seed) in &game.tick_corpse_hits {
                 server.broadcast_message(
                     DefaultChannel::ReliableOrdered,
                     proto::encode(&ServerMsg::CorpseHit { id, seed }),
+                );
+            }
+            for (name, x, y, seed) in &game.tick_body_reactions {
+                server.broadcast_message(
+                    DefaultChannel::ReliableOrdered,
+                    proto::encode(&ServerMsg::BodyReaction {
+                        name: name.clone(),
+                        x: *x,
+                        y: *y,
+                        seed: *seed,
+                    }),
                 );
             }
             for b in &game.tick_blasts {

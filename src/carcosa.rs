@@ -116,7 +116,12 @@ impl Phantom {
         self.ttl > 0.0
     }
 
-    pub fn render(&self, fb: &mut Framebuffer, camera: &Camera) {
+    pub fn render(
+        &self,
+        fb: &mut Framebuffer,
+        camera: &Camera,
+        content: &crate::content::ContentDb,
+    ) {
         let (sx, sy) = camera.world_to_screen((self.x, self.y));
         let cx = sx.round() as i32;
         let cy = sy.round() as i32;
@@ -124,7 +129,7 @@ impl Phantom {
 
         let mip = camera.mip_level();
         if mip.shows_sprite() {
-            let mut s: Sprite = sprite::enemy_sprite(archetype);
+            let mut s: Sprite = sprite::enemy_sprite_from_content(archetype, content);
             let t = 1.0 - (self.ttl / self.ttl_max);
             let spawn_flash = if t < 0.08 { 0.9 } else { 0.0 };
             if spawn_flash > 0.0 {

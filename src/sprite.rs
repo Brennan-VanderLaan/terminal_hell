@@ -46,6 +46,7 @@ impl SpriteOverlay {
     }
 }
 
+#[derive(Clone)]
 pub struct Sprite {
     pub w: u16,
     pub h: u16,
@@ -354,6 +355,9 @@ pub fn render_hastur_mark(fb: &mut crate::fb::Framebuffer, cx: i32, cy: i32) {
 }
 
 pub fn enemy_sprite(archetype: Archetype) -> Sprite {
+    // Legacy hardcoded builders — used when no ASCII-art override is
+    // registered in the content pack. See `enemy_sprite_from_content`
+    // for the art-aware variant.
     match archetype {
         Archetype::Rusher => rusher(),
         Archetype::Pinkie => pinkie(),
@@ -364,7 +368,21 @@ pub fn enemy_sprite(archetype: Archetype) -> Sprite {
         Archetype::Swarmling => swarmling(),
         Archetype::Orb => orb(),
         Archetype::Miniboss => miniboss(),
+        Archetype::Eater => eater(),
     }
+}
+
+/// Preferred lookup: consults the content pack for an ASCII-art
+/// sprite override first, falls back to the hardcoded Rust builder.
+/// Clone is O(sprite-size) which is tiny (≤ a few hundred pixels).
+pub fn enemy_sprite_from_content(
+    archetype: Archetype,
+    content: &crate::content::ContentDb,
+) -> Sprite {
+    if let Some(art) = content.archetype_sprites.get(&archetype) {
+        return art.clone();
+    }
+    enemy_sprite(archetype)
 }
 
 fn rusher() -> Sprite {
@@ -572,6 +590,46 @@ fn orb() -> Sprite {
     // Core
     s.fill_rect(2, 2, 3, 3, core);
     s.set(3, 3, dark);
+    s
+}
+
+fn eater() -> Sprite {
+    let flesh = Pixel::rgb(140, 30, 180);
+    let dark = Pixel::rgb(60, 10, 80);
+    let bone = Pixel::rgb(230, 210, 240);
+    let maw = Pixel::rgb(40, 0, 30);
+    let eye = Pixel::rgb(255, 200, 80);
+
+    // 12×14 lumbering silhouette — low tusks, wide maw, hunched shoulders.
+    let mut s = Sprite::new(12, 14);
+    // Top — hunched back ridges.
+    for x in 3..9 {
+        s.set(x, 0, dark);
+    }
+    s.fill_rect(2, 1, 8, 2, flesh);
+    // Eyes on either side.
+    s.set(3, 2, eye);
+    s.set(8, 2, eye);
+    // Maw — wide open.
+    s.fill_rect(3, 3, 6, 3, maw);
+    // Tusks at maw corners.
+    s.set(2, 4, bone);
+    s.set(9, 4, bone);
+    s.set(2, 5, bone);
+    s.set(9, 5, bone);
+    // Heavy torso.
+    s.fill_rect(1, 6, 10, 5, flesh);
+    s.fill_rect(3, 7, 6, 3, dark);
+    // Arms.
+    s.fill_rect(0, 7, 2, 4, dark);
+    s.fill_rect(10, 7, 2, 4, dark);
+    // Legs.
+    s.fill_rect(2, 11, 3, 3, dark);
+    s.fill_rect(7, 11, 3, 3, dark);
+    s.set(2, 13, bone);
+    s.set(4, 13, bone);
+    s.set(7, 13, bone);
+    s.set(9, 13, bone);
     s
 }
 

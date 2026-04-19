@@ -312,19 +312,25 @@ fn handle_reliable(
         ServerMsg::TileUpdate { x, y, kind, hp } => {
             game.apply_tile_update(x, y, kind, hp);
         }
-        ServerMsg::GroundPaint { x, y, kind, data } => {
-            game.apply_ground_paint(x, y, kind, data);
+        ServerMsg::SubstancePaint { x, y, substance_id, state } => {
+            game.apply_substance_paint(x, y, substance_id, state);
         }
         ServerMsg::WorldSync { tile_deltas, ground_deltas } => {
             for d in tile_deltas {
                 game.apply_tile_update(d.x as i32, d.y as i32, d.kind, d.hp);
             }
             for d in ground_deltas {
-                game.apply_ground_paint(d.x as i32, d.y as i32, d.kind, d.data);
+                game.apply_substance_paint(d.x as i32, d.y as i32, d.substance_id, d.state);
             }
         }
         ServerMsg::CorpseHit { id, seed } => {
             game.apply_corpse_hit(id, seed);
+        }
+        ServerMsg::BodyReaction { name: _, x: _, y: _, seed: _ } => {
+            // Body reactions are host-only today — their effects flow
+            // through SubstancePaint / Blast / snapshots. Kept in the
+            // proto for future use when a reaction needs a dedicated
+            // wire path.
         }
         ServerMsg::PlayerJoined { .. } | ServerMsg::PlayerLeft { .. } => {
             // Player list is driven by the snapshot; nothing to do here yet.

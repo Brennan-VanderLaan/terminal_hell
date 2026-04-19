@@ -30,15 +30,25 @@ pub enum ServerMsg {
     Welcome(Welcome),
     Snapshot(Snapshot),
     TileUpdate { x: i32, y: i32, kind: u8, hp: u8 },
-    /// Ground-layer decal update. Preserves structure / object on top.
-    /// `kind`: 0=BloodPool (data=shade), 1=Scorch (data=intensity).
-    /// Used for persistent blood and scorch marks left behind by
-    /// corpse collapse, explosions, burn damage — the effect infra that
-    /// the new MIP tiers make visible.
-    GroundPaint { x: i32, y: i32, kind: u8, data: u8 },
+    /// Ground-layer substance paint. Preserves structure / object on top.
+    /// `substance_id` indexes the content pack's substance registry;
+    /// `state` is the substance's state byte (shade / intensity /
+    /// substance-specific). Used for blood, scorch, glowing substances,
+    /// any future data-driven ground decal.
+    SubstancePaint {
+        x: i32,
+        y: i32,
+        substance_id: u16,
+        state: u8,
+    },
     /// Projectile landed on a corpse. `seed` drives deterministic hole
     /// synthesis so every peer punches out the same sprite pixels.
     CorpseHit { id: u32, seed: u64 },
+    /// A body-on-death / body-on-interaction reaction fired. The
+    /// `name` keys into the ReactionRegistry; the seed drives any
+    /// RNG-driven placement so host + client paint identical
+    /// substances and spawn identical effects.
+    BodyReaction { name: String, x: f32, y: f32, seed: u64 },
     Blast(Blast),
     /// Sent once, reliable, right after Welcome to freshly-joined
     /// clients. Carries every tile that has diverged from the pristine
@@ -67,8 +77,8 @@ pub struct TileDeltaMsg {
 pub struct GroundDeltaMsg {
     pub x: u16,
     pub y: u16,
-    pub kind: u8,
-    pub data: u8,
+    pub substance_id: u16,
+    pub state: u8,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

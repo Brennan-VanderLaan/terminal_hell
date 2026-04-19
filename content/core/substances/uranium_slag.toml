@@ -1,0 +1,12 @@
+id             = "uranium_slag"
+tags           = ["radioactive", "toxic", "glowing", "heavy"]
+fresh          = "#7cff64"
+dried          = "#2a6a18"
+state_curve    = "faint_to_intense"
+jitter         = 1
+# Green bloom — glows in the dark so you can see it underfoot at any
+# zoom. Bounded radius keeps the bloom pass cheap.
+bloom_color    = "#80ff3c"
+bloom_radius   = 4
+bloom_falloff  = 0.75
+bloom_strength = 0.55

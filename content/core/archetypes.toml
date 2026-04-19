@@ -15,6 +15,15 @@ speed = 22.0
 touch_damage = 10
 hit_radius = 2.2
 reach = 2.2
+art = "rusher.art"
+tags = ["biological", "flesh"]
+body_on_death = "spawn_blood"
+
+[rusher.palette]
+H = "#c82828"
+B = "#ff3c3c"
+E = "#ffe678"
+D = "#821428"
 
 [pinkie]
 hp = 140
@@ -22,6 +31,8 @@ speed = 15.0
 touch_damage = 18
 hit_radius = 4.0
 reach = 3.2
+tags = ["biological", "flesh", "heavy"]
+body_on_death = "spawn_big_blood"
 
 [charger]
 hp = 75
@@ -61,6 +72,8 @@ speed = 30.0
 touch_damage = 6
 hit_radius = 1.6
 reach = 1.6
+tags = ["biological", "small", "flammable"]
+body_on_death = "ignite_aura"
 
 [orb]
 hp = 90
@@ -68,6 +81,8 @@ speed = 11.0
 touch_damage = 14
 hit_radius = 3.2
 reach = 3.0
+tags = ["arcane", "floating", "volatile"]
+body_on_death = "explode_small"
 
 [miniboss]
 hp = 550
@@ -75,3 +90,18 @@ speed = 9.0
 touch_damage = 30
 hit_radius = 6.5
 reach = 5.0
+tags = ["biological", "heavy", "necromantic"]
+body_on_death = "explode_big"
+
+# Emergent boss: the Corpse-Eater. Spawns only from a rare interaction
+# (necromantic body dying near corpses) — never from regular waves.
+# Starts moderate, grows by consuming corpses, rampages once fed.
+[eater]
+hp = 320
+speed = 8.0
+touch_damage = 40
+hit_radius = 5.0
+reach = 4.5
+tags = ["abomination", "necromantic", "hungry"]
+# No body_on_death — dying Eaters just drop blood like anything else
+# doesn't, because the raise logic triggers off necromantic+corpse.

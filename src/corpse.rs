@@ -3,7 +3,7 @@
 //! growing punch-out overlay. Each projectile that hits the corpse
 //! deterministically removes sprite pixels around the hit coord and
 //! spawns a gore burst; accumulated damage eventually collapses the
-//! corpse into a `BloodPool` ground decal.
+//! corpse into a `blood_pool` substance on the ground layer.
 //!
 //! Corpses live in the object layer of the 3-layer tile stack (`Arena`).
 //! They don't block movement — players step over them — but projectiles
@@ -15,8 +15,9 @@
 //! - The *hole state* isn't in the snapshot. Instead, each hit generates
 //!   a reliable `CorpseHit { id, seed }` event — clients compute
 //!   identical hole positions via deterministic seeded synthesis.
-//! - On collapse the host broadcasts `GroundPaint(BloodPool)` and drops
-//!   the corpse from its list; clients remove it from theirs.
+//! - On collapse the host broadcasts a `SubstancePaint` with the
+//!   blood_pool substance id and drops the corpse from its list;
+//!   clients remove it from theirs.
 
 use crate::camera::{Camera, MipLevel};
 use crate::enemy::Archetype;
@@ -119,14 +120,19 @@ impl Corpse {
         dx * dx + dy * dy < Self::HIT_RADIUS * Self::HIT_RADIUS
     }
 
-    pub fn render(&self, fb: &mut Framebuffer, camera: &Camera) {
+    pub fn render(
+        &self,
+        fb: &mut Framebuffer,
+        camera: &Camera,
+        content: &crate::content::ContentDb,
+    ) {
         let (sx, sy) = camera.world_to_screen((self.x, self.y));
         let center = (sx.round() as i32, sy.round() as i32);
         let mip = camera.mip_level();
         let gib = gib_color(self.archetype);
 
         if mip.shows_sprite() {
-            let mut s: Sprite = sprite::enemy_sprite(self.archetype);
+            let mut s: Sprite = sprite::enemy_sprite_from_content(self.archetype, content);
             // Tint toward dead-tones: most of the base tint collapses to
             // the archetype's gib color + a darkening pass.
             s.tint_toward(gib, 0.6);
@@ -182,5 +188,6 @@ pub fn gib_color(archetype: Archetype) -> Pixel {
         Archetype::Swarmling => Pixel::rgb(160, 40, 20),
         Archetype::Orb => Pixel::rgb(140, 70, 200),
         Archetype::Miniboss => Pixel::rgb(200, 120, 40),
+        Archetype::Eater => Pixel::rgb(100, 20, 140),
     }
 }

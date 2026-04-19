@@ -1,0 +1,7 @@
+id          = "scorch"
+tags        = ["burnt", "sooty"]
+# `faint_to_intense` — state 0 = faint gray, 255 = deep black soot.
+fresh       = "#46342e"
+dried       = "#0f0b08"
+state_curve = "faint_to_intense"
+jitter      = 0

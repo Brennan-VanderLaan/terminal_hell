@@ -1,0 +1,6 @@
+id          = "blood_pool"
+tags        = ["biological", "blood", "slippery", "flammable_mildly"]
+fresh       = "#b41418"
+dried       = "#281018"
+state_curve = "fresh_to_dried"
+jitter      = 1
