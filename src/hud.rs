@@ -220,7 +220,19 @@ pub fn draw_zoom_indicator<W: Write>(
     cols: u16,
     zoom: f32,
 ) -> Result<()> {
-    let text = format!(" ZOOM {:>4.2}x ", zoom);
+    use crate::camera::{MIP_BLOB_MIN_ZOOM, MIP_CLOSE_MIN_ZOOM, MIP_HERO_MIN_ZOOM, MIP_NORMAL_MIN_ZOOM};
+    let tier = if zoom >= MIP_HERO_MIN_ZOOM {
+        "HERO"
+    } else if zoom >= MIP_CLOSE_MIN_ZOOM {
+        "CLOSE"
+    } else if zoom >= MIP_NORMAL_MIN_ZOOM {
+        "NORM"
+    } else if zoom >= MIP_BLOB_MIN_ZOOM {
+        "BLOB"
+    } else {
+        "DOT"
+    };
+    let text = format!(" ZOOM {:>4.2}x {:<5} ", zoom, tier);
     let col = cols.saturating_sub(text.len() as u16);
     queue!(
         out,

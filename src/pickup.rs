@@ -48,49 +48,65 @@ impl Pickup {
         let cy = sy.round() as i32;
 
         let rarity = self.rarity.color();
-        match camera.mip_level() {
-            0 => {
-                let pulse = 0.6 + 0.4 * (self.flash_phase * std::f32::consts::TAU).sin().abs();
-                let halo = Pixel::rgb(
-                    (rarity.r as f32 * pulse) as u8,
-                    (rarity.g as f32 * pulse) as u8,
-                    (rarity.b as f32 * pulse) as u8,
-                );
-                for dy in -2..=2_i32 {
-                    for dx in -2..=2_i32 {
-                        if dx.abs() == 2 || dy.abs() == 2 {
-                            set(fb, cx + dx, cy + dy, halo);
-                        }
-                    }
-                }
-                let slot_colors: Vec<Pixel> = self.primitives.iter().map(|p| p.color()).collect();
-                let mut i = 0;
-                for dy in -1..=1_i32 {
-                    for dx in -1..=1_i32 {
-                        let color = if slot_colors.is_empty() {
-                            rarity
-                        } else {
-                            slot_colors[i % slot_colors.len()]
-                        };
-                        set(fb, cx + dx, cy + dy, color);
-                        i += 1;
-                    }
-                }
-                if self.ttl < 8.0 {
-                    let dim = Pixel::rgb(40, 30, 50);
-                    if (self.flash_phase * 8.0).floor() as i32 % 2 == 0 {
-                        set(fb, cx, cy, dim);
+        let mip = camera.mip_level();
+        if mip.shows_sprite() {
+            // Scale the stamp so zooming in makes the pickup read larger
+            // rather than staying a tiny 5×5 in the middle of a big frame.
+            let scale = (camera.zoom * 0.5).max(1.0);
+            let pulse = 0.6 + 0.4 * (self.flash_phase * std::f32::consts::TAU).sin().abs();
+            let halo = Pixel::rgb(
+                (rarity.r as f32 * pulse) as u8,
+                (rarity.g as f32 * pulse) as u8,
+                (rarity.b as f32 * pulse) as u8,
+            );
+            for dy in -2..=2_i32 {
+                for dx in -2..=2_i32 {
+                    if dx.abs() == 2 || dy.abs() == 2 {
+                        stamp(fb, cx, cy, dx, dy, scale, halo);
                     }
                 }
             }
-            1 => sprite::render_blob(fb, (cx, cy), rarity),
-            _ => sprite::render_dot(fb, (cx, cy), rarity),
+            let slot_colors: Vec<Pixel> = self.primitives.iter().map(|p| p.color()).collect();
+            let mut i = 0;
+            for dy in -1..=1_i32 {
+                for dx in -1..=1_i32 {
+                    let color = if slot_colors.is_empty() {
+                        rarity
+                    } else {
+                        slot_colors[i % slot_colors.len()]
+                    };
+                    stamp(fb, cx, cy, dx, dy, scale, color);
+                    i += 1;
+                }
+            }
+            if self.ttl < 8.0 {
+                let dim = Pixel::rgb(40, 30, 50);
+                if (self.flash_phase * 8.0).floor() as i32 % 2 == 0 {
+                    stamp(fb, cx, cy, 0, 0, scale, dim);
+                }
+            }
+        } else if matches!(mip, crate::camera::MipLevel::Blob) {
+            sprite::render_blob(fb, (cx, cy), rarity);
+        } else {
+            sprite::render_dot(fb, (cx, cy), rarity);
         }
     }
 }
 
-fn set(fb: &mut Framebuffer, px: i32, py: i32, color: Pixel) {
-    if px >= 0 && py >= 0 {
-        fb.set(px as u16, py as u16, color);
+/// Fill a zoom-scaled block of screen pixels centered on (cx+dx*scale,
+/// cy+dy*scale). Keeps hand-authored small pixel arrangements readable at
+/// the Close/Hero tiers without converting them to Sprites.
+fn stamp(fb: &mut Framebuffer, cx: i32, cy: i32, dx: i32, dy: i32, scale: f32, color: Pixel) {
+    let s = scale.max(1.0);
+    let x0 = cx + (dx as f32 * s).round() as i32;
+    let y0 = cy + (dy as f32 * s).round() as i32;
+    let x1 = x0 + s.round() as i32;
+    let y1 = y0 + s.round() as i32;
+    for py in y0..y1 {
+        for px in x0..x1 {
+            if px >= 0 && py >= 0 {
+                fb.set(px as u16, py as u16, color);
+            }
+        }
     }
 }

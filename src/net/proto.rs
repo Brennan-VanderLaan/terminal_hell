@@ -30,10 +30,45 @@ pub enum ServerMsg {
     Welcome(Welcome),
     Snapshot(Snapshot),
     TileUpdate { x: i32, y: i32, kind: u8, hp: u8 },
+    /// Ground-layer decal update. Preserves structure / object on top.
+    /// `kind`: 0=BloodPool (data=shade), 1=Scorch (data=intensity).
+    /// Used for persistent blood and scorch marks left behind by
+    /// corpse collapse, explosions, burn damage — the effect infra that
+    /// the new MIP tiers make visible.
+    GroundPaint { x: i32, y: i32, kind: u8, data: u8 },
+    /// Projectile landed on a corpse. `seed` drives deterministic hole
+    /// synthesis so every peer punches out the same sprite pixels.
+    CorpseHit { id: u32, seed: u64 },
     Blast(Blast),
+    /// Sent once, reliable, right after Welcome to freshly-joined
+    /// clients. Carries every tile that has diverged from the pristine
+    /// seed generation: damaged walls, destroyed rubble, carcosa spread,
+    /// persistent blood pools, scorch marks. Lets a late joiner walk
+    /// into the accumulated mess the other survivors have made instead
+    /// of a cleanly-regenerated arena.
+    WorldSync {
+        tile_deltas: Vec<TileDeltaMsg>,
+        ground_deltas: Vec<GroundDeltaMsg>,
+    },
     PlayerJoined { id: u32 },
     PlayerLeft { id: u32 },
     RunEnded { wave: u32, kills: u32, elapsed_secs: f32 },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct TileDeltaMsg {
+    pub x: u16,
+    pub y: u16,
+    pub kind: u8,
+    pub hp: u8,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct GroundDeltaMsg {
+    pub x: u16,
+    pub y: u16,
+    pub kind: u8,
+    pub data: u8,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -65,6 +100,10 @@ pub struct Snapshot {
     pub enemies: Vec<EnemySnap>,
     pub projectiles: Vec<ProjSnap>,
     pub pickups: Vec<PickupSnap>,
+    /// Persistent corpse entities. Positions sync every snapshot; the
+    /// per-corpse hole state is *not* in the snapshot — clients apply
+    /// identical holes via reliable `CorpseHit` events.
+    pub corpses: Vec<CorpseSnap>,
     /// Indexed per-player (by order in `players`): which weapon slot is
     /// active, and a short loadout summary for the HUD.
     pub weapons: Vec<WeaponSnap>,
@@ -152,6 +191,15 @@ pub struct EnemySnap {
     pub y: f32,
     pub hp: i32,
     pub kind: u8,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CorpseSnap {
+    pub id: u32,
+    pub x: f32,
+    pub y: f32,
+    pub kind: u8,
+    pub hp: i32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

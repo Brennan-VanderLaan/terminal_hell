@@ -14,8 +14,9 @@ use crate::hud;
 use crate::input::Input;
 use crate::menu;
 use crate::net::proto::{
-    self, Blast, ClientMsg, EnemySnap, HitscanSnap, KioskSnap, PickupSnap, PlayerSnap, ProjSnap,
-    ServerMsg, SignSnap, Snapshot, WeaponLoadout, WeaponSnap, Welcome,
+    self, Blast, ClientMsg, CorpseSnap, EnemySnap, GroundDeltaMsg, HitscanSnap, KioskSnap,
+    PickupSnap, PlayerSnap, ProjSnap, ServerMsg, SignSnap, Snapshot, TileDeltaMsg, WeaponLoadout,
+    WeaponSnap, Welcome,
 };
 use crate::share::{self, ShareCode};
 use crate::terminal;
@@ -255,6 +256,30 @@ pub fn run_serve(port: u16) -> Result<()> {
                         DefaultChannel::ReliableOrdered,
                         proto::encode(&welcome),
                     );
+                    // World-state catch-up: every tile that's diverged
+                    // from the seed-regenerated pristine arena. Keeps
+                    // late joiners in sync with the accumulated damage
+                    // + ground decals the other survivors have made.
+                    let (structs, grounds) = game.arena.diff_from_seed(arena_seed);
+                    let tile_deltas: Vec<TileDeltaMsg> = structs
+                        .into_iter()
+                        .map(|d| TileDeltaMsg { x: d.x, y: d.y, kind: d.kind, hp: d.hp })
+                        .collect();
+                    let ground_deltas: Vec<GroundDeltaMsg> = grounds
+                        .into_iter()
+                        .map(|d| GroundDeltaMsg { x: d.x, y: d.y, kind: d.kind, data: d.data })
+                        .collect();
+                    tracing::info!(
+                        %client_id,
+                        tile = tile_deltas.len(),
+                        ground = ground_deltas.len(),
+                        "WorldSync"
+                    );
+                    server.send_message(
+                        client_id,
+                        DefaultChannel::ReliableOrdered,
+                        proto::encode(&ServerMsg::WorldSync { tile_deltas, ground_deltas }),
+                    );
                     server.broadcast_message_except(
                         client_id,
                         DefaultChannel::ReliableOrdered,
@@ -440,6 +465,18 @@ pub fn run_serve(port: u16) -> Result<()> {
                     proto::encode(&ServerMsg::TileUpdate { x, y, kind, hp }),
                 );
             }
+            for &(x, y, kind, data) in &game.tick_ground_paints {
+                server.broadcast_message(
+                    DefaultChannel::ReliableOrdered,
+                    proto::encode(&ServerMsg::GroundPaint { x, y, kind, data }),
+                );
+            }
+            for &(id, seed) in &game.tick_corpse_hits {
+                server.broadcast_message(
+                    DefaultChannel::ReliableOrdered,
+                    proto::encode(&ServerMsg::CorpseHit { id, seed }),
+                );
+            }
             for b in &game.tick_blasts {
                 let blast = Blast {
                     x: b.x,
@@ -573,6 +610,17 @@ fn build_snapshot(game: &Game) -> Snapshot {
             .enemies
             .iter()
             .map(|e| EnemySnap { x: e.x, y: e.y, hp: e.hp, kind: e.archetype.to_kind() })
+            .collect(),
+        corpses: game
+            .corpses
+            .iter()
+            .map(|c| CorpseSnap {
+                id: c.id,
+                x: c.x,
+                y: c.y,
+                kind: c.archetype.to_kind(),
+                hp: c.hp,
+            })
             .collect(),
         projectiles: game
             .projectiles

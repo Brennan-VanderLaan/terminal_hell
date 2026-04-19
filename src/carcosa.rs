@@ -62,35 +62,37 @@ impl YellowSign {
             (60.0 * (0.3 + bloom * 0.7)) as u8,
         );
 
-        match camera.mip_level() {
-            0 => {
-                let halo = Pixel::rgb(
-                    (200.0 * (0.4 + bloom * 0.6)) as u8,
-                    (140.0 * (0.4 + bloom * 0.6)) as u8,
-                    (30.0 * (0.4 + bloom * 0.6)) as u8,
-                );
-                for dy in -4..=4_i32 {
-                    for dx in -4..=4_i32 {
-                        let d2 = dx * dx + dy * dy;
-                        if d2 > 20 && d2 < 25 {
-                            set(fb, cx + dx, cy + dy, halo);
-                        }
+        let mip = camera.mip_level();
+        if mip.shows_sprite() {
+            let scale = (camera.zoom * 0.5).max(1.0);
+            let halo = Pixel::rgb(
+                (200.0 * (0.4 + bloom * 0.6)) as u8,
+                (140.0 * (0.4 + bloom * 0.6)) as u8,
+                (30.0 * (0.4 + bloom * 0.6)) as u8,
+            );
+            for dy in -4..=4_i32 {
+                for dx in -4..=4_i32 {
+                    let d2 = dx * dx + dy * dy;
+                    if d2 > 20 && d2 < 25 {
+                        stamp(fb, cx, cy, dx, dy, scale, halo);
                     }
                 }
-                for dy in -3..=3_i32 {
-                    set(fb, cx, cy + dy, sign_color);
-                }
-                set(fb, cx - 1, cy - 2, sign_color);
-                set(fb, cx - 2, cy - 1, sign_color);
-                set(fb, cx - 3, cy, sign_color);
-                set(fb, cx + 1, cy - 2, sign_color);
-                set(fb, cx + 2, cy - 1, sign_color);
-                set(fb, cx + 3, cy, sign_color);
-                set(fb, cx - 1, cy + 3, sign_color);
-                set(fb, cx + 1, cy + 3, sign_color);
             }
-            1 => sprite::render_blob(fb, (cx, cy), sign_color),
-            _ => sprite::render_dot(fb, (cx, cy), sign_color),
+            for dy in -3..=3_i32 {
+                stamp(fb, cx, cy, 0, dy, scale, sign_color);
+            }
+            stamp(fb, cx, cy, -1, -2, scale, sign_color);
+            stamp(fb, cx, cy, -2, -1, scale, sign_color);
+            stamp(fb, cx, cy, -3, 0, scale, sign_color);
+            stamp(fb, cx, cy, 1, -2, scale, sign_color);
+            stamp(fb, cx, cy, 2, -1, scale, sign_color);
+            stamp(fb, cx, cy, 3, 0, scale, sign_color);
+            stamp(fb, cx, cy, -1, 3, scale, sign_color);
+            stamp(fb, cx, cy, 1, 3, scale, sign_color);
+        } else if matches!(mip, crate::camera::MipLevel::Blob) {
+            sprite::render_blob(fb, (cx, cy), sign_color);
+        } else {
+            sprite::render_dot(fb, (cx, cy), sign_color);
         }
     }
 }
@@ -120,26 +122,36 @@ impl Phantom {
         let cy = sy.round() as i32;
         let archetype = crate::enemy::Archetype::from_kind(self.archetype_kind);
 
-        match camera.mip_level() {
-            0 => {
-                let mut s: Sprite = sprite::enemy_sprite(archetype);
-                let t = 1.0 - (self.ttl / self.ttl_max);
-                let spawn_flash = if t < 0.08 { 0.9 } else { 0.0 };
-                if spawn_flash > 0.0 {
-                    s.tint_toward(Pixel::rgb(255, 255, 255), spawn_flash);
-                } else {
-                    s.tint_toward(Pixel::rgb(180, 140, 40), 0.55);
-                }
-                s.blit_scaled(fb, (cx, cy), camera.zoom);
+        let mip = camera.mip_level();
+        if mip.shows_sprite() {
+            let mut s: Sprite = sprite::enemy_sprite(archetype);
+            let t = 1.0 - (self.ttl / self.ttl_max);
+            let spawn_flash = if t < 0.08 { 0.9 } else { 0.0 };
+            if spawn_flash > 0.0 {
+                s.tint_toward(Pixel::rgb(255, 255, 255), spawn_flash);
+            } else {
+                s.tint_toward(Pixel::rgb(180, 140, 40), 0.55);
             }
-            1 => sprite::render_blob(fb, (cx, cy), Pixel::rgb(180, 140, 40)),
-            _ => sprite::render_dot(fb, (cx, cy), Pixel::rgb(180, 140, 40)),
+            s.blit_scaled(fb, (cx, cy), camera.zoom);
+        } else if matches!(mip, crate::camera::MipLevel::Blob) {
+            sprite::render_blob(fb, (cx, cy), Pixel::rgb(180, 140, 40));
+        } else {
+            sprite::render_dot(fb, (cx, cy), Pixel::rgb(180, 140, 40));
         }
     }
 }
 
-fn set(fb: &mut Framebuffer, px: i32, py: i32, color: Pixel) {
-    if px >= 0 && py >= 0 {
-        fb.set(px as u16, py as u16, color);
+fn stamp(fb: &mut Framebuffer, cx: i32, cy: i32, dx: i32, dy: i32, scale: f32, color: Pixel) {
+    let s = scale.max(1.0);
+    let x0 = cx + (dx as f32 * s).round() as i32;
+    let y0 = cy + (dy as f32 * s).round() as i32;
+    let x1 = x0 + s.round() as i32;
+    let y1 = y0 + s.round() as i32;
+    for py in y0..y1 {
+        for px in x0..x1 {
+            if px >= 0 && py >= 0 {
+                fb.set(px as u16, py as u16, color);
+            }
+        }
     }
 }

@@ -312,6 +312,20 @@ fn handle_reliable(
         ServerMsg::TileUpdate { x, y, kind, hp } => {
             game.apply_tile_update(x, y, kind, hp);
         }
+        ServerMsg::GroundPaint { x, y, kind, data } => {
+            game.apply_ground_paint(x, y, kind, data);
+        }
+        ServerMsg::WorldSync { tile_deltas, ground_deltas } => {
+            for d in tile_deltas {
+                game.apply_tile_update(d.x as i32, d.y as i32, d.kind, d.hp);
+            }
+            for d in ground_deltas {
+                game.apply_ground_paint(d.x as i32, d.y as i32, d.kind, d.data);
+            }
+        }
+        ServerMsg::CorpseHit { id, seed } => {
+            game.apply_corpse_hit(id, seed);
+        }
         ServerMsg::PlayerJoined { .. } | ServerMsg::PlayerLeft { .. } => {
             // Player list is driven by the snapshot; nothing to do here yet.
         }
@@ -368,6 +382,11 @@ fn handle_unreliable(msg: ServerMsg, game: &mut Game) {
                 e.hp = es.hp;
                 game.enemies.push(e);
             }
+            // Corpse positions come from the snap; hole state is
+            // preserved across merges. Late joiners get the full corpse
+            // list in their first snapshot and see any subsequent hits
+            // via reliable CorpseHit events.
+            game.merge_corpse_snapshot(&s.corpses);
             game.projectiles.clear();
             for ps in s.projectiles {
                 game.projectiles.push(Projectile {

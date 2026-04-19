@@ -1,6 +1,22 @@
-//! Arena: tile grid in logical-pixel units (1 tile = 1 pixel in the
-//! framebuffer). Walls have HP and a material; destruction reports back
-//! which color to paint the glyph-confetti with.
+//! Arena: 3-layer tile stack, in logical-pixel units (1 tile = 1 pixel in
+//! the framebuffer).
+//!
+//! **Ground layer** — floor and flat ground decoration: Floor, Carcosa
+//! terrain, Rubble (post-destruction debris), blood pools, scorch marks.
+//! Ground decals are cheap, drawn first, and don't block movement.
+//!
+//! **Object layer** — things sitting *on* the ground: debris piles,
+//! corpses (as IDs pointing at entity-level corpse state), dropped loot in
+//! the future. Objects render above ground and below structure.
+//!
+//! **Structure layer** — things that block movement and sightlines: walls,
+//! low cover, doorways. Only structures gate collisions — objects are
+//! walk-over-able.
+//!
+//! Breaking a wall destroys only the structure slot; the ground underneath
+//! (including any Carcosa terrain or blood pool) persists. This makes
+//! building interiors (walls forming rooms, Doorway openings to enter)
+//! natural to express in a follow-on pass.
 
 use crate::camera::Camera;
 use crate::fb::{Framebuffer, Pixel};
@@ -8,7 +24,7 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Material {
     Concrete,
 }
@@ -27,13 +43,79 @@ impl Material {
     }
 }
 
-#[derive(Clone, Copy)]
+/// Ground-layer kind. Flat decoration; always passable. Replaced on
+/// ground-targeted writes (e.g., a corpse collapsing into a BloodPool
+/// overwrites whatever was underneath).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Ground {
+    Floor,
+    Carcosa,
+    Rubble { material: Material },
+    /// Persistent blood decal. `shade` darkens as blood dries (0 = fresh
+    /// bright, 255 = faded). Spawned by the corpse/decal work.
+    BloodPool { shade: u8 },
+    /// Burn / explosion scorch. `intensity` 0..=255.
+    Scorch { intensity: u8 },
+}
+
+/// Object-layer kind. Sits above the ground; never blocks movement in v1
+/// (players step over corpses and debris piles). Objects can block
+/// projectiles if their variant says so — DebrisPile does, Corpse does
+/// after a small hit radius is used during corpse-damage resolution.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Object {
+    /// Loose debris — pile of broken concrete / bone / whatever. Partial
+    /// LoS cover, no movement block.
+    DebrisPile { material: Material, remaining: u8 },
+    /// Handle to a full corpse entity (state lives on `Game.corpses`).
+    /// Kept in the spatial grid so hit resolution is fast.
+    Corpse { id: u32 },
+}
+
+/// Structure-layer kind. Opaque + blocking unless the variant opts out
+/// (Doorway). The only layer that gates collisions.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Structure {
+    Wall { hp: u8, material: Material },
+    /// Low cover — currently same collision as Wall (placeholder for
+    /// future crouch mechanics).
+    LowCover { hp: u8, material: Material },
+    /// Doorway: part of a wall run but does *not* block movement or LoS.
+    /// Makes enterable buildings a data-only construct.
+    Doorway,
+}
+
+impl Structure {
+    pub fn blocks_movement(self) -> bool {
+        !matches!(self, Structure::Doorway)
+    }
+    pub fn blocks_los(self) -> bool {
+        !matches!(self, Structure::Doorway)
+    }
+}
+
+/// Full per-tile state.
+#[derive(Clone, Copy, Debug)]
+pub struct TileStack {
+    pub ground: Ground,
+    pub object: Option<Object>,
+    pub structure: Option<Structure>,
+}
+
+impl TileStack {
+    pub fn floor() -> Self {
+        Self { ground: Ground::Floor, object: None, structure: None }
+    }
+}
+
+/// Dominant-state view of a tile, preserved for legacy callers and the
+/// net TileUpdate protocol. Blood / scorch decals are *not* surfaced
+/// through this view — use `Arena::ground` directly for those.
+#[derive(Clone, Copy, Debug)]
 pub enum Tile {
     Floor,
     Wall { hp: u8, material: Material },
     Rubble { material: Material },
-    /// Carcosa-terrain tile. Drains sanity from players standing on it;
-    /// renders yellow-ochre. Non-destructible in v0.3.
     Carcosa,
 }
 
@@ -45,7 +127,7 @@ pub struct HitOutcome {
 pub struct Arena {
     pub width: u16,
     pub height: u16,
-    tiles: Vec<Tile>,
+    stacks: Vec<TileStack>,
 }
 
 const WALL_HP: u8 = 2;
@@ -53,7 +135,7 @@ const WALL_HP: u8 = 2;
 impl Arena {
     pub fn new_empty(width: u16, height: u16) -> Self {
         let n = (width as usize) * (height as usize);
-        Self { width, height, tiles: vec![Tile::Floor; n] }
+        Self { width, height, stacks: vec![TileStack::floor(); n] }
     }
 
     /// Seed-driven procedural arena. Scales blob + breaker counts with
@@ -83,8 +165,6 @@ impl Arena {
         let core_radius = (w.min(h * 2) / 6).max(10);
         let core_r2 = core_radius * core_radius;
 
-        // Density-driven counts: roughly one blob per 4000 world pixels,
-        // one breaker per 20000.
         let area = w.max(1) * h.max(1);
         let blob_count = (area / 4000).clamp(14, 600);
         let breaker_count = (area / 20000).clamp(3, 120);
@@ -140,15 +220,13 @@ impl Arena {
         a
     }
 
-    /// Backwards-compat hand-crafted layout used before the generator. Kept
-    /// for tests; live code should prefer `generate`.
+    /// Hand-crafted layout used before the generator. Kept for tests.
+    #[allow(dead_code)]
     pub fn hand_crafted(width: u16, height: u16) -> Self {
         let mut a = Self::new_empty(width, height);
         let w = width as i32;
         let h = height as i32;
 
-        // Thick perimeter (3 pixels) for visual weight. Outer ring is
-        // effectively indestructible via triple HP.
         for t in 0..3 {
             for x in 0..w {
                 a.set_wall(x, t, Material::Concrete, WALL_HP * 3);
@@ -160,18 +238,16 @@ impl Arena {
             }
         }
 
-        // Interior cover — scales with arena width so layouts stay readable
-        // whether the terminal is 120 cols or 300 cols.
         let cx = w / 2;
         let cy = h / 2;
-        let u = (w / 28).max(3); // "unit" — scales cover blocks proportionally
+        let u = (w / 28).max(3);
 
         place_block(&mut a, cx - 8 * u, cy - 3 * u, 2 * u, 3 * u);
         place_block(&mut a, cx + 6 * u, cy - 3 * u, 2 * u, 3 * u);
         place_block(&mut a, cx - 4 * u, cy - 5 * u, 8 * u, u.min(3));
         place_block(&mut a, cx - 4 * u, cy + 5 * u - u.min(3), 8 * u, u.min(3));
-        place_block(&mut a, cx - 5 * u, cy, 3 * u, u.min(2).max(2));
-        place_block(&mut a, cx + 2 * u, cy, 3 * u, u.min(2).max(2));
+        place_block(&mut a, cx - 5 * u, cy, 3 * u, 2);
+        place_block(&mut a, cx + 2 * u, cy, 3 * u, 2);
 
         a
     }
@@ -184,70 +260,345 @@ impl Arena {
         Some((y as usize) * (self.width as usize) + (x as usize))
     }
 
+    /// Full stack at (x, y). Returns a "floor" stack for OOB coords so
+    /// callers don't have to special-case edges.
+    #[inline]
+    pub fn stack(&self, x: i32, y: i32) -> TileStack {
+        match self.idx(x, y) {
+            Some(i) => self.stacks[i],
+            None => TileStack {
+                ground: Ground::Floor,
+                object: None,
+                // OOB reads as an invincible wall so projectiles don't
+                // leave the world.
+                structure: Some(Structure::Wall {
+                    hp: u8::MAX,
+                    material: Material::Concrete,
+                }),
+            },
+        }
+    }
+
+    /// Ground-layer decoration at (x, y). Prefer this over `tile()` when
+    /// you care about blood / scorch / etc.
+    #[inline]
+    pub fn ground(&self, x: i32, y: i32) -> Ground {
+        self.stack(x, y).ground
+    }
+
+    /// Object at (x, y), if any.
+    #[inline]
+    pub fn object(&self, x: i32, y: i32) -> Option<Object> {
+        self.stack(x, y).object
+    }
+
+    /// Dominant-state view of (x, y). Used by the net TileUpdate encoder
+    /// and by any legacy caller that just wants to know "is this a wall,
+    /// a floor, or debris." Blood / scorch decals fall through to
+    /// whatever structural state is present (or Floor if none).
     #[inline]
     pub fn tile(&self, x: i32, y: i32) -> Tile {
-        match self.idx(x, y) {
-            Some(i) => self.tiles[i],
-            None => Tile::Wall { hp: u8::MAX, material: Material::Concrete },
+        let s = self.stack(x, y);
+        if let Some(Structure::Wall { hp, material }) = s.structure {
+            return Tile::Wall { hp, material };
+        }
+        if let Some(Structure::LowCover { hp, material }) = s.structure {
+            return Tile::Wall { hp, material };
+        }
+        match s.ground {
+            Ground::Floor => Tile::Floor,
+            Ground::Carcosa => Tile::Carcosa,
+            Ground::Rubble { material } => Tile::Rubble { material },
+            // Decals don't change dominant state — legacy callers keep
+            // seeing Floor. Blood/scorch are surfaced via `ground()`.
+            Ground::BloodPool { .. } | Ground::Scorch { .. } => Tile::Floor,
         }
     }
 
     pub fn is_wall(&self, x: i32, y: i32) -> bool {
-        matches!(self.tile(x, y), Tile::Wall { .. })
+        matches!(
+            self.stack(x, y).structure,
+            Some(Structure::Wall { .. }) | Some(Structure::LowCover { .. })
+        )
     }
 
+    /// Does the structure at (x, y) block line of sight? True for walls,
+    /// low cover, any non-Doorway structure. False for Doorways and
+    /// open tiles.
+    pub fn blocks_los(&self, x: i32, y: i32) -> bool {
+        match self.stack(x, y).structure {
+            Some(s) => s.blocks_los(),
+            None => false,
+        }
+    }
+
+    /// Amanatides–Woo grid traversal from `from` to `to` in world-pixel
+    /// space. Walks every tile the segment passes through in order and
+    /// returns the first tile whose `blocking(x, y)` returns true, with
+    /// the parametric hit point along the segment. O(|dx| + |dy|) tile
+    /// checks; no allocation.
+    ///
+    /// Fast enough for every projectile tick, every sniper/laser shot,
+    /// every AI LoS query. Prefer this over hand-rolled step loops.
+    pub fn raycast<F>(&self, from: (f32, f32), to: (f32, f32), mut blocking: F) -> Option<RayHit>
+    where
+        F: FnMut(&Arena, i32, i32) -> bool,
+    {
+        let dx = to.0 - from.0;
+        let dy = to.1 - from.1;
+        // Degenerate (no movement) — treat as a point test at `from`.
+        if dx == 0.0 && dy == 0.0 {
+            let ix = from.0.floor() as i32;
+            let iy = from.1.floor() as i32;
+            if blocking(self, ix, iy) {
+                return Some(RayHit { point: from, tile: (ix, iy), t: 0.0, normal: (0, 0) });
+            }
+            return None;
+        }
+
+        let mut ix = from.0.floor() as i32;
+        let mut iy = from.1.floor() as i32;
+
+        // Check the starting cell first — if we spawn inside a blocker,
+        // report an immediate hit so callers can snap out.
+        if blocking(self, ix, iy) {
+            return Some(RayHit { point: from, tile: (ix, iy), t: 0.0, normal: (0, 0) });
+        }
+
+        let step_x: i32 = if dx > 0.0 {
+            1
+        } else if dx < 0.0 {
+            -1
+        } else {
+            0
+        };
+        let step_y: i32 = if dy > 0.0 {
+            1
+        } else if dy < 0.0 {
+            -1
+        } else {
+            0
+        };
+
+        // Parametric distance along the segment to the next tile
+        // boundary on each axis, and the parametric delta for crossing
+        // one full tile along that axis.
+        let inf = f32::INFINITY;
+        let (mut t_max_x, t_delta_x) = if dx != 0.0 {
+            let next_bx = if step_x > 0 { (ix + 1) as f32 } else { ix as f32 };
+            ((next_bx - from.0) / dx, (1.0 / dx.abs()))
+        } else {
+            (inf, inf)
+        };
+        let (mut t_max_y, t_delta_y) = if dy != 0.0 {
+            let next_by = if step_y > 0 { (iy + 1) as f32 } else { iy as f32 };
+            ((next_by - from.1) / dy, (1.0 / dy.abs()))
+        } else {
+            (inf, inf)
+        };
+
+        // Hard cap in case of pathological input.
+        let max_iters = (dx.abs() + dy.abs()).ceil() as i32 + 4;
+        for _ in 0..max_iters {
+            // Advance to whichever axis crosses its next boundary first.
+            let (t, crossed_x) = if t_max_x < t_max_y {
+                (t_max_x, true)
+            } else {
+                (t_max_y, false)
+            };
+            if t > 1.0 {
+                return None;
+            }
+            if crossed_x {
+                ix += step_x;
+                t_max_x += t_delta_x;
+            } else {
+                iy += step_y;
+                t_max_y += t_delta_y;
+            }
+            if blocking(self, ix, iy) {
+                let px = from.0 + dx * t;
+                let py = from.1 + dy * t;
+                let normal = if crossed_x { (-step_x as i8, 0i8) } else { (0i8, -step_y as i8) };
+                return Some(RayHit { point: (px, py), tile: (ix, iy), t, normal });
+            }
+        }
+        None
+    }
+
+    /// Convenience: first wall-ish blocker along the segment.
+    pub fn raycast_wall(&self, from: (f32, f32), to: (f32, f32)) -> Option<RayHit> {
+        self.raycast(from, to, |a, x, y| a.is_wall(x, y))
+    }
+
+    /// Convenience: first LoS blocker along the segment. Used by AI
+    /// ranged-attack LoS checks and any future sight logic.
+    pub fn raycast_los(&self, from: (f32, f32), to: (f32, f32)) -> Option<RayHit> {
+        self.raycast(from, to, |a, x, y| a.blocks_los(x, y))
+    }
+
+    /// True if no LoS blocker stands between `from` and `to`.
+    pub fn has_line_of_sight(&self, from: (f32, f32), to: (f32, f32)) -> bool {
+        self.raycast_los(from, to).is_none()
+    }
+
+    /// True if a player or projectile can move/pass through. Movement and
+    /// LoS share this test today (structure walls block both; objects
+    /// block neither).
     pub fn is_passable(&self, x: i32, y: i32) -> bool {
-        matches!(self.tile(x, y), Tile::Floor | Tile::Rubble { .. } | Tile::Carcosa)
+        match self.stack(x, y).structure {
+            Some(s) => !s.blocks_movement(),
+            None => true,
+        }
     }
 
     pub fn is_carcosa(&self, x: i32, y: i32) -> bool {
-        matches!(self.tile(x, y), Tile::Carcosa)
+        matches!(self.ground(x, y), Ground::Carcosa)
     }
 
     pub fn set_carcosa(&mut self, x: i32, y: i32) {
         if let Some(i) = self.idx(x, y) {
-            self.tiles[i] = Tile::Carcosa;
+            self.stacks[i].structure = None;
+            self.stacks[i].ground = Ground::Carcosa;
         }
     }
 
     pub fn set_wall(&mut self, x: i32, y: i32, material: Material, hp: u8) {
         if let Some(i) = self.idx(x, y) {
-            self.tiles[i] = Tile::Wall { hp, material };
+            self.stacks[i].structure = Some(Structure::Wall { hp, material });
         }
     }
 
     pub fn set_rubble(&mut self, x: i32, y: i32, material: Material) {
         if let Some(i) = self.idx(x, y) {
-            self.tiles[i] = Tile::Rubble { material };
+            self.stacks[i].structure = None;
+            self.stacks[i].ground = Ground::Rubble { material };
         }
     }
 
     pub fn set_floor(&mut self, x: i32, y: i32) {
         if let Some(i) = self.idx(x, y) {
-            self.tiles[i] = Tile::Floor;
+            self.stacks[i] = TileStack::floor();
         }
     }
 
+    /// Paint a blood pool into the ground layer, preserving whatever
+    /// structure / object sit above. If a fresher pool already exists,
+    /// keep the fresher (lower) shade.
+    pub fn set_blood_pool(&mut self, x: i32, y: i32, shade: u8) {
+        if let Some(i) = self.idx(x, y) {
+            let cur = self.stacks[i].ground;
+            let new_shade = match cur {
+                Ground::BloodPool { shade: s } => shade.min(s),
+                _ => shade,
+            };
+            self.stacks[i].ground = Ground::BloodPool { shade: new_shade };
+        }
+    }
+
+    /// Paint a scorch mark into the ground layer, preserving structure /
+    /// object. Intensifies if one is already there.
+    pub fn set_scorch(&mut self, x: i32, y: i32, intensity: u8) {
+        if let Some(i) = self.idx(x, y) {
+            let cur = self.stacks[i].ground;
+            let new_i = match cur {
+                Ground::Scorch { intensity: s } => s.saturating_add(intensity).min(255),
+                _ => intensity,
+            };
+            self.stacks[i].ground = Ground::Scorch { intensity: new_i };
+        }
+    }
+
+    /// Place or replace the object at (x, y).
+    pub fn set_object(&mut self, x: i32, y: i32, obj: Object) {
+        if let Some(i) = self.idx(x, y) {
+            self.stacks[i].object = Some(obj);
+        }
+    }
+
+    pub fn clear_object(&mut self, x: i32, y: i32) {
+        if let Some(i) = self.idx(x, y) {
+            self.stacks[i].object = None;
+        }
+    }
+
+    /// Width × height accessor helpers — used by `diff_from_seed` callers
+    /// that want to walk the grid from outside the crate.
+    pub fn stacks_len(&self) -> usize {
+        self.stacks.len()
+    }
+
+    /// Walk this arena against a freshly-regenerated reference arena
+    /// (same seed + dimensions). Returns every tile that has diverged:
+    /// structure deltas (wall damage / carcosa / rubble) and ground
+    /// deltas (blood pools, scorch). Used by the host to catch a
+    /// late-joining client up to the accumulated arena state so they
+    /// walk into the chaos, not a pristine map.
+    pub fn diff_from_seed(
+        &self,
+        seed: u64,
+    ) -> (Vec<StructureDelta>, Vec<GroundDelta>) {
+        let pristine = Arena::generate(seed, self.width, self.height);
+        let mut structure_deltas = Vec::new();
+        let mut ground_deltas = Vec::new();
+        let w = self.width as i32;
+        let h = self.height as i32;
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y as usize) * (self.width as usize) + (x as usize);
+                let a = self.stacks[i];
+                let b = pristine.stacks[i];
+                if structure_differs(a.structure, b.structure) {
+                    let (kind, hp) = encode_structure(a);
+                    structure_deltas.push(StructureDelta {
+                        x: x as u16,
+                        y: y as u16,
+                        kind,
+                        hp,
+                    });
+                }
+                if ground_differs(a.ground, b.ground) {
+                    if let Some((kind, data)) = encode_ground_decal(a.ground) {
+                        ground_deltas.push(GroundDelta {
+                            x: x as u16,
+                            y: y as u16,
+                            kind,
+                            data,
+                        });
+                    }
+                }
+            }
+        }
+        (structure_deltas, ground_deltas)
+    }
+
     /// Raw tile iteration for initial-snapshot serialization.
+    /// Encodes the dominant-state Tile; ground decals (blood/scorch) and
+    /// objects are NOT covered here — they sync via dedicated
+    /// `GroundPaint` / `ObjectUpdate` messages in the decal + corpse
+    /// pushes.
     pub fn encode_tiles(&self) -> Vec<u8> {
         // 2 bytes per tile: (kind, hp). kind: 0=Floor, 1=Wall, 2=Rubble, 3=Carcosa.
-        let mut out = Vec::with_capacity(self.tiles.len() * 2);
-        for t in &self.tiles {
-            match *t {
-                Tile::Floor => {
-                    out.push(0);
-                    out.push(0);
-                }
-                Tile::Wall { hp, .. } => {
+        let mut out = Vec::with_capacity(self.stacks.len() * 2);
+        for s in &self.stacks {
+            match (s.structure, s.ground) {
+                (Some(Structure::Wall { hp, .. }), _)
+                | (Some(Structure::LowCover { hp, .. }), _) => {
                     out.push(1);
                     out.push(hp);
                 }
-                Tile::Rubble { .. } => {
+                (None, Ground::Rubble { .. }) => {
                     out.push(2);
                     out.push(0);
                 }
-                Tile::Carcosa => {
+                (None, Ground::Carcosa) => {
                     out.push(3);
+                    out.push(0);
+                }
+                _ => {
+                    // Floor / blood / scorch all encode as Floor for
+                    // dominant-state sync; decals land via GroundPaint.
+                    out.push(0);
                     out.push(0);
                 }
             }
@@ -260,33 +611,53 @@ impl Arena {
         if bytes.len() != expected {
             return None;
         }
-        let mut tiles = Vec::with_capacity(bytes.len() / 2);
+        let mut stacks = Vec::with_capacity(bytes.len() / 2);
         for chunk in bytes.chunks_exact(2) {
             let kind = chunk[0];
             let hp = chunk[1];
-            tiles.push(match kind {
-                0 => Tile::Floor,
-                1 => Tile::Wall { hp, material: Material::Concrete },
-                2 => Tile::Rubble { material: Material::Concrete },
-                _ => Tile::Carcosa,
-            });
+            let stack = match kind {
+                0 => TileStack::floor(),
+                1 => TileStack {
+                    ground: Ground::Floor,
+                    object: None,
+                    structure: Some(Structure::Wall { hp, material: Material::Concrete }),
+                },
+                2 => TileStack {
+                    ground: Ground::Rubble { material: Material::Concrete },
+                    object: None,
+                    structure: None,
+                },
+                _ => TileStack {
+                    ground: Ground::Carcosa,
+                    object: None,
+                    structure: None,
+                },
+            };
+            stacks.push(stack);
         }
-        Some(Self { width, height, tiles })
+        Some(Self { width, height, stacks })
     }
 
     /// Apply 1 point of structural damage to a wall tile. Returns None if
-    /// there was no wall there (projectile should still despawn on impact —
-    /// the caller may treat that as "missed" vs "absorbed" as needed).
+    /// there was no wall there. On destroy, the underlying ground becomes
+    /// Rubble unless Carcosa / blood / scorch was already there (those
+    /// persist — a wall smashed on carcosa still reveals carcosa).
     pub fn damage_wall(&mut self, x: i32, y: i32) -> Option<HitOutcome> {
         let i = self.idx(x, y)?;
-        let tile = self.tiles[i];
-        match tile {
-            Tile::Wall { hp, material } => {
+        let stack = self.stacks[i];
+        match stack.structure {
+            Some(Structure::Wall { hp, material }) => {
                 if hp <= 1 {
-                    self.tiles[i] = Tile::Rubble { material };
+                    self.stacks[i].structure = None;
+                    // Keep existing ground decals (Carcosa / blood / scorch);
+                    // otherwise drop a Rubble ground.
+                    if matches!(stack.ground, Ground::Floor) {
+                        self.stacks[i].ground = Ground::Rubble { material };
+                    }
                     Some(HitOutcome { destroyed: true, material })
                 } else {
-                    self.tiles[i] = Tile::Wall { hp: hp - 1, material };
+                    self.stacks[i].structure =
+                        Some(Structure::Wall { hp: hp - 1, material });
                     Some(HitOutcome { destroyed: false, material })
                 }
             }
@@ -303,41 +674,28 @@ impl Arena {
 
         for wy in iy0..iy1 {
             for wx in ix0..ix1 {
-                let color = match self.tile(wx, wy) {
-                    Tile::Floor => continue,
-                    Tile::Wall { material, hp } => {
-                        let base = material.intact_color();
-                        let ratio = (hp as f32 / WALL_HP as f32).clamp(0.35, 1.0);
-                        Pixel::rgb(
-                            (base.r as f32 * ratio) as u8,
-                            (base.g as f32 * ratio) as u8,
-                            (base.b as f32 * ratio) as u8,
-                        )
-                    }
-                    Tile::Rubble { material } => material.debris_color(),
-                    Tile::Carcosa => {
-                        let pattern = ((wx ^ wy) & 1) == 0;
-                        if pattern {
-                            Pixel::rgb(180, 140, 20)
-                        } else {
-                            Pixel::rgb(110, 80, 10)
-                        }
-                    }
-                };
+                let stack = self.stack(wx, wy);
 
-                // Screen rect for this world tile. Nearest-neighbor fill:
-                // at zoom > 1 we upscale; at zoom < 1 multiple tiles map to
-                // the same screen pixel and last-write wins (acceptable).
-                let (sx0, sy0) = camera.world_to_screen((wx as f32, wy as f32));
-                let (sx1, sy1) =
-                    camera.world_to_screen(((wx + 1) as f32, (wy + 1) as f32));
-                let x0 = (sx0.floor() as i32).max(0);
-                let y0 = (sy0.floor() as i32).max(0);
-                let x1 = (sx1.ceil() as i32).min(camera.viewport_w as i32);
-                let y1 = (sy1.ceil() as i32).min(camera.viewport_h as i32);
-                for py in y0..y1 {
-                    for px in x0..x1 {
-                        fb.set(px as u16, py as u16, color);
+                // Layer 1: ground. Floor is intentionally left black
+                // (so the braille layer can show through).
+                let ground_color = ground_color_at(wx, wy, stack.ground);
+                if let Some(c) = ground_color {
+                    fill_world_tile(fb, camera, wx, wy, c);
+                }
+
+                // Layer 2: object. Currently no objects are populated —
+                // corpses and debris piles land in follow-on pushes.
+                if let Some(obj) = stack.object {
+                    if let Some(c) = object_color(obj) {
+                        fill_world_tile(fb, camera, wx, wy, c);
+                    }
+                }
+
+                // Layer 3: structure. Walls overwrite the other layers so
+                // they read as solid silhouettes.
+                if let Some(s) = stack.structure {
+                    if let Some(c) = structure_color(s) {
+                        fill_world_tile(fb, camera, wx, wy, c);
                     }
                 }
             }
@@ -345,10 +703,158 @@ impl Arena {
     }
 }
 
+fn ground_color_at(wx: i32, wy: i32, g: Ground) -> Option<Pixel> {
+    match g {
+        Ground::Floor => None,
+        Ground::Rubble { material } => Some(material.debris_color()),
+        Ground::Carcosa => {
+            let pattern = ((wx ^ wy) & 1) == 0;
+            Some(if pattern {
+                Pixel::rgb(180, 140, 20)
+            } else {
+                Pixel::rgb(110, 80, 10)
+            })
+        }
+        Ground::BloodPool { shade } => {
+            // shade 0 = fresh bright red; 255 = fully faded brown-black.
+            let t = shade as f32 / 255.0;
+            let r = lerp_u8(180, 40, t);
+            let g = lerp_u8(20, 12, t);
+            let b = lerp_u8(30, 16, t);
+            // Subtle checker so a big pool reads as texture, not a flat
+            // rectangle.
+            let jitter = ((wx.wrapping_mul(37) ^ wy.wrapping_mul(91)) & 1) == 0;
+            Some(if jitter {
+                Pixel::rgb(r, g, b)
+            } else {
+                Pixel::rgb(r.saturating_sub(30), g, b)
+            })
+        }
+        Ground::Scorch { intensity } => {
+            let t = intensity as f32 / 255.0;
+            let v = lerp_u8(70, 15, t);
+            Some(Pixel::rgb(v, v.saturating_sub(4), v.saturating_sub(8)))
+        }
+    }
+}
+
+fn object_color(obj: Object) -> Option<Pixel> {
+    match obj {
+        Object::DebrisPile { material, .. } => Some(material.debris_color()),
+        // Corpses render via their own Corpse::render pass (not via the
+        // arena fill) so the per-corpse mutable sprite bitmap can draw.
+        // The arena just carries the handle.
+        Object::Corpse { .. } => None,
+    }
+}
+
+fn structure_color(s: Structure) -> Option<Pixel> {
+    match s {
+        Structure::Wall { hp, material } | Structure::LowCover { hp, material } => {
+            let base = material.intact_color();
+            let ratio = (hp as f32 / WALL_HP as f32).clamp(0.35, 1.0);
+            Some(Pixel::rgb(
+                (base.r as f32 * ratio) as u8,
+                (base.g as f32 * ratio) as u8,
+                (base.b as f32 * ratio) as u8,
+            ))
+        }
+        Structure::Doorway => None,
+    }
+}
+
+fn fill_world_tile(fb: &mut Framebuffer, camera: &Camera, wx: i32, wy: i32, color: Pixel) {
+    let (sx0, sy0) = camera.world_to_screen((wx as f32, wy as f32));
+    let (sx1, sy1) = camera.world_to_screen(((wx + 1) as f32, (wy + 1) as f32));
+    let x0 = (sx0.floor() as i32).max(0);
+    let y0 = (sy0.floor() as i32).max(0);
+    let x1 = (sx1.ceil() as i32).min(camera.viewport_w as i32);
+    let y1 = (sy1.ceil() as i32).min(camera.viewport_h as i32);
+    for py in y0..y1 {
+        for px in x0..x1 {
+            fb.set(px as u16, py as u16, color);
+        }
+    }
+}
+
+fn lerp_u8(a: u8, b: u8, t: f32) -> u8 {
+    let t = t.clamp(0.0, 1.0);
+    let v = a as f32 + (b as f32 - a as f32) * t;
+    v.round().clamp(0.0, 255.0) as u8
+}
+
 fn place_block(a: &mut Arena, x: i32, y: i32, w: i32, h: i32) {
     for yy in y..(y + h) {
         for xx in x..(x + w) {
             a.set_wall(xx, yy, Material::Concrete, WALL_HP);
         }
+    }
+}
+
+/// Result of a ray-cast along a world-space segment. `point` is the
+/// contact position (entry into the first blocking tile), `tile` is the
+/// blocker's integer coordinates, `t` is the parametric 0..=1 along the
+/// segment, and `normal` is the tile-face normal (-1/0/1 per axis) used
+/// by callers that want to reflect off the surface.
+#[derive(Clone, Copy, Debug)]
+pub struct RayHit {
+    pub point: (f32, f32),
+    pub tile: (i32, i32),
+    pub t: f32,
+    pub normal: (i8, i8),
+}
+
+/// One tile's worth of structure delta, mirroring the TileUpdate wire
+/// format. `kind`: 0=Floor, 1=Wall (hp in `hp`), 2=Rubble, 3=Carcosa.
+#[derive(Clone, Copy, Debug)]
+pub struct StructureDelta {
+    pub x: u16,
+    pub y: u16,
+    pub kind: u8,
+    pub hp: u8,
+}
+
+/// One tile's worth of ground-decal delta. `kind`: 0=BloodPool (shade in
+/// `data`), 1=Scorch (intensity in `data`).
+#[derive(Clone, Copy, Debug)]
+pub struct GroundDelta {
+    pub x: u16,
+    pub y: u16,
+    pub kind: u8,
+    pub data: u8,
+}
+
+fn structure_differs(a: Option<Structure>, b: Option<Structure>) -> bool {
+    match (a, b) {
+        (None, None) => false,
+        (Some(x), Some(y)) => x != y,
+        _ => true,
+    }
+}
+
+fn ground_differs(a: Ground, b: Ground) -> bool {
+    a != b
+}
+
+fn encode_structure(stack: TileStack) -> (u8, u8) {
+    match stack.structure {
+        Some(Structure::Wall { hp, .. }) | Some(Structure::LowCover { hp, .. }) => (1, hp),
+        Some(Structure::Doorway) => (0, 0),
+        None => match stack.ground {
+            Ground::Rubble { .. } => (2, 0),
+            Ground::Carcosa => (3, 0),
+            _ => (0, 0),
+        },
+    }
+}
+
+/// Only blood / scorch variants are round-tripped here — regular Floor /
+/// Carcosa / Rubble go through the structure delta since they're
+/// dominant-state changes, not decorative paint.
+fn encode_ground_decal(g: Ground) -> Option<(u8, u8)> {
+    match g {
+        Ground::BloodPool { shade } => Some((0, shade)),
+        Ground::Scorch { intensity } => Some((1, intensity)),
+        _ => None,
     }
 }

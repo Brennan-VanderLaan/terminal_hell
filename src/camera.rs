@@ -6,19 +6,57 @@
 //! viewport. `zoom` is screen-pixels per world-pixel: 1.0 is identity,
 //! 2.0 draws everything 2× larger, 0.5 draws everything 2× smaller.
 //!
-//! The camera also derives a **mip level** from the current zoom: full
-//! sprites at L0, simplified blobs at L1, single dots at L2. Renderers
-//! query `mip_level()` and pick their own drawing strategy.
+//! The camera also derives a **mip level** from the current zoom.
+//! Renderers query `mip_level()` and pick their own drawing strategy.
+//! The 5 tiers, from most to least detail:
+//!
+//!   Hero   — zoom ≥ 4.0 — full sprite + HIGH-detail overlay (muzzle flash,
+//!            wound decals, blood stains, burn soot)
+//!   Close  — zoom ≥ 2.0 — full sprite + MID-detail overlay
+//!   Normal — zoom ≥ 1.0 — base sprite, no overlay
+//!   Blob   — zoom ≥ 0.35 — 3×3 colored blob
+//!   Dot    — zoom <  0.35 — single screen pixel
 
 pub const ZOOM_MIN: f32 = 0.2;
-pub const ZOOM_MAX: f32 = 3.0;
+pub const ZOOM_MAX: f32 = 6.0;
 pub const ZOOM_STEP: f32 = 1.25;
 
-pub const MIP_L0_MIN_ZOOM: f32 = 1.0;
-pub const MIP_L1_MIN_ZOOM: f32 = 0.35;
+pub const MIP_HERO_MIN_ZOOM: f32 = 4.0;
+pub const MIP_CLOSE_MIN_ZOOM: f32 = 2.0;
+pub const MIP_NORMAL_MIN_ZOOM: f32 = 1.0;
+pub const MIP_BLOB_MIN_ZOOM: f32 = 0.35;
 
 const EDGE_NUDGE_ZONE: f32 = 0.30;
 const EDGE_NUDGE_MAX_WORLD: f32 = 40.0;
+
+/// Which MIP tier a given zoom falls into. Ordered from most detailed to
+/// least so `level as u8` can be used for comparisons if needed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MipLevel {
+    Hero,
+    Close,
+    Normal,
+    Blob,
+    Dot,
+}
+
+impl MipLevel {
+    /// True if renderers should draw a full procedural sprite rather than
+    /// a blob/dot.
+    pub fn shows_sprite(self) -> bool {
+        matches!(self, MipLevel::Hero | MipLevel::Close | MipLevel::Normal)
+    }
+    /// True if sprite-local overlays (muzzle flash, wound decals, blood
+    /// splatter, burn soot) should be composited on top of the base sprite.
+    pub fn shows_overlay(self) -> bool {
+        matches!(self, MipLevel::Hero | MipLevel::Close)
+    }
+    /// True for the most detailed tier where HIGH-intensity overlay elements
+    /// (extra trail pixels, muzzle flash sparkle, barrel highlight) kick in.
+    pub fn shows_hi_overlay(self) -> bool {
+        matches!(self, MipLevel::Hero)
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct Camera {
@@ -69,13 +107,17 @@ impl Camera {
         (tl.0 - 1.0, tl.1 - 1.0, br.0 + 1.0, br.1 + 1.0)
     }
 
-    pub fn mip_level(&self) -> u8 {
-        if self.zoom >= MIP_L0_MIN_ZOOM {
-            0
-        } else if self.zoom >= MIP_L1_MIN_ZOOM {
-            1
+    pub fn mip_level(&self) -> MipLevel {
+        if self.zoom >= MIP_HERO_MIN_ZOOM {
+            MipLevel::Hero
+        } else if self.zoom >= MIP_CLOSE_MIN_ZOOM {
+            MipLevel::Close
+        } else if self.zoom >= MIP_NORMAL_MIN_ZOOM {
+            MipLevel::Normal
+        } else if self.zoom >= MIP_BLOB_MIN_ZOOM {
+            MipLevel::Blob
         } else {
-            2
+            MipLevel::Dot
         }
     }
 

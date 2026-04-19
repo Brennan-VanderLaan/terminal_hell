@@ -2,6 +2,7 @@ use crate::arena::{Arena, Material, Tile};
 use crate::camera::Camera;
 use crate::carcosa::{Phantom, YellowSign};
 use crate::content::ContentDb;
+use crate::corpse::Corpse;
 use crate::enemy::{Archetype, Enemy};
 use crate::fb::{Framebuffer, Pixel};
 use crate::mouse::Mouse;
@@ -140,8 +141,18 @@ pub struct Game {
     loot_rng: SmallRng,
     kiosk_rng: SmallRng,
     pub tick_tile_updates: Vec<(i32, i32, u8, u8)>,
+    /// Ground-layer paint events generated this tick: (x, y, kind, data).
+    /// Kind 0=BloodPool, 1=Scorch. Broadcast reliable. See net::proto::ServerMsg::GroundPaint.
+    pub tick_ground_paints: Vec<(i32, i32, u8, u8)>,
+    /// Corpse hits generated this tick: (corpse_id, seed). Broadcast reliable.
+    pub tick_corpse_hits: Vec<(u32, u64)>,
     pub tick_blasts: Vec<DestructionBlast>,
     pub hitscans: Vec<HitscanTrace>,
+    /// Persistent corpse entities. Host owns hp + hole state; clients
+    /// mirror positions from snapshots and synthesize holes from
+    /// reliable CorpseHit events.
+    pub corpses: Vec<Corpse>,
+    next_corpse_id: u32,
     /// Set by the client from incoming snapshots so the HUD can render the
     /// local player's loadout even though the client doesn't run the
     /// authoritative weapon sim.
@@ -197,8 +208,12 @@ impl Game {
             loot_rng: SmallRng::seed_from_u64(0xBAD_F00D),
             kiosk_rng: SmallRng::seed_from_u64(0xCAFE_BABE),
             tick_tile_updates: Vec::new(),
+            tick_ground_paints: Vec::new(),
+            tick_corpse_hits: Vec::new(),
             tick_blasts: Vec::new(),
             hitscans: Vec::new(),
+            corpses: Vec::new(),
+            next_corpse_id: 1,
             remote_weapons: Vec::new(),
             client_phase: None,
             client_phase_timer: 0.0,
@@ -668,10 +683,14 @@ impl Game {
             // so a paused frame doesn't re-broadcast stale blasts.
             self.tick_tile_updates.clear();
             self.tick_blasts.clear();
+            self.tick_ground_paints.clear();
+            self.tick_corpse_hits.clear();
             return;
         }
         self.tick_tile_updates.clear();
         self.tick_blasts.clear();
+        self.tick_ground_paints.clear();
+        self.tick_corpse_hits.clear();
         self.elapsed_secs += dt;
         // Passive corruption tick; drivers below add more per event.
         self.add_corruption(dt * 0.15);
@@ -836,12 +855,70 @@ impl Game {
 
         // Step projectiles + resolve impacts. `retain_mut` keeps piercing /
         // ricocheting projectiles alive; despawns others.
+        //
+        // Collision uses swept segment tests, not endpoint point-tests, so
+        // fast projectiles can't tunnel through walls/enemies/corpses in
+        // one tick. `p.update` runs a DDA ray-cast for walls; we follow
+        // with segment-vs-circle sweeps for enemies and corpses and pick
+        // the earliest contact (smallest `t`).
         let mut wall_hits: Vec<((f32, f32), (i32, i32), Vec<Primitive>)> = Vec::new();
         let mut enemy_hits: Vec<(usize, (f32, f32), i32, u32, Vec<Primitive>)> = Vec::new();
+        let mut corpse_hits: Vec<(usize, (f32, f32))> = Vec::new();
 
         self.projectiles.retain_mut(|p| {
-            match p.update(&self.arena, dt) {
-                ProjectileOutcome::Expired => return false,
+            let from = (p.x, p.y);
+            let outcome = p.update(&self.arena, dt);
+            if matches!(outcome, ProjectileOutcome::Expired) {
+                return false;
+            }
+            // `to` is where the projectile actually ended this tick
+            // (just before any wall it struck). Swept tests run on
+            // [from..to]; anything past `to` is behind a wall.
+            let to = (p.x, p.y);
+
+            // Nearest enemy along the segment.
+            let mut best_enemy: Option<(usize, f32)> = None;
+            for (i, e) in self.enemies.iter().enumerate() {
+                if let Some(t) = segment_circle_first_t(from, to, (e.x, e.y), e.hit_radius()) {
+                    if best_enemy.map_or(true, |(_, bt)| t < bt) {
+                        best_enemy = Some((i, t));
+                    }
+                }
+            }
+            if let Some((idx, t)) = best_enemy {
+                let (px, py) = lerp_pt(from, to, t);
+                enemy_hits.push((idx, (px, py), p.damage, p.owner_id, p.primitives.clone()));
+                if p.pierces_left > 0 {
+                    p.pierces_left -= 1;
+                    let r = self.enemies[idx].hit_radius();
+                    nudge_past(p, (px, py), r);
+                    return true;
+                }
+                return false;
+            }
+
+            // No enemy hit — check corpses next.
+            let mut best_corpse: Option<(usize, f32)> = None;
+            for (i, c) in self.corpses.iter().enumerate() {
+                if let Some(t) = segment_circle_first_t(from, to, (c.x, c.y), Corpse::HIT_RADIUS) {
+                    if best_corpse.map_or(true, |(_, bt)| t < bt) {
+                        best_corpse = Some((i, t));
+                    }
+                }
+            }
+            if let Some((idx, t)) = best_corpse {
+                let (px, py) = lerp_pt(from, to, t);
+                corpse_hits.push((idx, (px, py)));
+                if p.pierces_left > 0 {
+                    p.pierces_left -= 1;
+                    nudge_past(p, (px, py), Corpse::HIT_RADIUS);
+                    return true;
+                }
+                return false;
+            }
+
+            // No enemy / corpse hit — process the wall outcome if any.
+            match outcome {
                 ProjectileOutcome::HitWall { at, tile } => {
                     wall_hits.push((at, tile, p.primitives.clone()));
                     if p.bounces_left > 0 {
@@ -849,28 +926,10 @@ impl Game {
                         p.bounces_left -= 1;
                         return true;
                     }
-                    return false;
+                    false
                 }
-                ProjectileOutcome::Alive => {}
+                _ => true,
             }
-            for (i, e) in self.enemies.iter().enumerate() {
-                let dx = p.x - e.x;
-                let dy = p.y - e.y;
-                let r = e.hit_radius();
-                if dx * dx + dy * dy < r * r {
-                    enemy_hits.push((i, (p.x, p.y), p.damage, p.owner_id, p.primitives.clone()));
-                    if p.pierces_left > 0 {
-                        p.pierces_left -= 1;
-                        // Nudge forward so we don't re-collide next tick.
-                        let len = (p.vx * p.vx + p.vy * p.vy).sqrt().max(0.1);
-                        p.x += p.vx / len * (r + 0.5);
-                        p.y += p.vy / len * (r + 0.5);
-                        return true;
-                    }
-                    return false;
-                }
-            }
-            true
         });
 
         // Apply wall damage + Breach ring.
@@ -930,6 +989,36 @@ impl Game {
             }
         }
 
+        // Apply corpse hits: punch holes deterministically, spawn a small
+        // gore blast, and collapse the corpse into a blood pool when its
+        // integrity runs out.
+        for (idx, at) in corpse_hits.iter().rev() {
+            if *idx >= self.corpses.len() {
+                continue;
+            }
+            let seed = self.next_seed((at.0 as i32, at.1 as i32));
+            let (color, destroyed, pos) = {
+                let c = &mut self.corpses[*idx];
+                let color = c.apply_hit(seed);
+                (color, c.is_destroyed(), (c.x, c.y))
+            };
+            self.tick_corpse_hits.push((self.corpses[*idx].id, seed));
+            self.emit_blast(*at, color, seed, 0);
+            if destroyed {
+                // Collapse into a blood-pool decal on the ground, then
+                // drop the corpse from the authoritative list.
+                let (tx, ty) = (pos.0 as i32, pos.1 as i32);
+                self.paint_blood_pool(tx, ty, 10);
+                // Splash a few neighboring tiles with lighter pools.
+                for (dx, dy) in &[(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                    if ((seed >> (dx + dy + 2)) & 1) == 1 {
+                        self.paint_blood_pool(tx + dx, ty + dy, 40);
+                    }
+                }
+                self.corpses.swap_remove(*idx);
+            }
+        }
+
         // Merge status kills into the unified stream (killer_id = 0: DoT has
         // no "firer" to credit Overdrive to).
         for idx in enemy_status_kills.iter().copied() {
@@ -954,6 +1043,14 @@ impl Game {
             // Small Corruption bump per kill; miniboss handled below via
             // the earlier is_miniboss path.
             self.add_corruption(0.2);
+            // Spawn a persistent corpse before swap_remove so the body
+            // stays in the world for players to walk over, shoot up,
+            // etc. Carries the enemy's archetype for sprite lookup.
+            let (cx, cy, arch) = {
+                let e = &self.enemies[idx];
+                (e.x, e.y, e.archetype)
+            };
+            self.spawn_corpse(arch, cx, cy);
             self.enemies.swap_remove(idx);
             self.kills += 1;
         }
@@ -996,6 +1093,17 @@ impl Game {
         }
         self.emit_blast(at, color, seed, intensity);
         self.emit_tile_update(tile);
+        // Persistent scorch on destruction — the ground under a blown
+        // wall carries the mark for the rest of the run so arena decay
+        // reads as a visible story.
+        if outcome.destroyed {
+            let base = if extra_primitives.contains(&Primitive::Ignite) {
+                160
+            } else {
+                90
+            };
+            self.paint_scorch(tile.0, tile.1, base);
+        }
     }
 
     /// Chain splash: find `n` nearest other enemies within `radius` of
@@ -1134,9 +1242,94 @@ impl Game {
         }
     }
 
+    /// Client-side handler for `ServerMsg::GroundPaint`. Touches only the
+    /// ground layer; structures + objects on top are preserved.
+    pub fn apply_ground_paint(&mut self, x: i32, y: i32, kind: u8, data: u8) {
+        match kind {
+            0 => self.arena.set_blood_pool(x, y, data),
+            _ => self.arena.set_scorch(x, y, data),
+        }
+    }
+
+    /// Client-side handler for `ServerMsg::CorpseHit`. Looks up the
+    /// corpse by id and applies the same seeded hole synthesis the host
+    /// ran, yielding identical pixel punchouts. Spawns a matching gore
+    /// blast locally.
+    pub fn apply_corpse_hit(&mut self, id: u32, seed: u64) {
+        let Some(i) = self.corpses.iter().position(|c| c.id == id) else {
+            return;
+        };
+        let color = self.corpses[i].apply_hit(seed);
+        let (x, y, destroyed) = {
+            let c = &self.corpses[i];
+            (c.x, c.y, c.is_destroyed())
+        };
+        let blast = DestructionBlast {
+            x,
+            y,
+            color_rgb: [color.r, color.g, color.b],
+            seed,
+            intensity: 0,
+        };
+        self.apply_blast(&blast);
+        if destroyed {
+            self.corpses.swap_remove(i);
+        }
+    }
+
+    /// Merge an incoming snapshot's corpse list into local state,
+    /// preserving hole state for corpses that already exist. New ids are
+    /// pushed; ids missing from the snapshot are dropped. Called on
+    /// clients whenever a `Snapshot` arrives.
+    pub fn merge_corpse_snapshot(&mut self, snap: &[crate::net::proto::CorpseSnap]) {
+        // Drop corpses no longer present in the snap.
+        let keep: std::collections::HashSet<u32> = snap.iter().map(|s| s.id).collect();
+        self.corpses.retain(|c| keep.contains(&c.id));
+        // Upsert.
+        for s in snap {
+            let arch = Archetype::from_kind(s.kind);
+            match self.corpses.iter_mut().find(|c| c.id == s.id) {
+                Some(c) => {
+                    c.x = s.x;
+                    c.y = s.y;
+                    c.hp = s.hp;
+                }
+                None => {
+                    let mut c = Corpse::new(s.id, arch, s.x, s.y);
+                    c.hp = s.hp;
+                    self.corpses.push(c);
+                }
+            }
+        }
+    }
+
+    fn spawn_corpse(&mut self, archetype: Archetype, x: f32, y: f32) {
+        let id = self.next_corpse_id;
+        self.next_corpse_id = self.next_corpse_id.saturating_add(1);
+        self.corpses.push(Corpse::new(id, archetype, x, y));
+    }
+
+    /// Host-side ground paint: apply locally AND queue a GroundPaint
+    /// broadcast for all clients.
+    fn paint_blood_pool(&mut self, x: i32, y: i32, shade: u8) {
+        self.arena.set_blood_pool(x, y, shade);
+        self.tick_ground_paints.push((x, y, 0, shade));
+    }
+
+    #[allow(dead_code)]
+    fn paint_scorch(&mut self, x: i32, y: i32, intensity: u8) {
+        self.arena.set_scorch(x, y, intensity);
+        self.tick_ground_paints.push((x, y, 1, intensity));
+    }
+
     pub fn render(&self, fb: &mut Framebuffer) {
         let camera = &self.camera;
         self.arena.render(fb, camera);
+        // Corpses render between ground and live entities — they sit
+        // *on* the floor but standing enemies occlude them.
+        for c in &self.corpses {
+            c.render(fb, camera);
+        }
         for part in &self.particles {
             part.render(fb, camera);
         }
@@ -1227,6 +1420,63 @@ impl Game {
             }
         }
     }
+}
+
+/// Swept segment-vs-circle test. Returns the smallest t ∈ [0, 1] at
+/// which the segment `from → to` first enters a circle of radius `r`
+/// centered at `c`. Returns 0 if the segment *starts* inside the circle
+/// so a projectile spawned inside an enemy still counts as a hit.
+///
+/// Shared by projectile↔enemy and projectile↔corpse collision so fast
+/// movers (snipers, future lasers) can't tunnel through targets.
+fn segment_circle_first_t(
+    from: (f32, f32),
+    to: (f32, f32),
+    c: (f32, f32),
+    r: f32,
+) -> Option<f32> {
+    let dx = to.0 - from.0;
+    let dy = to.1 - from.1;
+    let fx = from.0 - c.0;
+    let fy = from.1 - c.1;
+    let a = dx * dx + dy * dy;
+    if a < 1e-6 {
+        // Degenerate (no movement) — fall back to a point-in-circle test.
+        return if fx * fx + fy * fy < r * r {
+            Some(0.0)
+        } else {
+            None
+        };
+    }
+    let b = 2.0 * (fx * dx + fy * dy);
+    let c_term = fx * fx + fy * fy - r * r;
+    let disc = b * b - 4.0 * a * c_term;
+    if disc < 0.0 {
+        return None;
+    }
+    let sq = disc.sqrt();
+    let t1 = (-b - sq) / (2.0 * a);
+    let t2 = (-b + sq) / (2.0 * a);
+    // Started inside: t1 < 0 ≤ t2 → immediate contact.
+    if t1 < 0.0 && t2 >= 0.0 {
+        return Some(0.0);
+    }
+    if (0.0..=1.0).contains(&t1) {
+        return Some(t1);
+    }
+    None
+}
+
+fn lerp_pt(from: (f32, f32), to: (f32, f32), t: f32) -> (f32, f32) {
+    (from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t)
+}
+
+/// After a pierce, advance the projectile just past the struck circle
+/// so next tick's swept test doesn't re-hit the same target.
+fn nudge_past(p: &mut Projectile, hit: (f32, f32), r: f32) {
+    let speed = (p.vx * p.vx + p.vy * p.vy).sqrt().max(0.1);
+    p.x = hit.0 + p.vx / speed * (r + 0.5);
+    p.y = hit.1 + p.vy / speed * (r + 0.5);
 }
 
 /// Brand-ID → signature halo color for kiosks and UI. Kept in sync with the

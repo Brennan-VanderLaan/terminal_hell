@@ -3,9 +3,48 @@
 //! Each sprite is a tiny 2D grid of `Option<Pixel>`. `None` is transparent so
 //! silhouettes render cleanly over terrain. Sprite centers are placed at
 //! entity positions; the blit clips at buffer edges.
+//!
+//! **Overlays** (`SpriteOverlay`) are an optional second layer composited on
+//! top of the base sprite at the HIGH/CLOSE mip tiers. Overlays can (a)
+//! suppress base pixels — used for damageable corpses, where hits punch
+//! holes in the sprite — and (b) add decorative pixels over the top —
+//! blood splatter, burn soot, glow, wound highlights. Overlay coordinates
+//! are in *sprite-local* pixels, not screen pixels, so they scale cleanly
+//! with zoom.
 
 use crate::enemy::Archetype;
 use crate::fb::{Framebuffer, Pixel};
+
+/// Optional sprite-local decoration layer. Composited on top of a base
+/// `Sprite` during `blit_scaled_with_overlay`. Sprite-local coords: (0, 0)
+/// is top-left of the base sprite grid.
+#[derive(Default, Clone, Debug)]
+pub struct SpriteOverlay {
+    /// Base-sprite pixels to suppress (render transparent). Used by
+    /// damageable corpses: each hit punches out a small cluster of coords.
+    pub holes: Vec<(u16, u16)>,
+    /// Extra pixels painted over the top of the base sprite. Used for
+    /// blood splatter, scorch, burn soot, muzzle flash, glow.
+    pub stains: Vec<(u16, u16, Pixel)>,
+}
+
+impl SpriteOverlay {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn punch(&mut self, x: u16, y: u16) {
+        self.holes.push((x, y));
+    }
+
+    pub fn stain(&mut self, x: u16, y: u16, color: Pixel) {
+        self.stains.push((x, y, color));
+    }
+
+    pub fn is_hole(&self, x: u16, y: u16) -> bool {
+        self.holes.iter().any(|&(hx, hy)| hx == x && hy == y)
+    }
+}
 
 pub struct Sprite {
     pub w: u16,
@@ -58,29 +97,73 @@ impl Sprite {
     /// Scaled blit: at `scale = 1.0` each sprite pixel fills one screen
     /// pixel; at `scale = 2.0` each sprite pixel fills a 2×2 screen block;
     /// etc. `scale < 1.0` is clamped to 1.0 — callers should switch to the
-    /// L1/L2 simplified representations instead of downscaling.
+    /// Blob/Dot mip levels instead of downscaling.
     pub fn blit_scaled(&self, fb: &mut Framebuffer, center: (i32, i32), scale: f32) {
+        self.blit_scaled_with_overlay(fb, center, scale, None);
+    }
+
+    /// Scaled blit with optional overlay. The overlay can suppress base
+    /// pixels (holes) and paint extra pixels over the top (stains). Overlay
+    /// coordinates are in sprite-local pixel space and scale with `scale`.
+    pub fn blit_scaled_with_overlay(
+        &self,
+        fb: &mut Framebuffer,
+        center: (i32, i32),
+        scale: f32,
+        overlay: Option<&SpriteOverlay>,
+    ) {
         let scale = scale.max(1.0);
         let w_px = (self.w as f32 * scale).round() as i32;
         let h_px = (self.h as f32 * scale).round() as i32;
         let ox = center.0 - w_px / 2;
         let oy = center.1 - h_px / 2;
 
+        // Base layer: base sprite pixels, skipping any coord that the
+        // overlay has marked as a hole.
         for sy in 0..self.h {
             for sx in 0..self.w {
                 let idx = (sy as usize) * (self.w as usize) + (sx as usize);
                 let Some(color) = self.pixels[idx] else { continue };
-                let x0 = ox + (sx as f32 * scale).round() as i32;
-                let y0 = oy + (sy as f32 * scale).round() as i32;
-                let x1 = ox + ((sx + 1) as f32 * scale).round() as i32;
-                let y1 = oy + ((sy + 1) as f32 * scale).round() as i32;
-                for py in y0..y1 {
-                    for px in x0..x1 {
-                        if px >= 0 && py >= 0 {
-                            fb.set(px as u16, py as u16, color);
-                        }
+                if let Some(o) = overlay {
+                    if o.is_hole(sx, sy) {
+                        continue;
                     }
                 }
+                stamp_cell(fb, ox, oy, sx, sy, scale, color);
+            }
+        }
+
+        // Overlay stains: drawn on top, can sit over holes or base pixels.
+        if let Some(o) = overlay {
+            for &(sx, sy, color) in &o.stains {
+                if sx >= self.w || sy >= self.h {
+                    continue;
+                }
+                stamp_cell(fb, ox, oy, sx, sy, scale, color);
+            }
+        }
+    }
+}
+
+/// Fill one sprite-local pixel's screen rect with `color`. Shared by the
+/// base and overlay passes so scaling stays consistent.
+fn stamp_cell(
+    fb: &mut Framebuffer,
+    ox: i32,
+    oy: i32,
+    sx: u16,
+    sy: u16,
+    scale: f32,
+    color: Pixel,
+) {
+    let x0 = ox + (sx as f32 * scale).round() as i32;
+    let y0 = oy + (sy as f32 * scale).round() as i32;
+    let x1 = ox + ((sx + 1) as f32 * scale).round() as i32;
+    let y1 = oy + ((sy + 1) as f32 * scale).round() as i32;
+    for py in y0..y1 {
+        for px in x0..x1 {
+            if px >= 0 && py >= 0 {
+                fb.set(px as u16, py as u16, color);
             }
         }
     }
@@ -117,7 +200,8 @@ pub fn player_body() -> Sprite {
 
 /// Draw the player's weapon barrel extending from their body center on
 /// the screen in the aim direction. Scales with zoom so the barrel stays
-/// visually proportional to the zoomed-in player sprite.
+/// visually proportional to the zoomed-in player sprite. At the Hero
+/// tier the barrel gets an additional thickness pass + brighter tip.
 pub fn render_player_barrel(
     fb: &mut Framebuffer,
     screen_cx: f32,
@@ -125,18 +209,91 @@ pub fn render_player_barrel(
     aim_x: f32,
     aim_y: f32,
     zoom: f32,
+    hi_detail: bool,
 ) {
     let shaft = Pixel::rgb(200, 220, 255);
     let tip = Pixel::rgb(255, 245, 150);
     let scale = zoom.max(1.0);
     let start_offset = 2.5 * scale;
+    // Perpendicular unit vector for thickness passes at the Hero tier.
+    let perp_x = -aim_y;
+    let perp_y = aim_x;
     for step in 1..=5 {
         let t = step as f32 * scale;
-        let px = (screen_cx + aim_x * (t + start_offset)).round() as i32;
-        let py = (screen_cy + aim_y * (t + start_offset)).round() as i32;
+        let bx = screen_cx + aim_x * (t + start_offset);
+        let by = screen_cy + aim_y * (t + start_offset);
+        let color = if step == 5 { tip } else { shaft };
+        let px = bx.round() as i32;
+        let py = by.round() as i32;
         if px >= 0 && py >= 0 {
-            let color = if step == 5 { tip } else { shaft };
             fb.set(px as u16, py as u16, color);
+        }
+        if hi_detail {
+            // Extra parallel pixel so the barrel reads thick at high zoom.
+            let offs = (scale * 0.5).max(1.0);
+            let tpx = (bx + perp_x * offs).round() as i32;
+            let tpy = (by + perp_y * offs).round() as i32;
+            if tpx >= 0 && tpy >= 0 {
+                fb.set(tpx as u16, tpy as u16, color);
+            }
+        }
+    }
+}
+
+/// Muzzle flash burst at the tip of a weapon barrel. Used on the firing
+/// frame at the Close/Hero tiers so shots read as *something* rather than
+/// just a projectile appearing somewhere. `intensity` is 0..1.
+pub fn render_muzzle_flash(
+    fb: &mut Framebuffer,
+    screen_cx: f32,
+    screen_cy: f32,
+    aim_x: f32,
+    aim_y: f32,
+    zoom: f32,
+    intensity: f32,
+) {
+    let i = intensity.clamp(0.0, 1.0);
+    if i <= 0.0 {
+        return;
+    }
+    let scale = zoom.max(1.0);
+    // Muzzle origin — past the barrel tip.
+    let start_offset = 2.5 * scale + 5.0 * scale;
+    let mx = screen_cx + aim_x * start_offset;
+    let my = screen_cy + aim_y * start_offset;
+
+    let core = Pixel::rgb(
+        ((255.0_f32) * i).round() as u8,
+        ((250.0_f32) * i).round() as u8,
+        ((180.0_f32) * i).round() as u8,
+    );
+    let spark = Pixel::rgb(
+        ((255.0_f32) * i).round() as u8,
+        ((180.0_f32) * i).round() as u8,
+        ((60.0_f32) * i).round() as u8,
+    );
+
+    // Core blob at the muzzle.
+    let core_r = (scale * 0.9).round() as i32;
+    for dy in -core_r..=core_r {
+        for dx in -core_r..=core_r {
+            if dx * dx + dy * dy > core_r * core_r {
+                continue;
+            }
+            let px = (mx + dx as f32).round() as i32;
+            let py = (my + dy as f32).round() as i32;
+            if px >= 0 && py >= 0 {
+                fb.set(px as u16, py as u16, core);
+            }
+        }
+    }
+    // Spark tongue forward along aim.
+    for step in 1..=4 {
+        let t = step as f32 * scale * 0.9;
+        let px = (mx + aim_x * t).round() as i32;
+        let py = (my + aim_y * t).round() as i32;
+        if px >= 0 && py >= 0 {
+            fb.set(px as u16, py as u16, spark);
         }
     }
 }

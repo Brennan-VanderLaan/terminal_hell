@@ -1,9 +1,9 @@
 use crate::arena::Arena;
-use crate::camera::Camera;
+use crate::camera::{Camera, MipLevel};
 use crate::content::ArchetypeStats;
 use crate::fb::{Framebuffer, Pixel};
 use crate::primitive::BurnStatus;
-use crate::sprite;
+use crate::sprite::{self, SpriteOverlay};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Archetype {
@@ -194,7 +194,7 @@ impl Enemy {
         if dist2 > 40.0 * 40.0 || dist2 < 4.0 * 4.0 {
             return None;
         }
-        if !has_line_of_sight(arena, (self.x, self.y), player) {
+        if !arena.has_line_of_sight((self.x, self.y), player) {
             return None;
         }
 
@@ -208,7 +208,7 @@ impl Enemy {
             let target = self.tell_target;
             self.tell_target = (0.0, 0.0);
             self.attack_cooldown = 2.2;
-            if has_line_of_sight(arena, (self.x, self.y), target) {
+            if arena.has_line_of_sight((self.x, self.y), target) {
                 return Some(RangedShot {
                     from: (self.x, self.y),
                     to: target,
@@ -288,33 +288,101 @@ impl Enemy {
         let (sx, sy) = camera.world_to_screen((self.x, self.y));
         let center = (sx.round() as i32, sy.round() as i32);
 
-        match camera.mip_level() {
-            0 => {
-                let mut s = sprite::enemy_sprite(self.archetype);
-                if self.hit_flash > 0.0 {
-                    s.tint_toward(Pixel::rgb(255, 255, 255), self.hit_flash.min(0.75));
-                } else if self.tell_timer > 0.0 {
-                    s.tint_toward(Pixel::rgb(255, 245, 230), 0.55);
-                } else if self.burn.is_some() {
-                    s.tint_toward(Pixel::rgb(255, 140, 40), 0.35);
-                }
-                s.blit_scaled(fb, center, camera.zoom);
+        let mip = camera.mip_level();
+        if mip.shows_sprite() {
+            let mut s = sprite::enemy_sprite(self.archetype);
+            if self.hit_flash > 0.0 {
+                s.tint_toward(Pixel::rgb(255, 255, 255), self.hit_flash.min(0.75));
+            } else if self.tell_timer > 0.0 {
+                s.tint_toward(Pixel::rgb(255, 245, 230), 0.55);
+            } else if self.burn.is_some() {
+                s.tint_toward(Pixel::rgb(255, 140, 40), 0.35);
             }
-            1 => {
-                // Blob keeps the signature color and picks up burn/tell
-                // feedback via a flat fill color swap.
-                let color = if self.tell_timer > 0.0 {
-                    Pixel::rgb(255, 245, 230)
-                } else if self.burn.is_some() {
-                    Pixel::rgb(255, 140, 40)
-                } else {
-                    self.color()
-                };
-                sprite::render_blob(fb, center, color);
-            }
-            _ => sprite::render_dot(fb, center, self.color()),
+            // Build a sprite-local overlay at Close/Hero tiers so the
+            // higher-detail zoom levels show extra state beats: burn soot
+            // scatter, tell-halo sparkle, hit splatter. No overlay at the
+            // Normal tier — the base tint still communicates state.
+            let overlay = if mip.shows_overlay() {
+                Some(build_enemy_overlay(self, mip))
+            } else {
+                None
+            };
+            s.blit_scaled_with_overlay(fb, center, camera.zoom, overlay.as_ref());
+        } else if matches!(mip, MipLevel::Blob) {
+            // Blob keeps the signature color and picks up burn/tell
+            // feedback via a flat fill color swap.
+            let color = if self.tell_timer > 0.0 {
+                Pixel::rgb(255, 245, 230)
+            } else if self.burn.is_some() {
+                Pixel::rgb(255, 140, 40)
+            } else {
+                self.color()
+            };
+            sprite::render_blob(fb, center, color);
+        } else {
+            sprite::render_dot(fb, center, self.color());
         }
     }
+}
+
+/// Derive a sprite-local overlay from an enemy's current state. Called at
+/// Close/Hero mip tiers only — at Normal the base tint does the work.
+/// Positions are hash-derived from (archetype, x, y) so the decorations
+/// stick to the enemy and don't jitter between frames.
+fn build_enemy_overlay(e: &Enemy, mip: MipLevel) -> SpriteOverlay {
+    let mut overlay = SpriteOverlay::new();
+    let tmpl = sprite::enemy_sprite(e.archetype);
+    let hi = matches!(mip, MipLevel::Hero);
+
+    // Burn soot: a handful of dark pixels scattered over the sprite.
+    // Dark-red at the Close tier, full soot black at Hero.
+    if let Some(b) = &e.burn {
+        let soot = if hi {
+            Pixel::rgb(20, 10, 0)
+        } else {
+            Pixel::rgb(60, 20, 10)
+        };
+        let count = if hi { 5 } else { 3 };
+        let seed = deterministic_seed(e.archetype.to_kind() as u64, e.x, e.y)
+            ^ (b.ttl.to_bits() as u64);
+        for i in 0..count {
+            let (sx, sy) = sample_sprite_coord(seed.wrapping_mul(0x9E37_79B9).wrapping_add(i), tmpl.w, tmpl.h);
+            overlay.stain(sx, sy, soot);
+        }
+    }
+
+    // Hit flash sparkle — an extra white highlight pixel at Hero tier.
+    if hi && e.hit_flash > 0.35 {
+        let seed = deterministic_seed(0xFACE, e.x, e.y);
+        let (sx, sy) = sample_sprite_coord(seed, tmpl.w, tmpl.h);
+        overlay.stain(sx, sy, Pixel::rgb(255, 255, 255));
+    }
+
+    // Ranged enemies winding up a shot get a bright fore-eye at Hero.
+    if hi && e.tell_timer > 0.0 {
+        if tmpl.w >= 4 && tmpl.h >= 3 {
+            overlay.stain(tmpl.w / 2, 1, Pixel::rgb(255, 230, 120));
+        }
+    }
+
+    overlay
+}
+
+fn deterministic_seed(base: u64, x: f32, y: f32) -> u64 {
+    let xb = x.to_bits() as u64;
+    let yb = y.to_bits() as u64;
+    base
+        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        .wrapping_add(xb.rotate_left(13))
+        .wrapping_add(yb.rotate_left(29))
+}
+
+fn sample_sprite_coord(seed: u64, w: u16, h: u16) -> (u16, u16) {
+    let w = w.max(1) as u64;
+    let h = h.max(1) as u64;
+    let sx = (seed % w) as u16;
+    let sy = ((seed / w) % h) as u16;
+    (sx, sy)
 }
 
 pub struct RangedShot {
@@ -337,17 +405,3 @@ fn collides(arena: &Arena, x: f32, y: f32) -> bool {
     arena.is_wall(tx, ty0) || arena.is_wall(tx, ty1)
 }
 
-/// DDA-style line walk between two world positions. Returns false if any
-/// wall tile sits along the line. Used by Revenant LoS checks.
-fn has_line_of_sight(arena: &Arena, from: (f32, f32), to: (f32, f32)) -> bool {
-    let steps = ((to.0 - from.0).abs().max((to.1 - from.1).abs()).ceil() as i32).max(1);
-    for i in 1..steps {
-        let t = i as f32 / steps as f32;
-        let x = from.0 + (to.0 - from.0) * t;
-        let y = from.1 + (to.1 - from.1) * t;
-        if arena.is_wall(x.floor() as i32, y.floor() as i32) {
-            return false;
-        }
-    }
-    true
-}

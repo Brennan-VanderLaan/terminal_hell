@@ -8,6 +8,7 @@ pub mod camera;
 pub mod carcosa;
 pub mod console;
 pub mod content;
+pub mod corpse;
 pub mod enemy;
 pub mod fb;
 pub mod game;

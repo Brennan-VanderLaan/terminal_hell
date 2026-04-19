@@ -1,5 +1,5 @@
 use crate::arena::Arena;
-use crate::camera::Camera;
+use crate::camera::{Camera, MipLevel};
 use crate::fb::{Framebuffer, Pixel};
 use crate::input::Input;
 use crate::sprite;
@@ -80,28 +80,48 @@ impl Player {
         let other_color = Pixel::rgb(140, 255, 100);
         let tint = if is_self { self_color } else { other_color };
 
-        match camera.mip_level() {
-            0 => {
-                let body = sprite::player_body();
-                body.blit_scaled(fb, center, camera.zoom);
-                sprite::render_player_barrel(fb, sx, sy, self.aim_x, self.aim_y, camera.zoom);
-                if marked {
-                    sprite::render_hastur_mark(fb, center.0, center.1);
-                }
+        let mip = camera.mip_level();
+        if mip.shows_sprite() {
+            let body = sprite::player_body();
+            body.blit_scaled(fb, center, camera.zoom);
+            let hi = matches!(mip, MipLevel::Hero);
+            sprite::render_player_barrel(
+                fb,
+                sx,
+                sy,
+                self.aim_x,
+                self.aim_y,
+                camera.zoom,
+                hi,
+            );
+            // Muzzle flash only at Close/Hero tiers — keeps the Normal tier
+            // reading clean and matches where the barrel detail lives.
+            if self.firing && mip.shows_overlay() {
+                let intensity = if hi { 1.0 } else { 0.7 };
+                sprite::render_muzzle_flash(
+                    fb,
+                    sx,
+                    sy,
+                    self.aim_x,
+                    self.aim_y,
+                    camera.zoom,
+                    intensity,
+                );
             }
-            1 => {
-                sprite::render_blob(fb, center, tint);
-                if marked {
-                    sprite::render_hastur_mark(fb, center.0, center.1);
-                }
+            if marked {
+                sprite::render_hastur_mark(fb, center.0, center.1);
             }
-            _ => {
-                sprite::render_dot(fb, center, tint);
-                // Even at max zoom-out, marked survivors keep a tiny crown
-                // so the team can locate them on the overview.
-                if marked && center.1 >= 2 {
-                    fb.set(center.0 as u16, (center.1 - 2) as u16, Pixel::rgb(255, 220, 80));
-                }
+        } else if matches!(mip, MipLevel::Blob) {
+            sprite::render_blob(fb, center, tint);
+            if marked {
+                sprite::render_hastur_mark(fb, center.0, center.1);
+            }
+        } else {
+            sprite::render_dot(fb, center, tint);
+            // Even at max zoom-out, marked survivors keep a tiny crown
+            // so the team can locate them on the overview.
+            if marked && center.1 >= 2 {
+                fb.set(center.0 as u16, (center.1 - 2) as u16, Pixel::rgb(255, 220, 80));
             }
         }
     }
