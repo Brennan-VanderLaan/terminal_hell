@@ -94,6 +94,35 @@ pub fn draw_loadout<W: Write>(
     Ok(())
 }
 
+/// Big centered "⏸ PAUSED" banner rendered when the host has paused the
+/// run. Visible to all peers. Uses the same layered-overlay pattern as
+/// the wave banner.
+pub fn draw_paused_banner<W: Write>(
+    out: &mut W,
+    cols: u16,
+    rows: u16,
+    is_authoritative: bool,
+) -> Result<()> {
+    let text = if is_authoritative {
+        "  ⏸ PAUSED — press ESC → Unpause  "
+    } else {
+        "  ⏸ HOST PAUSED  "
+    };
+    let text_len = text.chars().count() as u16;
+    let x = cols.saturating_sub(text_len) / 2;
+    let y = rows / 5;
+    queue!(
+        out,
+        MoveTo(x, y),
+        SetForegroundColor(Color::Rgb { r: 30, g: 10, b: 40 }),
+        SetBackgroundColor(Color::Rgb { r: 255, g: 220, b: 120 }),
+        Print(text),
+        ResetColor,
+    )?;
+    out.flush()?;
+    Ok(())
+}
+
 /// Single-line intermission strip: phase label + time remaining + either
 /// the active brand stack or the live vote tallies during the Vote phase.
 pub fn draw_intermission<W: Write>(out: &mut W, game: &crate::game::Game) -> Result<()> {

@@ -6,12 +6,16 @@ use std::time::{Duration, Instant};
 pub mod arena;
 pub mod camera;
 pub mod carcosa;
+pub mod console;
 pub mod content;
 pub mod enemy;
 pub mod fb;
 pub mod game;
 pub mod hud;
 pub mod input;
+pub mod install_server;
+pub mod log_buf;
+pub mod menu;
 pub mod mouse;
 pub mod net;
 pub mod particle;
@@ -19,8 +23,11 @@ pub mod pickup;
 pub mod player;
 pub mod primitive;
 pub mod projectile;
+pub mod share;
 pub mod sprite;
+pub mod stun;
 pub mod terminal;
+pub mod upnp;
 pub mod vote;
 pub mod waves;
 pub mod weapon;
@@ -51,6 +58,16 @@ pub fn run_solo() -> Result<()> {
     let content = content::ContentDb::load_core()?;
     tracing::info!(brand = %content.active_brand().id, "content pack loaded");
     let mut game = Game::new(arena, content, cols, rows);
+    // Solo runs get a throwaway share code so the menu "Copy connect
+    // string" item always has something to copy — useful if the user
+    // later decides to `serve` from a similar environment.
+    game.session_token = share::new_token().unwrap_or([0u8; 16]);
+    game.share_code = Some(share::ShareCode::new(
+        std::net::Ipv4Addr::LOCALHOST,
+        4646,
+        4647,
+        game.session_token,
+    ));
     let local_id = game.add_player();
     game.local_id = Some(local_id);
     let mut input = Input::default();
@@ -70,13 +87,72 @@ pub fn run_solo() -> Result<()> {
                 Event::Key(k) => {
                     let press = matches!(k.kind, KeyEventKind::Press | KeyEventKind::Repeat);
                     let release = matches!(k.kind, KeyEventKind::Release);
-                    match k.code {
-                        KeyCode::Esc => return Ok(()),
-                        KeyCode::Char('c')
-                            if press && k.modifiers.contains(KeyModifiers::CONTROL) =>
-                        {
-                            return Ok(());
+                    // ESC always toggles the menu. When the menu is open it
+                    // swallows the other game keys; Enter activates the
+                    // selected item and may return us to gameplay or quit.
+                    if let KeyCode::Esc = k.code {
+                        if press && !matches!(k.kind, KeyEventKind::Repeat) {
+                            game.menu.toggle();
                         }
+                        continue;
+                    }
+                    // Backtick toggles the log console. Pure overlay — it
+                    // doesn't gate game input; player can keep playing
+                    // while logs scroll.
+                    if let KeyCode::Char('`') = k.code {
+                        if press && !matches!(k.kind, KeyEventKind::Repeat) {
+                            game.console.toggle();
+                        }
+                        continue;
+                    }
+                    if k.code == KeyCode::Char('c')
+                        && press
+                        && k.modifiers.contains(KeyModifiers::CONTROL)
+                    {
+                        return Ok(());
+                    }
+                    if game.menu.open {
+                        if !press || matches!(k.kind, KeyEventKind::Repeat) {
+                            continue;
+                        }
+                        match k.code {
+                            KeyCode::Up => game.menu.move_up(),
+                            KeyCode::Down => {
+                                let max = game.menu.items(game.is_authoritative).len();
+                                game.menu.move_down(max);
+                            }
+                            KeyCode::Enter => {
+                                let connect_cmd = game
+                                    .share_code
+                                    .as_ref()
+                                    .map(|c| c.connect_command());
+                                let install = game.install_one_liner.clone();
+                                let action = game.menu.activate(
+                                    game.is_authoritative,
+                                    connect_cmd.as_deref(),
+                                    install.as_deref(),
+                                );
+                                match action {
+                                    menu::MenuAction::None => {}
+                                    menu::MenuAction::Close => {}
+                                    menu::MenuAction::Quit => return Ok(()),
+                                    menu::MenuAction::TogglePause => {
+                                        game.toggle_pause();
+                                        let msg = if game.paused { "paused" } else { "resumed" };
+                                        game.menu.set_feedback(msg, 1.5);
+                                    }
+                                    menu::MenuAction::Copy(text) => {
+                                        let feedback = menu::copy_to_clipboard(&text);
+                                        eprintln!("\n{}", text);
+                                        game.menu.set_feedback(feedback, 2.0);
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
+                    match k.code {
                         KeyCode::Char(' ') if press => game.mouse.lmb = true,
                         KeyCode::Char(' ') if release => game.mouse.lmb = false,
                         KeyCode::Char('e') | KeyCode::Char('E') if press => {
@@ -85,7 +161,6 @@ pub fn run_solo() -> Result<()> {
                             }
                         }
                         KeyCode::Char('q') if press => {
-                            // In solo mode Q toggles weapon slot, not quit.
                             if !matches!(k.kind, KeyEventKind::Repeat) {
                                 game.try_cycle_weapon(local_id);
                             }
@@ -133,7 +208,10 @@ pub fn run_solo() -> Result<()> {
         );
 
         while tick_accum >= SIM_DT {
+            // tick_authoritative short-circuits when game.paused is set,
+            // so the menu's Pause toggle is the only thing gating sim now.
             game.tick_authoritative(SIM_DT_SECS);
+            game.menu.tick(SIM_DT_SECS);
             tick_accum -= SIM_DT;
         }
 
@@ -163,8 +241,14 @@ pub fn run_solo() -> Result<()> {
         }
         hud::draw_intermission(&mut stdout, &game)?;
         hud::draw_kiosk_labels(&mut stdout, &game)?;
-        let (tc_z, _) = crossterm::terminal::size()?;
+        let (tc_z, tr_z) = crossterm::terminal::size()?;
         hud::draw_zoom_indicator(&mut stdout, tc_z, game.camera.zoom)?;
+        if game.paused {
+            hud::draw_paused_banner(&mut stdout, tc_z, tr_z, game.is_authoritative)?;
+        }
+        // Console renders below the menu so the menu stays modal on top.
+        game.console.render(&mut stdout, tc_z, tr_z)?;
+        game.menu.render(&mut stdout, tc_z, tr_z, game.is_authoritative, game.paused)?;
         let (tc, tr) = crossterm::terminal::size()?;
         hud::draw_wave_banner(
             &mut stdout,

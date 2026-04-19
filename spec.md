@@ -229,23 +229,24 @@ engine exposes a small set of base effect-verbs (apply-damage, spawn-entity,
 modify-stat, trigger-on-event, move-entity, etc.) that primitives are built
 from in TOML.
 
-#### 6.1.1 Starter primitive pool (v1 ship list — ~24)
+#### 6.1.1 Starter primitive pool (v1 design list — ~24; 6 shipped in v0.6)
 
 **Combat primitives:**
-- `ignite` — burns target; ticks damage; ignites adjacent flammables.
-- `breach` — kinetic force; damages/destroys terrain tiles; knockback.
-- `ricochet` — projectile bounces off terrain; preserves damage for N
+- ✅ `ignite` — burns target; ticks damage; ignites adjacent flammables.
+- ✅ `breach` — kinetic force; damages/destroys terrain tiles; knockback.
+- ✅ `ricochet` — projectile bounces off terrain; preserves damage for N
   bounces.
-- `chain` — on-hit, arcs to nearest N unlinked targets.
-- `contagion` — on applied-effect, spreads to adjacent allies/enemies.
-- `acid` — leaves damaging pool on hit; pools linger.
-- `pierce` — projectile passes through target; preserves damage.
+- ✅ `chain` — on-hit, arcs to nearest N unlinked targets.
+- `contagion` — on applied-effect, spreads to adjacent allies/enemies. *(planned)*
+- `acid` — leaves damaging pool on hit; pools linger. *(planned)*
+- ✅ `pierce` — projectile passes through target; preserves damage.
 - `cryo` — slows target; stacking cryo eventually freezes for shatter
-  bonus.
-- `gravity-well` — hit creates brief attractor; pulls nearby entities.
-- `overdrive` — next shot after kill is empowered; stacks to cap.
+  bonus. *(planned)*
+- `gravity-well` — hit creates brief attractor; pulls nearby entities. *(planned)*
+- ✅ `overdrive` — next shot after kill is empowered; stacks to cap.
 
 **Movement primitives (traversal slot; also composable with weapons):**
+*None shipped in v0.6 — the traversal slot itself isn't wired yet. See §6.3.*
 - `dash` — short directional burst; brief i-frames.
 - `blink` — short teleport; no i-frames; ignores terrain.
 - `slide` — maintain speed while crouched; under low cover; kicks debris.
@@ -257,21 +258,22 @@ from in TOML.
 
 **Utility / defensive:**
 - `deployable` — primitive applied to an item makes it placeable as a
-  stationary trap/turret version of itself.
-- `sustained` — extends duration of any duration-bearing effect.
-- `shield-break` — ignores shield/armor layer on hit.
+  stationary trap/turret version of itself. *(planned)*
+- `sustained` — extends duration of any duration-bearing effect. *(planned)*
+- `shield-break` — ignores shield/armor layer on hit. *(planned)*
 - `marked` — on hit, target is highlighted and takes bonus damage from
-  others.
-- `reflect` — brief window where damage is returned.
+  others. *(planned; marks currently applied by Hastur's gaze, not by
+  player weapon hits)*
+- `reflect` — brief window where damage is returned. *(planned)*
 - `phoenix-seed` *(removed for v1 per design)* — (placeholder: was
   considered, cut to preserve "no second chances")
-- `feedback` — taking damage charges next outgoing shot.
-- `siphon` — on kill, regenerate sanity (not HP).
+- `feedback` — taking damage charges next outgoing shot. *(planned)*
+- `siphon` — on kill, regenerate sanity (not HP). *(planned)*
 
-**Carcosa primitives (rare, granted by Hastur events only):**
+**Carcosa primitives (rare, granted by Hastur events only; none shipped):**
 - `yellow-glyph` — projectile or hit leaves a Yellow Sign tile for 5s that
-  drains sanity from enemies.
-- `sign-bound` — while active, Carcosa terrain does not drain YOUR sanity.
+  drains sanity from enemies. *(planned)*
+- `sign-bound` — while active, Carcosa terrain does not drain YOUR sanity. *(planned)*
 
 #### 6.1.2 Interaction rules
 
@@ -296,22 +298,34 @@ The interaction matrix is itself data. Authors ship new primitives with
 their own interaction declarations against existing primitives. Symmetric
 by default; asymmetric interactions are explicit.
 
+**v0.6 status:** the interaction logic is currently **hardcoded in
+`src/game.rs`** rather than data-driven. Breach damages the 3×3 adjacent
+tile ring on wall hit; Chain arcs to 2 nearest enemies within 12 tiles;
+Pierce nudges projectiles past the enemy's hit radius; Ricochet reflects
+off walls until `bounces_left` is exhausted. The TOML-declared interaction
+matrix is deferred pending more primitives in the pool.
+
 ### 6.2 Weapons
 
 Weapons are **base fire-mode + primitive slots**.
 
-#### 6.2.1 Base fire-modes (v1 ship list — 8)
+#### 6.2.1 Base fire-modes (v1 design list — 8; 1 shipped in v0.6)
 
-| Fire mode      | Feel                                                    |
-|----------------|---------------------------------------------------------|
-| `pulse`        | Hitscan, fast cadence, forgiving spread                 |
-| `auto`         | Full-auto projectile, medium cadence, spread on sustained|
-| `burst`        | 3-round burst, high single-click damage                 |
-| `pump`         | Shotgun cone; slow reload; pellet count                 |
-| `rail`         | High-damage pierce line; long cooldown; tracer          |
-| `lob`          | Grenade launcher; arcs, bounces                         |
-| `cone`         | Continuous cone stream (flamer/plasma); no reload, heats|
-| `beam`         | Continuous line; locks on held target; ramps damage     |
+| Fire mode      | Status | Feel                                                    |
+|----------------|--------|---------------------------------------------------------|
+| `pulse`        | ✅     | Hitscan, fast cadence, forgiving spread                 |
+| `auto`         | planned | Full-auto projectile, medium cadence, spread on sustained|
+| `burst`        | planned | 3-round burst, high single-click damage                 |
+| `pump`         | planned | Shotgun cone; slow reload; pellet count                 |
+| `rail`         | planned | High-damage pierce line; long cooldown; tracer          |
+| `lob`          | planned | Grenade launcher; arcs, bounces                         |
+| `cone`         | planned | Continuous cone stream (flamer/plasma); no reload, heats|
+| `beam`         | planned | Continuous line; locks on held target; ramps damage     |
+
+The shipped `pulse` is treated as a projectile (not hitscan) today — it
+fires a visible 2×2-pixel projectile with a trail at ~140 world pixels
+per second. Primitive slots on the weapon transfer to each projectile at
+fire time.
 
 #### 6.2.2 Slots & rarity
 
@@ -330,18 +344,23 @@ decisions happen every pickup.
 
 #### 6.2.3 Authored signature passes
 
-Most weapons are parameterized archetypes — two pulse-SMGs are identical
-except for their slotted primitives. BUT a handful of **authored
-signature** weapons exist in the pool as named exotics: the `Nail Gun`
-(sticks nails that tick; over 3 nails = rupture), the `Bent Fork` (melee,
-one shot, severs armor type), the `Harpoon` (grapples + chain-pulls + deals
-damage), `Blood Rattle` (beam; damages *you* while it heats up enemy). The
+*(planned — no signature exotics shipped in v0.6.)* Most weapons will be
+parameterized archetypes — two pulse-SMGs identical except for their
+slotted primitives. BUT a handful of **authored signature** weapons will
+exist in the pool as named exotics: the `Nail Gun` (sticks nails that
+tick; over 3 nails = rupture), the `Bent Fork` (melee, one shot, severs
+armor type), the `Harpoon` (grapples + chain-pulls + deals damage),
+`Blood Rattle` (beam; damages *you* while it heats up enemy). The
 authored signature weapons carry a unique base fire-mode variant and do
 not spawn randomly — they unlock via achievement and appear in runs as
 hand-placed Carcosa rewards (e.g., always in the Hastur-mark-survived
 drop).
 
 ### 6.3 Movement
+
+*(v0.6 reality: the traversal slot isn't wired yet. Movement is plain
+WASD-at-fixed-speed with axis-separated wall collision. The design below
+remains the target; see deferral note in §19 milestones.)*
 
 Movement verbs are primitives (§6.1). Each character has **1 traversal
 slot**. Default is `walk` (baseline running speed). Picking up a traversal
@@ -358,35 +377,40 @@ bound to **LShift tap** by default (rebindable).
 
 ### 6.4 Inventory
 
-**Fixed slots, no weight:**
+**v0.6 shipped:** 2 weapon slots, `Q` to cycle, `E` to pick up / swap
+active. Pickup replaces the active slot; old weapon is discarded.
 
-- 2 weapon slots (swap with Q or 1/2; picking up overflows → swap prompt)
-- 1 traversal slot (replaced on pickup)
-- 1 armor slot (replaced on pickup)
+**Full design (planned):**
+
+- 2 weapon slots (swap with Q or 1/2; picking up overflows → swap prompt) ✅
+- 1 traversal slot (replaced on pickup) *(planned)*
+- 1 armor slot (replaced on pickup) *(planned)*
 - 3 utility slots (grenades, deployables, consumables; cycled with mouse
-  wheel or 3/4/5)
+  wheel or 3/4/5) *(planned)*
 - 1 "sidearm" slot — a fixed cheap pistol that cannot be lost, the only
-  guaranteed weapon you keep. Your lifeline when you've wasted your ammo.
+  guaranteed weapon you keep. *(planned)*
 
 No crafting. No combining. No drop-and-pick-up-again micro. Picking up is
 swapping.
 
 ### 6.5 Controls (default, rebindable)
 
-| Action              | Input                                     |
-|---------------------|-------------------------------------------|
-| Move                | WASD                                      |
-| Aim                 | Mouse                                     |
-| Fire                | LMB or Space                              |
-| Alt-fire            | RMB or Shift+LMB                          |
-| Reload              | R                                         |
-| Swap weapon         | Q / 1–2                                   |
-| Cycle utility       | MouseWheel / 3–5                          |
-| Use / Loot corpse   | E (channel 0.7s)                          |
-| Traversal verb      | LShift tap                                |
-| Ping                | Middle-click or G                         |
-| Vote at intermission| Walk up to vote terminal + press E        |
-| Team chat           | Enter (line-buffered)                     |
+| Action              | Input                                  | Shipped |
+|---------------------|----------------------------------------|---------|
+| Move                | WASD                                   | ✅      |
+| Aim                 | Mouse                                  | ✅      |
+| Fire                | LMB or Space                           | ✅      |
+| Zoom camera         | Scrollwheel (0.2×–3.0×)                | ✅      |
+| Pickup / Interact / Vote | E                                 | ✅      |
+| Cycle weapon        | Q                                      | ✅      |
+| ESC menu            | Esc                                    | ✅      |
+| Log console         | Backtick `` ` ``                       | ✅      |
+| Alt-fire            | RMB or Shift+LMB                       | planned |
+| Reload              | R                                      | planned |
+| Swap / Cycle utility| 1–2 / 3–5                              | planned |
+| Traversal verb      | LShift tap                             | planned |
+| Ping                | Middle-click or G                      | planned |
+| Team chat           | Enter (line-buffered)                  | planned |
 | Scoreboard          | Tab (hold)                                |
 | Menu                | Esc                                       |
 
@@ -505,65 +529,56 @@ All effects at thresholds are **deterministic and readable**. No random
 gear corruption. No random possession chaos. A player who understands
 the system can pre-empt every effect.
 
+*v0.6 snapshot: the palette tint, Carcosa terrain, marks, phantoms, and
+Yellow Sign visitations are in-game. Corrupted enemy variants, false-
+friendlies / snap-out-of-it, regenerating walls, Daemon possession, and
+the brand-discipline-break are still ahead. Each beat below is annotated
+with `✅` for shipped, `planned` for not.*
+
 **25% — First bleed.**
-- Palette begins shifting: cool magenta/cyan picks up amber.
-- Yellow Sign glyphs briefly flash in empty arena tiles (always 2s;
-  always the same glyph family; players learn to tune them out
-  mechanically, but tuning them out drains sanity).
-- Sanity drain begins (see §8.3) at a low rate.
-- Hastur Daemon moves from passive to active (see §8.6).
+- ✅ Palette begins shifting: cool magenta/cyan picks up amber (global
+  framebuffer tint that ramps with Corruption).
+- planned — Yellow Sign glyphs briefly flash in empty arena tiles (today,
+  Signs are triggered only by the Daemon, not as ambient 2s pulses).
+- ✅ Sanity drain begins (see §8.3) at a low rate; Carcosa tiles start
+  spawning.
+- ✅ Hastur Daemon moves from passive to active (see §8.6).
 
 **50% — The King stirs.**
-- Music bed fractures: the synthwave track gains a discordant overlay.
-  Volume mix shifts over 5s. Audio-as-telegraph.
-- **Hastur begins cycling marks.** One survivor at a time is *marked*
-  (Yellow Sign over their glyph; also visible to them and all
-  teammates). Marked players take +25% incoming damage and are
-  prioritized by all AI. Mark rotates every 45s to a new survivor. Skill
-  expression: the marked player plays defensively; the team screens for
-  them.
-- **Corrupted enemy variants** — a small fixed percentage (25%) of
-  spawns from this point on gain ONE primitive rolled from a
-  Corruption-specific sub-pool. The variants are *visually distinct*
-  (different glyph palette, brief flash on spawn). Not a surprise; a
-  telegraph. Skill: learn to identify them, prioritize accordingly.
-- Audio hallucinations begin — but only in areas the player hasn't
-  looked at in >3 seconds. They are tells, not traps.
+- planned — Music bed fractures (no audio shipped yet; see §13).
+- ✅ **Hastur begins cycling marks.** One survivor at a time is *marked*.
+  Marked players take +25% incoming damage and are prioritized by all
+  AI. Mark rotates every 45s to a new survivor.
+- planned — **Corrupted enemy variants** (25% spawn chance) — not shipped;
+  the Corruption-specific primitive sub-pool doesn't exist yet.
+- planned — Audio hallucinations (no audio shipped yet).
 
 **75% — Reality thins.**
-- **Phantom enemies and false-friendlies** — the render layer begins to
-  sometimes draw fake enemy glyphs in empty tiles, and to sometimes
-  render teammates in enemy palettes. **Every hallucination has a
-  tell**: phantom glyphs have a 1-frame flicker at spawn; false-friendly
-  renders leave a faint cyan outline on the teammate's true glyph. A
-  skilled player who knows the tells can always disambiguate. A player
-  ignoring the tells will shoot their friends.
-- **Snap-out-of-it:** when a player damages a false-friendly rendered as
-  an enemy, they hear a distinctive bell tone and the hallucination
-  collapses for that player for 5s (grace window). They see clearly
-  again, but sanity drops.
-- HUD corruption: ammo counters occasionally display with a 1-frame
-  delay; health bar is rendered in Carcosa ochre. Both *consistent* —
-  learnable, not random.
-- **Destroyed walls begin regenerating as Carcosa terrain** (§8.5).
-  Destruction decay is partially reversed into *unsafe* geometry.
-- **Brand discipline breaks** — the wave mixes all currently-voted
-  brands together freely (imp + scav + zergling in the same pack).
-- Intermission compresses to 20s.
+- partial — **Phantom enemies** are shipped as client-side illusions when
+  the local player's sanity drops below 50, regardless of Corruption
+  level. **False-friendlies** (rendering teammates as enemies) are
+  *deferred*. Phantoms have a 1-frame white flash as their spawn tell.
+- planned — **Snap-out-of-it** (hurting a false-friendly triggers a bell
+  + grace window) — depends on false-friendlies, also deferred.
+- planned — HUD corruption (ammo counters lagging, health in Carcosa
+  ochre) — not shipped.
+- planned — **Destroyed walls regenerating as Carcosa terrain** — not
+  shipped; destroyed walls stay as rubble/floor.
+- planned — **Brand discipline breaks** — not explicitly wired; brand
+  mixing happens whenever multiple brands are active regardless of
+  Corruption threshold.
+- planned — Intermission compression — not shipped; intermission is a
+  fixed ~30s regardless of Corruption.
 
 **100% — Carcosa proper.**
-- **Arena safe space is gone.** Yellow Sign tiles propagate. Most of the
-  arena is in Carcosa state. The horde composition is maximum
-  multi-brand plus Carcosa originals (original cosmic-horror archetypes:
-  the Pallid Mask, the Tatters of the King, sign-bearers).
-- Hastur Daemon can **directly possess** enemies — but only in situations
-  the team's positioning has invited. Possession is telegraphed: the
-  possessed enemy gains the Yellow Sign halo for 1.5s before the
-  Daemon's behavior kicks in. Players who watch for halos can react. A
-  skilled team at 100% still has agency.
-- Mark cadence doubles. Two marked players at any time.
-- Corruption gains from kills drop to zero. The only way to push past
-  100% is to continue surviving; the game will make sure you don't.
+- partial — Carcosa tiles keep spawning at higher density as Corruption
+  rises; "safe space is gone" is more gradient than binary in v0.6.
+- planned — Pallid Mask / Tatters of the King / sign-bearer archetypes
+  — no Carcosa-original enemies shipped.
+- planned — Hastur Daemon direct possession of enemies — not shipped.
+- planned — Double-mark cadence — single mark only today.
+- planned — Corruption-gains-from-kills dropping to zero at 100% — not
+  wired; kills keep contributing at any Corruption.
 
 ### 8.3 Sanity (per player)
 
@@ -578,12 +593,15 @@ Each survivor has a **Sanity** value, 0–100, starting at 100.
 - Adjacency to another player with <25 sanity.
 
 **Regens:**
-- Skill-based kills: headshots (critical hits), kills without taking
-  damage during that engagement, pistol-only kills all trickle sanity
-  back.
-- Destroying Yellow Sign anchor tiles (rare; requires AoE response).
-- Intermission breathe phase (small regen).
-- The `siphon` primitive (on-kill regen).
+- Passive +1.5/s when clean (not on Carcosa, not marked). ✅ shipped.
+- planned — Skill-based kills: headshots (critical hits), kills without
+  taking damage during that engagement, pistol-only kills — not
+  distinguished in v0.6.
+- planned — Destroying Yellow Sign anchor tiles — anchor destruction not
+  shipped.
+- planned — Intermission breathe phase (small regen) — not wired.
+- planned — The `siphon` primitive (on-kill regen) — primitive not
+  shipped.
 
 **Mechanical effects by sanity bracket:**
 
@@ -623,15 +641,13 @@ terrain**:
   up by Corruption %). Enemies crossing Carcosa gain a temporary
   `marked` primitive (they broadcast their position to teammates briefly
   — tactical tradeoff).
-- Carcosa terrain is **not destructible by normal means**. Exception: the
-  rare `yellow-glyph` primitive on a weapon will temporarily suppress a
-  Carcosa tile for 8s.
-- Carcosa has *anchor* tiles — clusters of 3–5 adjacent Carcosa tiles
-  that act as generators. Destroying an anchor (requires concentrated
-  AoE plus a Carcosa-suppression primitive or similar) removes 10%
-  Corruption and reverts nearby Carcosa terrain to normal.
-- At 75%, destroyed walls regenerate *as* Carcosa terrain. Your safe
-  bunker becomes hostile architecture.
+- ✅ Carcosa terrain is **not destructible by normal means**. The
+  `yellow-glyph` primitive (suppress for 8s) is *planned* and depends on
+  Carcosa-primitive shipping.
+- planned — Anchor tile clusters + anchor destruction for -10%
+  Corruption — not shipped.
+- planned — At 75%, destroyed walls regenerate as Carcosa terrain —
+  not shipped (destroyed walls stay as rubble/floor today).
 
 ### 8.6 The Hastur Daemon
 
@@ -640,17 +656,19 @@ the sole pressure-source beyond scripted wave spawns. It is the
 always-watching presence that makes the fiction feel real.
 
 **Responsibilities:**
-- Idle: observes. Does nothing but log pressure telemetry.
-- Active (from Corruption 25%): triggers periodic *notice events*. Each
-  notice event is a short, telegraphed pressure spike:
+- Idle: observes. Does nothing but log pressure telemetry. ✅
+- Active (from Corruption 25%): triggers periodic *notice events*.
+  *v0.6 reality: a single notice-event variant is shipped — a Yellow
+  Sign manifestation that drains sanity from all living players while
+  visible, placed near a random player. The three spec'd variants
+  below are planned follow-ups.*
   - *"The King notices."* — Yellow Sign glyph lingers onscreen for 4s.
     During those 4s, one random enemy in the arena gains a temporary
-    primitive. Survivors can see the target lighting up.
+    primitive. Survivors can see the target lighting up. *(planned)*
   - *"The King exhales."* — All ambient spawns in the next 8s are
-    teleport-spawned in the peripheral vision of survivors (telegraphed
-    by a 2s dust tell). This is a Director-ish move.
+    teleport-spawned in the peripheral vision of survivors. *(planned)*
   - *"The King reaches."* — A random destroyed-wall tile converts to
-    Carcosa terrain.
+    Carcosa terrain. *(planned)*
 - On the first player death: the Daemon **hands off** to human Directors.
   It remains in a reduced role, applying ambient pressure (small
   per-wave spawns) and handling ties in brand votes.
@@ -684,11 +702,15 @@ halos (see §8.2).
   miniboss.
 
 Each Tier-1 brand ships with:
-- 5–7 enemy archetypes (component-composed)
-- 1–2 minibosses
-- A music stem + ambient audio bed
-- A vox bundle (2–3s stingers)
-- Recognizable-but-non-trademarked palette
+- 5–7 enemy archetypes (component-composed) *(design target; v0.6
+  counts: FPS arena 4, tactical 3, chaos roguelike 2 — all below
+  target)*
+- 1–2 minibosses *(v0.6: one shared `Miniboss` archetype across all
+  brands; per-brand miniboss identities still to author)*
+- A music stem + ambient audio bed *(planned; audio pillar not yet
+  shipped, see §13)*
+- A vox bundle (2–3s stingers) *(planned)*
+- Recognizable-but-non-trademarked palette ✅
 
 **Tier-2 (post-v1 pack plan):**
 - Horde / co-op lineage (L4D / Vermintide / DRG / Helldivers / Killing
@@ -703,7 +725,15 @@ Each Tier-1 brand ships with:
 
 ### 9.2 Enemy archetype composition
 
-An enemy is a row in TOML referencing component categories:
+*v0.6 reality: archetype *stats* are data-driven via
+`content/core/archetypes.toml` (hp / speed / touch_damage / hit_radius /
+reach / preferred_distance / ranged_damage). Archetype *identity* still
+lives in the Rust `enum Archetype` — adding a new archetype currently
+requires both a TOML stats row AND a code change to register the enum
+variant + sprite builder. Full component-composed archetypes (AI, senses,
+modifiers, loot tables) are planned.*
+
+**Planned full schema:**
 
 ```toml
 [archetypes.scav_rifleman]
@@ -718,27 +748,38 @@ primitives = []                    # empty by default; Corruption adds
 corpse_loot = { chance = 0.35, table = "tactical_drops_uncommon" }
 ```
 
-Enemies can be **looted**. Killing a Scav leaves a corpse; pressing E on
-the corpse for 0.7s transfers loot. The loot table is brand-specific.
-Looting a Scav rifleman might give you a Mosin, a bandage, an armor
-plate, or a rare tactical primitive like `sustained`.
+**Actual v0.6 schema:**
 
-Looting channels cost time (you can be shot). Decisions matter.
+```toml
+[marksman]
+hp = 45
+speed = 10.0
+touch_damage = 6
+hit_radius = 2.4
+reach = 2.0
+preferred_distance = 32.0
+ranged_damage = 22
+```
+
+**Corpse looting** is planned (not shipped in v0.6). Today, miniboss
+kills drop a Rare weapon pickup at their position, and non-miniboss
+kills don't drop loot. Extending to per-archetype `corpse_loot` tables
+is a follow-up.
 
 ### 9.3 Wave composition
 
 Waves are **theme-driven but vote-driven**:
 
-- Wave 1 is always the *opening* brand (default: tactical). Cold open,
-  recognizable, grounded.
-- Waves 2+ are composed from currently-bled-in brands, weighted by the
-  order they were voted in.
-- As Corruption rises, brand composition rules relax (§8.2 at 75%: free
-  mixing).
+- ✅ Wave 1 is always the *opening* brand (default: tactical).
+- ✅ Waves 2+ are composed from currently-bled-in brands. v0.6 uses a
+  combined weighted pool from all active brands (weights declared in
+  each brand's `[spawn_weights]` table); there's no order-bias yet —
+  newly-voted brands contribute equally to the pool as the opener.
+- planned — Corruption-driven brand discipline relaxation (§8.2 at 75%).
 
-Miniboss waves (every 5) pull from the brand most recently voted in. A
-team that just picked FPS arena on wave 9 gets a cacodemon-analogue on
-wave 10.
+Miniboss waves (every 5) currently pull from the *first* active brand's
+miniboss entry (which in v0.6 always resolves to the shared `Miniboss`
+archetype). Per-brand miniboss identities are a content follow-up.
 
 ### 9.4 Authoring a new wave
 
@@ -748,9 +789,21 @@ and brand-identity palette.
 
 No Rust. That is a design contract.
 
+*v0.6 reality: authoring a new BRAND is a pure TOML task — drop
+`content/core/brands/<id>.toml` with `spawn_pool`, `miniboss`,
+`spawn_weights` and it's discovered at startup. Authoring a new
+ARCHETYPE still requires a Rust change (enum + sprite). The contract
+holds for brand-level content; archetype-level is partial.*
+
 ---
 
 ## 10. Director mode — pure chaos
+
+*v0.6 status: **not shipped.** No death-to-Director transition, no
+Influence economy, no possession / spawn / hazard / command APIs. This
+section remains the design target for M8 and is unchanged from v2 of
+the spec.*
+
 
 ### 10.1 Entry
 
@@ -832,28 +885,29 @@ This section is a pillar. Everything interacts with it.
 
 ### 11.1 Tile-chunked physics
 
-- Every **arena tile** has:
-  - `material` (metal / concrete / wood / bone / flesh / carcosa)
-  - `hp` and `armor_type`
-  - `chunk_count` (how many debris particles it spawns on destruction)
-  - `collapses_adjacent` (bool; triggers a destruction-propagation check)
-  - `regenerates_as_carcosa` (bool; true at 75%+ Corruption)
+*v0.6 reality: tiles have `hp` + `material` + a `Carcosa` variant.
+Multiple materials (wood/bone/flesh) and the richer per-tile metadata
+below are design targets.*
 
-- Tiles are destroyed by accumulated damage (and by specific primitives:
-  `breach` applies structural damage directly). On destruction, the
-  tile:
-  1. Spawns N glyph-particles with velocity (radial from damage source),
-     ballistic fall, decay timer (typical 0.7–1.3s), and a brief
-     collision-against-other-particles (loose, approximate).
-  2. Leaves a rubble/debris tile behind (low-cover; passable; can be
-     further destroyed).
-  3. Kicks a dust-cloud audio-visual effect (slight visibility penalty,
-     readable).
-  4. Applies knockback to adjacent entities if the damage source was
-     explosive (`breach`, `lob` with certain primitives, etc.).
-  5. Possibly propagates (for `collapses_adjacent` tiles — ceilings,
-     structural beams — adjacent tiles take a share of damage and can
-     chain).
+- Every **arena tile** has *(shipped)*:
+  - `material` (currently just `Concrete` and `Carcosa` — metal / wood /
+    bone / flesh are planned)
+  - `hp` (shipped)
+  - planned — `armor_type`
+  - planned — `chunk_count` (debris particle count is a global constant
+    today, not per-tile)
+  - planned — `collapses_adjacent` (no destruction propagation today)
+  - planned — `regenerates_as_carcosa` (no regen today)
+
+- Tiles are destroyed by accumulated damage (and by `breach` primitive
+  which hits the 3×3 adjacent ring). On destruction:
+  1. ✅ Spawns glyph-particles radially with drag + TTL decay + color
+     fade.
+  2. ✅ Leaves a rubble tile behind (passable, rendered darker).
+  3. planned — Dust-cloud effect.
+  4. planned — Explosive knockback to adjacent entities.
+  5. planned — Destruction propagation through `collapses_adjacent`
+     tiles.
 
 ### 11.2 Glyph particles & gore
 
@@ -877,24 +931,27 @@ This section is a pillar. Everything interacts with it.
 ### 11.4 Primitive interactions with terrain
 
 Documented per primitive; examples:
-- `ignite`: flammable tiles (wood / flesh / carcosa at low level) ignite
-  and tick.
-- `breach`: structural damage multiplier ×3 vs terrain.
-- `ricochet`: bounces off non-destroyed terrain; skipped over debris.
-- `cryo`: freezes liquid gibs into floor obstacles.
-- `gravity-well`: pulls loose debris; can funnel gore into a pile that
-  becomes a low-cover tile.
-- `acid`: slowly dissolves non-metal terrain over 8s.
+- ✅ `breach`: on wall hit, damages the 3×3 ring of adjacent tiles too.
+  (The "×3 structural multiplier" framing is conceptually what happens
+  in v0.6 — Breach's adjacent-tile damage is effectively the multiplier.)
+- ✅ `ricochet`: bounces off walls; `bounces_left` consumed per hit.
+- planned — `ignite`: flammable tiles ignite and tick.
+- planned — `cryo`: freezes liquid gibs into floor obstacles.
+- planned — `gravity-well`: pulls loose debris into a pile.
+- planned — `acid`: slowly dissolves non-metal terrain.
 
 ### 11.5 Networking destruction
 
-- Terrain state is authoritative on host.
-- Delta-sync on tile state changes (intact / damaged / destroyed / rubble
-  / carcosa).
-- Particle effects are *client-side visual only* — the client spawns
-  deterministic particle runs from a seeded RNG keyed on (host-tick,
-  damage-source-id, tile-id). All clients see identical particle
-  patterns without syncing particles over wire.
+- ✅ Terrain state is authoritative on host.
+- ✅ Tile state deltas broadcast on the reliable channel (intact /
+  damaged / destroyed / rubble / carcosa). Full initial tile sync was
+  removed in v0.5 after the 10× world jump made it too large for UDP —
+  the Welcome message now ships the seed and clients regenerate the
+  arena from it.
+- ✅ Particle effects are *client-side visual only* — the client spawns
+  deterministic particle runs from a seeded RNG (seed = monotonic
+  counter XOR'd with tile coords on the host). Late-joiner tile-delta
+  replay is planned.
 
 ---
 
@@ -902,14 +959,17 @@ Documented per primitive; examples:
 
 ### 12.1 Procedural generation
 
-- Single procedural arena per run. Seeded from a shared RNG; seed
-  displayed at run start and persisted to the leaderboard for "seed of
-  the day" sharing.
-- Generator outputs: a *core* (defensive focal point), 2–4 chokepoints
-  leading in, scattered cover, destructible architecture, and 2–3
-  *brand-bleed vote kiosks* (fixed positions; see §7.3).
-- Size: ~120×40 half-block cells (~120×80 logical pixels). Fits in one
-  standard terminal.
+- ✅ Single procedural arena per run. Seeded from a shared RNG; seed
+  displayed at run start. Leaderboard / seed-of-the-day sharing planned.
+- ✅ Generator outputs: open central disc (spawn + vote kiosk placement),
+  scattered rectangular cover blobs, and long sightline-breaker walls.
+  Cover blob + breaker counts scale with arena area (~1 blob per 4K
+  world pixels, ~1 breaker per 20K).
+- ✅ **Size: 1600×800 world pixels (fixed, independent of terminal
+  size).** This is 10× the v0.4 terminal-fit arena; the camera system
+  (§17.5a) windows into it.
+- planned — Explicit named chokepoint placement; today chokepoints
+  emerge naturally from cover blobs.
 
 ### 12.2 Arena contract
 
@@ -925,11 +985,17 @@ Every arena must support:
 
 ### 12.3 Day/night & environmental
 
-Some arenas are night-variants (low-light; vision-range reduction).
-Environmental modifiers can be layered per brand: fog (tactical), toxic
-rain (chaos roguelike), zero-G pockets (Carcosa late-game), etc.
+*(planned; no day/night variants or environmental modifiers shipped in
+v0.6.)* Some arenas will be night-variants (low-light; vision-range
+reduction). Environmental modifiers can be layered per brand: fog
+(tactical), toxic rain (chaos roguelike), zero-G pockets (Carcosa
+late-game), etc.
 
 ### 12.4 Arena themes
+
+*(planned; v0.6 has one generic procgen — concrete walls on a black
+floor, scaling to the fixed 1600×800 world. Multi-theme authoring
+is deferred.)*
 
 - `server_room` — metal + concrete; high cover density; short sight-lines
   in racks.
@@ -945,6 +1011,9 @@ rain (chaos roguelike), zero-G pockets (Carcosa late-game), etc.
 ---
 
 ## 13. Audio — pillar, not polish
+
+*v0.6 status: **not shipped.** No audio engine wired; `rodio`/`cpal` are
+not in the crate stack. This section remains the design target for M9.*
 
 The audio system is load-bearing gameplay, not flavor.
 
@@ -1009,6 +1078,10 @@ The audio system is load-bearing gameplay, not flavor.
 
 ## 14. Meta progression — unlocks only
 
+*v0.6 status: **not shipped.** No persistence, no unlock tracking, no
+achievements, no leaderboards, no daily-seed. Each run is fully
+disposable today. This section remains the design target for M10.*
+
 No stat inflation. No currency. No stash. Only **new primitive types**
 enter your pool over time.
 
@@ -1067,17 +1140,20 @@ as a shared watercooler.
 
 ## 15. Join in progress
 
-- Late joiners enter a 10s spectator orientation: arena overview, team
-  list, current wave, current Corruption, who's a Director.
-- Spawn as a survivor with **baseline kit only**. No catch-up loot.
-- Enemies are scaled to wave N; the joiner scavenges or dies quickly.
-- The joiner's unlocks still apply (primitive drop pool, palette).
-- If all survivors die before the joiner can contribute, they enter
-  Director mode with the reduced Influence cap per §10.6.
-- Dropped connections: a disconnected survivor's character remains as an
-  AI-controlled placeholder (idle, defensive) for 60s to allow rejoin.
-  If they don't rejoin in 60s, the character goes inert (still a
-  hitbox, not a combatant).
+*v0.6 reality: basic JIP works — a new client can `connect` mid-run
+and is added as a survivor at arena center with default HP. None of
+the polish below is shipped.*
+
+- planned — 10s spectator orientation overlay.
+- planned — Baseline kit assignment at JIP (clients currently spawn
+  with whatever Game::add_player gives them, same as host start).
+- planned — Wave-N enemy scaling already applies (authoritatively
+  shared), so joiners naturally face current-wave pressure.
+- planned — Unlock-scoped drop pool at JIP (blocked on §14 persistence).
+- planned — "All survivors dead → joiner becomes Director" (blocked on
+  §10 Director).
+- planned — AI-controlled placeholder for dropped connections; no
+  rejoin window today.
 
 ---
 
@@ -1085,13 +1161,15 @@ as a shared watercooler.
 
 `terminal_hell solo` starts offline practice:
 
-- Host and client in same process.
-- Hastur Daemon is the only pressure (no human Directors possible).
-- At first death, the run ends immediately. Solo is balanced accordingly
-  (lower spawn budget, slower Corruption rise).
-- Solo runs count for achievement progress but not co-op-specific
-  achievements.
-- Seed-of-the-day is available in solo.
+- ✅ Host and client in same process. No networking stack started.
+- ✅ Hastur Daemon is the only pressure (no human Directors possible
+  because Director mode doesn't exist yet).
+- ✅ At first death, the run ends immediately. No solo-specific
+  balancing yet — solo uses the same spawn budget + Corruption curve
+  as co-op host.
+- planned — Solo runs counting toward achievement progress (blocked on
+  §14 persistence).
+- planned — Seed-of-the-day in solo.
 
 ---
 
@@ -1100,65 +1178,105 @@ as a shared watercooler.
 ### 17.1 Overview
 
 ```
-┌──────────────────────────┐            ┌──────────────────────────┐
-│  terminal_hell (client)  │ ◄─ UDP ──► │  terminal_hell (server)  │
-│                          │   renet    │  (hosted by one player)  │
-│  ratatui render @60fps   │            │  sim @30Hz authoritative │
-│  crossterm input         │            │  netcode @20Hz snapshot  │
-│  rodio audio             │            │  content-pack loader     │
-│  input prediction        │            │  persistence (unlocks)   │
-│  interpolation buffer    │            │  corruption + Daemon AI  │
+                                ┌─ stun.l.google.com (public IP probe)
+                                │
+┌──────────────────────────┐    │       ┌──────────────────────────┐
+│  terminal_hell (client)  │ ◄──┴─UDP──►│  terminal_hell (host)    │
+│                          │    renet   │                          │
+│  crossterm input         │            │  sim @30Hz authoritative │
+│  custom framebuffer:     │            │  netcode @20Hz snapshot  │
+│    sextants + braille    │            │  content-pack loader     │
+│  camera + mip-mapped     │            │  corruption + Daemon AI  │
+│    sprite blit           │            │  UPnP auto-forward       │
+│  ring-buffer log console │            │                          │
+│  share-code auth         │◄───HTTP ──►│  install HTTP server     │
+│  ESC menu + pause mirror │    TCP     │  (binary + HMAC + scripts)│
 └──────────────────────────┘            └──────────────────────────┘
 ```
 
 Host runs both client and server in the same process. Server is truth;
-clients render an interpolated 100ms-past snapshot.
+clients snap to server state each snapshot (interpolation + prediction
+not yet shipped — see §17.3). Session authentication uses a 128-bit
+token carried in the share code (§17.9).
 
 ### 17.2 Crate stack
 
-| Concern            | Crate                              |
-|--------------------|------------------------------------|
-| TUI / rendering    | `ratatui` + `crossterm`            |
-| Async runtime      | `tokio`                            |
-| Networking         | `renet` (UDP + channels)           |
-| Serialization      | `bincode` (wire), `serde`          |
-| Content / config   | `toml`, `ron`, `serde`             |
-| RNG (deterministic)| `rand_pcg`                         |
-| Audio              | `rodio` (+ `cpal`)                 |
-| Logging            | `tracing` + `tracing-subscriber`   |
-| CLI                | `clap`                             |
-| ECS                | `hecs` (lightweight; reconsider if pain) |
+**Currently in `Cargo.toml` (v0.6):**
 
-No Bevy for v1. Headless Bevy ECS is overkill and pulls deps.
+| Concern                | Crate                              |
+|------------------------|------------------------------------|
+| TUI input / ANSI       | `crossterm`                        |
+| ratatui (dep only, not actively used) | `ratatui`           |
+| Networking             | `renet` 2.x + `renet_netcode` 2.x  |
+| Serialization (wire)   | `bincode` 2 (serde feature)        |
+| Serialization (derive) | `serde`                            |
+| Content config         | `toml`, `include_dir`              |
+| RNG (small, seeded)    | `rand` (SmallRng) + `getrandom`    |
+| HTTP install server    | `tiny_http`                        |
+| UPnP port forward      | `igd`                              |
+| Binary signing         | `hmac` + `sha2`                    |
+| Share code encoding    | `base32`                           |
+| Clipboard              | `arboard`                          |
+| Logging                | `tracing` + `tracing-subscriber`   |
+| Error contexts         | `anyhow`                           |
+| CLI                    | `clap`                             |
+
+**Planned (design target, not in Cargo.toml):**
+
+| Concern      | Crate                  |
+|--------------|------------------------|
+| Audio        | `rodio` + `cpal` (M9)  |
+| Persistence  | `ron` (M10)            |
+| ECS          | `hecs` — deferred; a hand-rolled `Game` struct has held up fine so far |
+
+**Deliberately absent:** `tokio` (renet 2.x is sync; no async runtime
+needed). `rand_pcg` (we use `SmallRng` from `rand`). No Bevy — headless
+Bevy ECS is overkill and pulls deps.
 
 ### 17.3 Simulation
 
-- 30Hz fixed-step tick. Deterministic given seed + input stream. Useful
-  for replays (stretch) and testing.
-- Authoritative host. Clients send input commands; server simulates;
-  server broadcasts snapshots.
-- Client prediction for movement only. Shooting, looting, destruction
-  are server-arbitrated.
-- Interpolation buffer: 100ms. Lag compensation for hitscan rewinds
-  remote entities 0–200ms based on reporter RTT; capped.
+- ✅ 30Hz fixed-step tick. Authoritative host. Clients send input
+  commands; server simulates; server broadcasts snapshots.
+- ✅ Host-only actions (shooting, wall damage, pickup consumption,
+  vote registration) are server-arbitrated.
+- ✅ Pause is host-controlled (§17.13). Snapshot carries `paused`;
+  clients freeze their particle / phantom ticks when the host pauses.
+- planned — Client-side input prediction for movement. Today clients
+  snap to server state each snapshot @ 20Hz, which is fine on LAN.
+- planned — 100ms interpolation buffer. Today: hard snap.
+- planned — Lag compensation (hitscan rewind up to 200ms by RTT).
+- planned — Deterministic replay from input stream. Deterministic-given-
+  seed holds for spawn RNG + particle seeding, but f32 sim math may
+  diverge across platforms for true replay parity.
 
 ### 17.4 Netcode
 
-- Transport: UDP via renet.
-- Reliability channels:
-  - `0` reliable-ordered — lobby, run start, unlocks, chat, votes.
-  - `1` unreliable-unordered — input (client→server), snapshots
-    (server→client).
-  - `2` reliable-unordered — damage events, pickup acks, destruction
-    events.
-- Snapshots: delta-compressed @20Hz.
-- Input packets: every sim tick @30Hz with last-N-frame redundancy.
-- Bandwidth: <30 KB/s sustained per client; <80 KB/s peak (destruction
-  events can spike).
-- Join handshake: Nickname → unlock hash → arena seed → pack manifest →
-  initial snapshot → go.
-- NAT traversal: none in v1. Host forwards a port / uses Tailscale /
-  ZeroTier / direct LAN. Document in README.
+- ✅ Transport: UDP via `renet` 2.x + `renet_netcode`.
+- ✅ Reliability channels:
+  - `ReliableOrdered` — Welcome, TileUpdate, PlayerJoined/Left, RunEnded,
+    client-side one-shot events (Interact / CycleWeapon).
+  - `Unreliable` — input (client→server), snapshots (server→client),
+    Blast events (visual-only).
+- ⚠️ Snapshots: **full state** @ 20Hz (not yet delta-compressed). See
+  `build_snapshot` in `src/net/server.rs`.
+- ✅ Input packets: every render frame (~60Hz) with the latest state;
+  last-N-frame redundancy not shipped (reliable-ordered action
+  messages cover the one-shot cases).
+- ⚠️ Bandwidth: untested at scale. The 10× world + full snapshots means
+  bandwidth scales with entity count rather than deltas.
+- ✅ Join handshake: Welcome carries `{your_id, arena_w, arena_h,
+  arena_seed}` — clients regenerate the arena from the seed rather
+  than receiving the full tile blob.
+- ✅ Session authentication: the share code's 128-bit token is placed
+  in `ClientAuthentication::Unsecure { user_data: … }`. Server
+  validates on `ClientConnected`, disconnects on mismatch. Strangers
+  who guess the IP+port but lack the token cannot start a handshake.
+- ✅ NAT traversal strategy: STUN probe via `stun.l.google.com:19302`
+  + UPnP auto-port-open via `igd` + CG-NAT detection via RFC 6598
+  prefix (`100.64.0.0/10`). When none of those succeed, the host is
+  pointed at Tailscale as the manual fallback. Full rendezvous-server
+  + TURN relay are **deliberately not shipped** (design call in §17.11).
+- See §17.9 for the share-code format, §17.11 for NAT details.
 
 ### 17.5 Rendering
 
@@ -1201,7 +1319,7 @@ silhouettes that read from across the arena.
    cells; diff against previous frame; emit only changed cells.
 
 - Truecolor assumed; 256-color fallback via `TERM`/`COLORTERM` probing
-  (not yet implemented in v0.2).
+  (not yet implemented in v0.6).
 - Keyboard-aim fallback if no mouse support detected (deferred).
 - Minimum terminal size: 80×30. Below that: refuse with resize prompt.
 - Required font glyph coverage: U+1FB00..U+1FB3B (sextants) and
@@ -1209,42 +1327,87 @@ silhouettes that read from across the arena.
   Code Nerd, Iosevka all work. Detection is deferred — users see tofu
   if they pick a bad font; the README documents known-good options.
 
+### 17.5a Camera + mip-mapped rendering
+
+The sim always works in **world coordinates** (fixed 1600×800 pixel
+arena, independent of terminal size). The camera is a pure render
+concept that transforms world positions onto the sextant framebuffer.
+
+**`Camera`** (`src/camera.rs`):
+- `center: (f32, f32)` — world position at the middle of the viewport.
+- `zoom: f32` — screen pixels per world pixel. Clamped to
+  `[ZOOM_MIN=0.2, ZOOM_MAX=3.0]`. Scrollwheel steps by 1.25× per notch.
+- `viewport_w/h: u16` — screen pixels (2 × terminal cols, 3 × terminal
+  rows). Recomputed on terminal resize.
+- `world_to_screen(world)` / `screen_to_world(screen)` — the transform
+  pair. Mouse aim inverse-transforms through the camera so aim is
+  always correct regardless of zoom / pan.
+
+**Follow behaviour** — camera recentered each frame on the local
+player, with optional **edge-nudge** look-ahead: when the cursor is in
+the outer 30% of the viewport, the camera leans in that direction up
+to ~40 world pixels (divided by zoom so the screen-space look-ahead
+stays consistent).
+
+**Mip levels** — derived from zoom:
+
+| Mip | Zoom range   | Entity rendering           |
+|-----|--------------|----------------------------|
+| L0  | `zoom ≥ 1.0` | Full procedural sprite, scaled 1:1 or up |
+| L1  | `0.35 – 1.0` | 3×3 colored blob at entity center |
+| L2  | `< 0.35`     | Single pixel at entity center |
+
+Walls render tile-by-tile with nearest-neighbor scaling at all zoom
+levels; at L2 the whole 1600×800 arena compresses onto the viewport
+and entities become motes on a map overview.
+
+**Corruption palette tint** is applied at blit time by the framebuffer
+itself via `set_tint(color, amount)` — every lit pixel lerps toward
+amber with the tint amount scaling with Corruption %. Preserves sprite
+shape while letting the whole arena drift toward Carcosa over the
+course of a run.
+
 ### 17.6 Content packs
+
+**v0.6 actual layout** (embedded via `include_dir!`):
 
 ```
 content/
-  core/                     # always loaded; embedded in binary
-    primitives.toml
-    fire_modes.toml
-    archetypes.toml
+  core/
+    archetypes.toml                # stats per archetype
     brands/
       fps_arena.toml
       tactical.toml
       chaos_roguelike.toml
-    audio/
-      music/ sfx/ vox/
-    arenas/
-      server_room.toml ...
-  carcosa_core/             # always loaded; Hastur + Sign mechanics
-    daemon.toml
-    sign.toml
-    carcosa_primitives.toml
-    audio/
-  <user_pack>/              # optional; loaded if enabled at serve time
-    brands/
-    arenas/
-    primitives/
-    audio/
 ```
 
-- Packs declare: brands they expose, primitives they add, arenas they
-  add, audio they bundle, dependencies.
-- Host selects active packs at `serve` start.
-- Clients auto-sync pack *metadata* (not full audio assets) at connect
-  so they can render correctly; missing-audio plays silently and logs a
-  warning. Asset sync is a v1.1 concern.
+**Planned extended layout:**
+
+```
+content/
+  core/
+    primitives.toml                # planned — today hardcoded in Rust
+    fire_modes.toml                # planned
+    archetypes.toml                # shipped
+    brands/                        # shipped
+    audio/ music/ sfx/ vox/        # planned — M9
+    arenas/                        # planned — multi-theme
+  carcosa_core/                    # planned — M7 polish
+    daemon.toml / sign.toml / carcosa_primitives.toml / audio/
+  <user_pack>/                     # planned — external packs
+```
+
+- ✅ Core pack embedded in the binary via `include_dir!` at build time.
+- planned — `--pack NAME` CLI arg + external pack loading from a disk
+  `content/` directory.
+- planned — Pack metadata manifests (dependencies, brands, primitives).
+- planned — Client pack-metadata sync at connect.
 
 ### 17.7 Persistence
+
+*v0.6 status: **not shipped.** No files written anywhere by the game
+process. Each run is fully disposable. The paths below remain the
+design target.*
 
 - Unlocks: `~/.terminal_hell/unlocks/<nick>@<host_pubkey_hash>.ron`
 - Leaderboard: `~/.terminal_hell/leaderboard.ron`
@@ -1253,18 +1416,158 @@ content/
 
 ### 17.8 Build & distribution
 
-- `cargo build --release` → single binary (`terminal_hell[.exe]`).
-- Core content embedded via `include_dir!`.
-- External packs live in `content/` next to binary.
-- CLI:
-  - `terminal_hell serve [--port P] [--pack NAME ...]`
-  - `terminal_hell connect <code>` | `connect <addr>:<port>`
+- ✅ `cargo build --release` → single binary (`terminal_hell[.exe]`).
+- ✅ Core content embedded via `include_dir!`.
+- **CLI (v0.6 actual):**
   - `terminal_hell solo`
-  - `terminal_hell --list-packs`
-  - `terminal_hell --seed-of-the-day`
-- Room codes: base32-encoded (case-insensitive), 6 chars. Maps to
-  `addr:port`. v1 skips the relay service — raw IP + Discord is fine.
-  Relay is post-v1.
+  - `terminal_hell serve [--port P]` (default port 4646, HTTP on port+1)
+  - `terminal_hell connect <addr>` — accepts either `ip:port` OR a
+    `TH01…` share code (§17.9).
+- **Planned CLI:**
+  - `--pack NAME` (multi-pack load)
+  - `--list-packs`
+  - `--seed-of-the-day`
+- **Session handoff:** no 6-char relay-backed room codes; instead,
+  full share codes carry IP + game port + HTTP port + session token in
+  a single pasteable string (§17.9).
+
+### 17.9 Share codes & session auth
+
+A **share code** is a `TH01` prefix + 40 base32 chars encoding a
+25-byte payload: `[schema:1] [ip:4] [game_port:2] [http_port:2]
+[token:16]`. Base32 (RFC 4648, no padding) means no char in the code
+is a shell metacharacter — codes are safe as raw args in bash / zsh /
+PowerShell.
+
+The **128-bit session token** is generated fresh per `serve` from the
+OS CSPRNG (`getrandom`). It acts as:
+
+- **Auth secret**: placed into `ClientAuthentication::Unsecure {
+  user_data: … }`. On `ClientConnected`, the host reads the first 16
+  bytes of the user_data and compares against the session token —
+  mismatched or missing tokens trigger an immediate disconnect.
+- **HMAC key** for binary signing (§17.10).
+
+Token expires with the host process — a fresh `serve` rolls a new one.
+Leaked codes become useless as soon as the host restarts.
+
+**Trust model.** The token protects the network handshake; it does NOT
+certify that the binary the friend receives matches "canonical
+terminal_hell." It certifies "the binary the friend receives came
+from the same host whose share code they pasted." The implicit trust
+boundary is "you trust whoever sent you this code," same as any
+friend-hosted game. Ed25519 release-signing with a published public
+key is a planned follow-up when the project goes public.
+
+### 17.10 HTTP install server + auto-install
+
+A `tiny_http` listener runs on `http_port` (default 4647) alongside the
+game server. Endpoints:
+
+- `GET /install.sh` — bash installer, **generated per request** with
+  the request's `Host` header as `$httpBase` and the embedded share
+  code's IP rewritten to match. This means `iwr
+  http://127.0.0.1:4647/install.sh` returns a script that connects to
+  `127.0.0.1`, not to the STUN-discovered public IP — fixes NAT
+  hairpinning on self-test.
+- `GET /install.ps1` — PowerShell equivalent.
+- `GET /binary[?platform=…]` — the host's own executable bytes, with
+  `X-Binary-HMAC: <hex>` response header = `HMAC-SHA256(session_token,
+  binary_bytes)`. Install scripts verify before executing.
+
+**Install script flow** (both bash and PowerShell):
+
+1. Baked constants: `CODE`, `VERSION`, `HTTP_BASE`, `TOKEN_HEX`.
+2. Probe: if local `terminal_hell --version` matches the session
+   version → skip download, `exec terminal_hell connect $CODE`.
+3. Download `/binary` + read `X-Binary-HMAC`.
+4. Verify HMAC locally (bash via `openssl dgst -mac HMAC -macopt
+   "hexkey:$TOKEN_HEX"`; PowerShell via
+   `System.Security.Cryptography.HMACSHA256`).
+5. Install to `~/.local/bin/terminal_hell` (Unix) or
+   `%USERPROFILE%\bin\terminal_hell.exe` (Windows).
+6. `exec terminal_hell connect $CODE`.
+
+**One-liners** the host pastes into Discord:
+
+```
+curl -sSfL http://<host>:4647/install.sh | sh
+iwr http://<host>:4647/install.ps1 -UseBasicParsing | iex
+```
+
+**Limitations** (v0.6):
+- Host serves its own-platform binary only. A Linux host + Windows
+  friend → friend's script errors with "unsupported platform, install
+  manually."
+- HTTP only (no TLS). HMAC defeats passive MITM; active attackers on
+  the network path who already hold the token are not blocked.
+- No multi-architecture bundle or Ed25519-signed release channel.
+
+### 17.11 NAT traversal
+
+Scope of v0.6: enough traversal for "convince friends to try it" while
+staying infra-free.
+
+- **STUN self-probe** (`src/stun.rs`, hand-rolled ~130 LOC). On
+  `serve`, one binding request to `stun.l.google.com:19302`; parses
+  XOR-MAPPED-ADDRESS out of the response. 3s timeout. The public IP
+  goes into the share code. Fallback: LAN IP (detected by opening a
+  connected UDP socket aimed at `8.8.8.8:80` and reading the local
+  side).
+- **CG-NAT detection** via the RFC 6598 prefix `100.64.0.0/10`. If the
+  STUN-reported IP is in that range, the host is warned and told to
+  use Tailscale — direct connections won't work.
+- **UPnP auto-port-open** (`src/upnp.rs`, using `igd`). Attempts to
+  open UDP `4646` (game) + TCP `4647` (HTTP install) on the LAN
+  gateway with a 2h lease. 3s discovery timeout. Partial success
+  (one of two) is reported distinctly from total failure.
+- **Not shipped:** rendezvous signaling server, TURN relay,
+  full ICE/WebRTC. These were evaluated (design discussion earlier);
+  cost and operational commitment didn't justify the ~10% of hosts
+  they'd rescue. Tailscale is the documented fallback for symmetric
+  NAT / CG-NAT / hole-punch-refused networks.
+
+### 17.12 UI overlays: menu + log console
+
+Two independent overlays, both drawn post-framebuffer-blit as direct
+ANSI writes:
+
+- **ESC menu** (`src/menu.rs`): centered panel. Items (dynamic by
+  context):
+  - `Resume` — closes the menu.
+  - `Pause run` / `Unpause run` — host-only; synced to clients
+    (§17.13).
+  - `Copy connect string` — clipboard via `arboard`. Stderr-dump
+    fallback if clipboard unavailable.
+  - `Copy install one-liner` — multi-line bash + PowerShell block.
+  - `Quit`.
+  ESC is modal — it traps keys (Up/Down/Enter/Esc) while open. When
+  the menu is closed, normal game input resumes.
+- **Log console** (`src/console.rs`): top-55% pull-down overlay
+  showing the tail of a 1024-line ring buffer fed by tracing. Color-
+  coded by level (red ERROR / amber WARN / cyan INFO / gray DEBUG).
+  Backtick (`` ` ``) toggles. Unlike the menu, the console is
+  **passive** — it doesn't trap input. Players can keep moving /
+  shooting / voting while watching logs scroll.
+
+Rendering order: arena → HUD → console → menu. Menu sits on top of
+the console when both are open.
+
+### 17.13 Pause semantics
+
+`Game.paused` is a host-authoritative flag synced in every snapshot.
+
+- Only `Game.is_authoritative` peers (solo + host) can flip pause via
+  the menu toggle. Clients trying to toggle get a "only the host can
+  pause" feedback message; the toggle item itself is hidden from the
+  client menu anyway.
+- When `paused`, `tick_authoritative` short-circuits (no sim advance,
+  no event emission — per-tick event buffers still clear). Clients
+  see `Snapshot.paused = true` and short-circuit `tick_client`, so
+  particles and phantoms freeze in place.
+- A centered `⏸ PAUSED` banner renders HUD-level, visible to all
+  peers. Host sees "press ESC → Unpause"; clients see "HOST PAUSED"
+  for clarity on who holds the toggle.
 
 ---
 
@@ -1296,29 +1599,41 @@ Entity {
 
 ### 18.2 Network messages
 
-```
-ClientToServer:
-  Handshake { nickname, unlocks_hash, client_version, pack_manifest_hash }
-  Input { tick, move_x, move_y, aim_x, aim_y, buttons, traversal, seq }
-  DirectorCommand { kind, target_or_pos, payload }
-  LootCorpse { target_entity }
-  VoteBrand { kiosk_id }
-  Chat { text }
-  Ping
+**v0.6 actual (see `src/net/proto.rs`):**
 
-ServerToClient:
-  JoinAck { session_id, seed, pack_manifest, initial_snapshot }
-  Snapshot { tick, delta_from_tick, entities, corruption, sanity_self, events }
-  DamageEvent { source, target, amount, kind, primitives_applied }
-  DestructionEvent { tile_id, damage_source, chunk_seed }
-  SanityEvent { target, delta, cause }
-  CorruptionEvent { new_value, threshold_crossed? }
-  HasturEvent { kind, target?, payload }   // notice / mark / possession
-  UnlockGranted { unlock_id }
-  RunEnd { summary }
-  Chat { from, text }
-  Pong
 ```
+ClientMsg:
+  Input(ClientInput { move_x, move_y, aim_x, aim_y, firing })
+  Interact       // one-shot; ReliableOrdered channel
+  CycleWeapon    // one-shot; ReliableOrdered channel
+
+ServerMsg:
+  Welcome { your_id, arena_w, arena_h, arena_seed }
+  Snapshot(Snapshot)            // full state; see below
+  TileUpdate { x, y, kind, hp } // ReliableOrdered
+  Blast { x, y, color, seed, intensity }  // Unreliable
+  PlayerJoined { id }
+  PlayerLeft { id }
+  RunEnded { wave, kills, elapsed_secs }
+
+Snapshot:
+  wave, kills, alive, elapsed_secs, corruption, marked_player_id, paused
+  players: [PlayerSnap { id, x, y, hp, aim_x, aim_y, sanity }]
+  enemies: [EnemySnap { x, y, hp, kind }]
+  projectiles: [ProjSnap { x, y }]
+  pickups: [PickupSnap { id, x, y, rarity, primitives }]
+  kiosks: [KioskSnap { id, x, y, brand_id, brand_name, color, votes }]
+  hitscans: [HitscanSnap { from_x, from_y, to_x, to_y, ttl }]
+  yellow_signs: [SignSnap { id, x, y, ttl, ttl_max }]
+  weapons: [WeaponSnap { player_id, active_slot, slot0?, slot1? }]
+  active_brands: Vec<String>
+  intermission_phase: u8, phase_timer: f32
+```
+
+**Planned** (unchanged from v2 design): `Handshake` w/ unlock hash,
+`DirectorCommand`, `LootCorpse` (when looting lands), `Chat`, `Ping`/
+`Pong`, `UnlockGranted`, delta-compressed `Snapshot`, tick/seq-numbered
+inputs for replay / rollback.
 
 ---
 
@@ -1351,46 +1666,72 @@ archetypes (Rusher, Pinkie, Miniboss), wave scheduler with banner
 announcements, miniboss every 5 waves, run-end summary, HP/wave/kills
 HUD. Damage + death + immediate run-end (no Director mode yet).
 
-**M3 — Primitive bus scaffold (2 weeks).** Universal effect bus with a
-starter set of ~8 primitives. Weapons are base fire-mode + slots.
-Everything composes. Test multiple primitive stacks on both player
-weapons and enemies.
+**M3 — Primitive bus scaffold. ✅ v0.5.** 6 of ~8 target primitives
+shipped (Ignite, Breach, Ricochet, Chain, Pierce, Overdrive). Weapons
+are base fire-mode + slots (rarity-scaled 1–3 slots; v0.6 ships only
+the `pulse` fire-mode). Primitive interactions hardcoded in
+`src/game.rs` — the data-driven interaction matrix from §6.1.2 is
+deferred pending a larger primitive pool.
 
-**M4 — Content-pack plumbing + first brand (2 weeks).** Move archetypes,
-fire-modes, primitives to TOML. Load core pack. Author and validate the
-FPS arena brand fully (5+ archetypes, music stem, vox, audio-tells).
+**M4 — Content-pack plumbing + first brand. ✅ v0.5.** TOML content
+loader via `include_dir!`. Archetype stats data-driven via
+`content/core/archetypes.toml`. FPS arena brand in
+`brands/fps_arena.toml` with 4 archetypes (Rusher, Pinkie, Charger,
+Revenant). Audio stem / vox deferred to M9.
 
-**M5 — Wave structure & intermission (2 weeks).** Wave scheduler,
-miniboss every 5, intermission loop with brand-vote kiosks. Three brands
-supported; voting resolves and bleed-through works.
+**M5 — Wave structure & intermission. ✅ v0.5.** 4-phase intermission
+(Breathe 5s / Vote 12s / Stock 8s / Warning 5s). Brand-bleed vote
+kiosks with player-vote accumulation. 3 brands authored (FPS arena,
+Tactical, Chaos Roguelike). Brand stack with weighted sampling from
+active brands. Miniboss every 5 waves.
 
-**M6 — Procedural arena (2 weeks).** Arena generator (core,
-chokepoints, kiosk placement, destructible structure). Seed sharing.
-Day/night variants.
+**M6 — Procedural arena. ✅ v0.5.** Seed-driven generator. Central disc
+for spawn + kiosks, rectangular cover blobs + long sightline-breakers
+scaled to arena area. **World size jumped to 1600×800 fixed pixels
+(10× the pre-camera arena);** the camera system (§17.5a) windows into
+it. Welcome message ships the seed only — clients regenerate locally.
+Day/night variants deferred.
 
-**M7 — Carcosa (4 weeks).** The jewel. Corruption %, sanity, marks,
-Carcosa terrain, Hastur Daemon, Yellow Sign audio + visual integration,
-threshold beats (25/50/75/100). Playtest extensively; this is the
-highest-risk system.
+**M7 — Carcosa. ◐ v0.6 (partial).** Corruption %, per-player sanity,
+Hastur marks, Carcosa terrain spawning, Hastur Daemon with Yellow
+Sign visitations, client-side phantom enemies at low sanity,
+corruption-driven palette tint. **Deferred from the full threshold
+spec:** corrupted-variant enemy spawns at 50%, false-friendly rendering
++ snap-out-of-it at 75%, destroyed-walls-regenerating-as-Carcosa,
+anchor-tile destruction (-10%), Daemon direct possession at 100%.
 
-**M8 — Director mode (3 weeks).** Death-to-Director transition.
-Influence economy. Spawn / possess / hazard / breach / command. Director
-UI. Co-op Director dynamics. Playtest.
+**M7.5 — Session handoff + camera + menu (new milestone, ✅ v0.6).**
+Not in the original spec — landed because it was the missing piece
+between "technically plays" and "you can actually get a friend in."
+Covers:
+- Camera system with scrollwheel zoom (0.2×–3.0×) and mip levels.
+- Fixed 1600×800 world independent of terminal size.
+- Share codes (`TH01…`), session tokens, secure-ish netcode auth.
+- STUN self-probe + CG-NAT detection + UPnP auto-port-open.
+- HTTP install server + bash/PowerShell auto-install + HMAC signing.
+- ESC menu (Resume / Pause / Copy / Quit) with host-synced pause.
+- Backtick log console pulling from an in-memory tracing ring buffer.
 
-**M9 — Audio pillar (2 weeks).** Full rodio integration. Spatial audio.
-Dual-stem dynamic mix. Hot-reload dev mode. Carcosa audio layer.
-Audio-tells across all enemy abilities.
+**M8 — Director mode (3 weeks).** *Not started.* Death-to-Director
+transition, Influence economy, possession / spawn / hazard / breach /
+command, Director UI, co-op Director dynamics.
 
-**M10 — Unlocks & persistence (1–2 weeks).** Per-nickname unlock files,
-local leaderboard, achievement triggers (survivor + Director).
+**M9 — Audio pillar (2 weeks).** *Not started.* Full rodio integration,
+spatial audio, dual-stem dynamic mix, hot-reload dev mode, Carcosa
+audio layer, audio-tells across all enemy abilities.
 
-**M11 — Join-in-progress + polish (2 weeks).** JIP, connection drop
-recovery, terminal probing, fallbacks, settings UI, sanity audio/visual
-polish.
+**M10 — Unlocks & persistence (1–2 weeks).** *Not started.* Per-
+nickname unlock files, local leaderboard, achievement triggers
+(survivor + Director).
 
-**M12 — Content push (3 weeks).** Author the remaining two Tier-1
-brands (tactical, chaos roguelike) + fill out primitive pool to 24 +
-author 5 arena variants.
+**M11 — Join-in-progress + polish (2 weeks).** *Not started — basic
+JIP works, the polish pass (orientation overlay, baseline kit,
+connection-drop recovery with AI placeholder, settings UI, sanity
+audio/visual polish) is ahead.*
+
+**M12 — Content push (3 weeks).** *Not started.* Hit the 5–7-archetype
+target per brand, bring primitive pool to ~24, per-brand minibosses,
+author 5 arena theme variants.
 
 **M13 — Closed playtest, balance, ship.**
 
@@ -1403,6 +1744,19 @@ before the spec fully lands.
 
 ## 20. Open design questions
 
+- **Corpse-looting UX vs. performance.** Spec §9.2 promises 0.7s loot
+  channels with per-archetype tables. Needs an inventory UX pass
+  before shipping, plus a re-examination of the pickup system now that
+  weapons work differently than the spec assumed.
+- **Client-side prediction for movement.** Today clients snap to server
+  state. Adding prediction means handling misprediction reconciliation
+  — worth it for WAN latency, overkill for LAN. Defer until we have
+  real internet-play telemetry.
+- **How much of the Carcosa threshold depth actually matters.** Shipped
+  minimum (palette / marks / terrain / Daemon / phantoms) already
+  generates the "King is closing in" feeling. The full depth (corrupted
+  variants, false-friendlies, snap-out-of-it) may be diminishing
+  returns — worth playtesting before committing to them all.
 - **Corruption-kill loss tuning.** How *much* can skill-kills decrease
   Corruption? Should it be genuine slowdown or just vibes? Playtest.
 - **Director Influence precise economy.** Baselines here are guesses;
@@ -1446,12 +1800,15 @@ before the spec fully lands.
 | Terminal rendering fragmentation                    | Low        | Min-size gate; generous reflow; probe at connect.          |
 | Yellow Sign fatigue                                 | Low        | Sign cadence is telegraphed and rare early; ramps late.    |
 | Legal: brand homage too close to brand fidelity     | Medium     | Core repo ships non-branded names + generic palettes. Third-party "brand-fidelity" packs live external to the repo per §25. |
+| Active MITM on install HTTP compromises clients     | Medium     | HTTP is plaintext today; HMAC defeats passive MITM only. Mitigation target: Ed25519 release-signed binaries with pinned public key in the install script. Tracked for post-v1. |
+| Host serving wrong-platform binary to a friend      | Low        | Script errors with "unsupported platform, install manually" rather than executing a broken binary. Multi-platform release bundle planned. |
+| UPnP refused + symmetric NAT + no Tailscale         | Medium     | Clear error telling the host to install Tailscale or forward manually. ~10% of home networks hit this; not solved by any infra we'd ship today. |
 
 ---
 
 ## 22. Glossary
 
-- **Arena** — the procedural map for a single run.
+- **Arena** — the procedural 1600×800-pixel map for a single run.
 - **Braille layer** — the 2×4-dot overlay rendered beneath the sextant
   layer; shows through where sextants are empty. For fine detail: bullet
   dust, sparks.
@@ -1459,38 +1816,65 @@ before the spec fully lands.
   roguelike, etc.).
 - **Brand bleed** — the vote-based introduction of a new brand into the
   current wave's enemy pool.
+- **Camera** — renderer-owned `(center, zoom, viewport)` that transforms
+  world coordinates to screen pixels. Sim never reads from it.
 - **Carcosa** — the fictional city from the Yellow Mythos; metaphysically
   bleeding into the shell. Also the visual state of the arena at high
   Corruption.
 - **Carcosa terrain** — Yellow-Sign-inlaid tiles that drain sanity and
   empower enemies crossing them.
+- **Console (log)** — backtick-toggled pull-down overlay showing the
+  tail of an in-memory tracing ring buffer. Passive; doesn't trap input.
 - **Corruption %** — global arena metric (0–100+) tracking the advance of
   Carcosa into the run.
-- **Director** — a dead player; plays the antagonist/chaos side.
+- **Director** — a dead player; plays the antagonist/chaos side. *(M8,
+  not yet shipped.)*
 - **Gibs** — glyph-particle remains of destroyed entities.
 - **Hastur** — the King in Yellow. The game's antagonist presence.
 - **Hastur Daemon** — the AI system running Hastur's passive/active
   pressure before (and alongside) human Directors.
+- **HMAC** — MAC signing of the served binary with the session token as
+  key. Install scripts verify before executing.
 - **Influence** — Director currency for spawning, possessing, hazards.
+- **Install one-liner** — the `curl | sh` / `iwr | iex` command a host
+  pastes to a friend. Fetches session-specific installer from the host's
+  HTTP server, verifies binary HMAC, installs, runs `connect`.
 - **Mark** — Hastur's gaze on a specific survivor; bonus-damage and
   AI-priority target.
+- **Menu** — ESC-toggled modal overlay with Resume / Pause / Copy / Quit.
+- **Mip level** — L0/L1/L2 entity-rendering tier derived from zoom. L0
+  full sprite, L1 3×3 blob, L2 1-pixel dot.
 - **Miniboss** — named themed elite every 5 waves.
 - **Pack** — content bundle (brands + archetypes + primitives + audio +
   arenas).
+- **Pause** — host-only toggle that freezes the authoritative sim and
+  all clients' particle / phantom ticks. Synced via snapshot.
+- **Phantom** — client-side hallucination enemy at low sanity. Pure
+  visual; not in the authoritative world.
 - **Primitive** — a named effect-component in the universal composition
   bus.
 - **Run** — single session from drop-in to last-survivor-down.
 - **Sanity** — per-player 0–100 metric; low sanity causes deterministic
   visual/audio/AI effects.
+- **Session token** — 128-bit random per-`serve` secret. Carried in the
+  share code; authenticates client→host handshakes; keys the binary HMAC.
 - **Sextant layer** — the 2×3 solid-fill pixel grid that is the primary
   rendering surface. Each terminal cell holds 6 sub-pixels resolved into
   one Unicode sextant glyph.
+- **Share code** — `TH01…` 44-char string encoding host IP + game port +
+  HTTP port + session token. Shell-safe. Pasted into `terminal_hell
+  connect TH01…`.
 - **Sprite** — a procedurally-generated 2D `Option<Pixel>` grid stamped
   into the sextant layer to render an entity.
+- **STUN** — public-IP discovery via `stun.l.google.com:19302`. One-shot
+  probe on `serve`; no rendezvous / TURN infrastructure.
 - **Traversal verb** — a movement primitive (dash, blink, grapple, etc.).
+  *(planned; not yet shipped.)*
+- **UPnP** — IGD-based auto-port-forwarding on the LAN gateway via `igd`.
+  Best-effort; logs + continues on failure.
 - **Wave** — 60–180s pressure period with a brand theme.
-- **Yellow Sign** — Hastur's sigil; appears onscreen at Corruption
-  thresholds and during notice events.
+- **Yellow Sign** — Hastur's sigil; appears onscreen during Daemon
+  notice events. Drains sanity while visible.
 
 ---
 
@@ -1531,34 +1915,113 @@ before the spec fully lands.
   Upgraded during early implementation after the initial half-block build
   looked like data-viz. Procedurally-generated multi-pixel sprites per
   archetype. See §17.5.
+- **Camera system with mip-mapped sprites** — added in v0.6 when the
+  world scaled up 10×. Scrollwheel zoom 0.2×–3.0× with three mip tiers
+  (full sprite / 3×3 blob / 1-pixel dot). Mouse aim inverse-transforms
+  through the camera. See §17.5a.
+- **World size is now fixed at 1600×800 pixels** independent of terminal
+  size. The camera is the viewport; terminal size just changes how much
+  of the world you can see at once.
+- **Session handoff via share codes.** `TH01…` strings encode host IP +
+  game port + HTTP port + 128-bit session token. Replace manual IP
+  entry. See §17.9.
+- **Secure-ish netcode auth.** Session token carried in netcode
+  user_data; host rejects handshakes lacking the token. Strangers who
+  discover the IP but don't have the code can't start a handshake.
+- **HTTP install server + HMAC-signed binary + auto-install scripts.**
+  Host serves `install.sh` / `install.ps1` / `binary` endpoints. Scripts
+  are generated per request from the `Host` header (fixes NAT hairpin
+  on self-test). HMAC-SHA256 signing with the session token defeats
+  passive MITM binary substitution. See §17.10.
+- **NAT traversal that actually works for friends.** STUN probe via
+  Google → public-IP in share code. UPnP auto-port-open. CG-NAT
+  detection → Tailscale fallback. No rendezvous server, no TURN relay
+  — decision matrix in §17.11.
+- **ESC menu + backtick log console** (§17.12). Menu has host-only
+  pause toggle, copy-connect, copy-install, quit. Log console is a
+  pull-down terminal showing live tracing output.
+- **Host-controlled pause synced to all peers** (§17.13). Snapshot
+  carries `paused`; all client-side motion freezes when the host
+  toggles. Banner tells clients who holds the toggle.
 
-### 24.1 Shipped in v0.2 (as of this writing)
+### 24.1 Shipped in v0.6 (as of this writing)
 
-What's in the repo and playable today:
+**Playable today:**
 
-- Solo, `serve`, and `connect` modes over UDP. Host-authoritative sim.
-- Sextant+braille framebuffer, procedural sprites, aim-tracking barrel.
-- Tile-chunked destruction + persistent rubble + glyph-particle gibs.
-- Three enemy archetypes (Rusher, Pinkie, Miniboss), wave scheduler,
-  miniboss every 5 waves, run-end summary.
-- One hand-crafted arena that auto-scales to the terminal size.
-- HUD (wave / HP / kills), wave banner, game-over screen.
+- Solo, `serve`, and `connect` modes over UDP with session-token
+  authentication. Host-authoritative sim at 30Hz + 20Hz full
+  snapshots.
+- Share codes (`TH01…` base32, shell-safe) replace manual IP entry.
+  `connect` accepts either a code or raw `ip:port`.
+- HTTP install server on the host auto-serves session-specific
+  `install.sh` / `install.ps1` + HMAC-signed binary. Version
+  shortcircuit skips download when the friend's local binary matches.
+  Per-request script regeneration with Host-header-based rewriting
+  makes self-test work.
+- STUN public-IP probe via Google. UPnP auto-port-open via `igd`.
+  CG-NAT detection with Tailscale fallback messaging.
+- Sextant + braille framebuffer. Camera with scrollwheel zoom
+  (0.2×–3.0×), mip-based entity rendering (L0 sprite / L1 blob /
+  L2 dot), edge-nudge follow, fixed 1600×800 world.
+- 6 primitives (`ignite` / `breach` / `ricochet` / `chain` / `pierce`
+  / `overdrive`) composing via rarity-scaled weapon slots. Weapon
+  pickups drop from miniboss kills.
+- 8 enemy archetypes across 3 brands (FPS arena: Rusher, Pinkie,
+  Charger, Revenant; Tactical: Marksman, PMC; Chaos Roguelike:
+  Swarmling, Orb; plus the shared Miniboss). Stats data-driven via
+  `content/core/archetypes.toml`. Ranged enemies use hitscan tracers
+  with 0.45s tell.
+- Wave scheduler with 4-phase intermission (Breathe / Vote / Stock /
+  Warning). Brand-bleed vote kiosks with active-brand-stack weighted
+  sampling. Three brands authored.
+- Carcosa: Corruption curve drives a global palette tint. Per-player
+  sanity drains on Carcosa terrain + under marks + under Sign gaze,
+  regens passively. Hastur marks rotate at 50%+. Carcosa terrain
+  spawns at 25%+. Hastur Daemon emits Yellow Sign visitations on a
+  corruption-scaled cadence. Client-side phantom enemies spawn at
+  low sanity.
+- Tile-chunked destruction with per-material palette, persistent
+  rubble, client-side deterministic particle spawning from host-
+  emitted blast events.
+- Procgen arena generator with seed sync; clients regenerate the arena
+  from the seed rather than receiving the tile blob.
+- ESC menu with host-only Pause (synced), Copy connect, Copy install,
+  Quit. Backtick log console showing live tracing output.
+- HUD: wave / HP / kills / corruption / sanity / marked indicator,
+  kiosk brand labels, zoom indicator, wave banner, game-over screen.
 
-What the spec describes but **is not yet shipped**:
+**Shipped but below spec'd depth:**
 
-- Universal effect bus and primitives (M3).
-- Classes-via-loot / inventory / corpse looting.
-- Carcosa / Corruption / Sanity / Hastur Daemon (§8).
+- Primitives: 6 of ~24 planned. No movement primitives, no Carcosa
+  primitives, no data-driven interaction matrix.
+- Weapon fire-modes: 1 (`pulse`) of 8 planned.
+- Brand archetype counts below the "5-7 per brand" target.
+- Carcosa thresholds: palette / marks / terrain / Daemon / phantoms
+  shipped; corrupted-variant enemies, false-friendlies, snap-out-of-
+  it, anchor-tile destruction, regenerating Carcosa walls, Daemon
+  direct possession all deferred.
+- Inventory: 2 weapon slots only. Traversal / armor / utility /
+  sidearm slots planned.
+- Sanity regen: passive only (no skill-kill / headshot differentiation).
+- Netcode: full snapshots, no delta compression. No client prediction
+  or lag compensation.
+- Install server: host-platform binary only (cross-platform release
+  bundle planned).
+
+**Not yet shipped at all:**
+
 - Director mode (§10).
-- Brands beyond "single hardcoded pool" (§9).
-- Intermission brand-vote kiosks (§7.3).
 - Audio pillar (§13).
-- Meta-progression + unlocks (§14).
-- Procedural arena generator (§12).
-- Content-pack loader (§17.6).
+- Meta-progression / unlocks / leaderboard / seed-of-the-day (§14, §17.7).
+- Movement-as-primitive traversal slot (§6.3).
+- Corpse looting (§9.2).
+- Day/night variants + multi-theme arenas (§12.3–12.4).
+- Signed-release channel / multi-platform binary bundles (Ed25519
+  public-key verification on top of HMAC).
+- Persistent late-joiner tile-delta replay.
 
-Sections 6–16 of this document are the design target, not the current
-build. Use §19 Milestones to navigate what's done vs. ahead.
+Sections 6–16 of this document remain the design target. Use §19
+Milestones to navigate what's done vs. ahead.
 
 ---
 

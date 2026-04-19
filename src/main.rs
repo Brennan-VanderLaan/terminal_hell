@@ -22,12 +22,19 @@ enum Command {
 }
 
 fn main() -> Result<()> {
+    // Logs go into an in-memory ring buffer instead of stderr; the TUI
+    // render loop would otherwise clobber them. Viewed in-game via
+    // backtick-toggled console overlay.
+    let log_buf = terminal_hell::log_buf::LogBuffer::install(1024);
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
-        .with_writer(std::io::stderr)
+        .with_writer(log_buf)
+        .with_ansi(false)
+        .with_target(false)
+        .without_time()
         .init();
 
     let cli = Cli::parse();

@@ -113,6 +113,25 @@ pub struct Game {
     /// Rendering camera owned by Game so every render path shares it. Sim
     /// never reads from this.
     pub camera: Camera,
+    /// Session token used for netcode user_data validation and (phase 3)
+    /// HMAC binary signing. Random per `serve`, blank in solo.
+    pub session_token: [u8; 16],
+    /// Share-code advertised to friends. None until the serve loop (or
+    /// STUN probe in phase 2) fills it in.
+    pub share_code: Option<crate::share::ShareCode>,
+    /// Install one-liner ready for clipboard (populated when the HTTP
+    /// install server is up — phase 3). None until then.
+    pub install_one_liner: Option<String>,
+    pub menu: crate::menu::Menu,
+    pub console: crate::console::Console,
+    /// True when this process owns the authoritative sim (solo or host).
+    /// Clients of a remote server run with this false; the menu uses it
+    /// to hide host-only controls (like the pause toggle) from clients.
+    pub is_authoritative: bool,
+    /// When true, authoritative ticks + client-side particle ticks are
+    /// skipped. Synced via snapshot so clients freeze in step with the
+    /// host.
+    pub paused: bool,
     pub local_id: Option<u32>,
     seed_counter: u64,
     next_player_id: u32,
@@ -163,6 +182,13 @@ impl Game {
             next_sign_id: 1,
             phantoms: Vec::new(),
             camera,
+            session_token: [0u8; 16],
+            share_code: None,
+            install_one_liner: None,
+            menu: crate::menu::Menu::default(),
+            console: crate::console::Console::default(),
+            is_authoritative: true,
+            paused: false,
             local_id: None,
             seed_counter: 0x9E3779B97F4A7C15,
             next_player_id: 1,
@@ -637,7 +663,11 @@ impl Game {
     }
 
     pub fn tick_authoritative(&mut self, dt: f32) {
-        if !self.alive {
+        if !self.alive || self.paused {
+            // Still clear per-tick outgoing event buffers even while paused
+            // so a paused frame doesn't re-broadcast stale blasts.
+            self.tick_tile_updates.clear();
+            self.tick_blasts.clear();
             return;
         }
         self.tick_tile_updates.clear();
@@ -1024,12 +1054,22 @@ impl Game {
     }
 
     pub fn tick_client(&mut self, dt: f32) {
+        if self.paused {
+            return;
+        }
         self.particles.retain_mut(|p| p.update(dt));
         self.hitscans.retain_mut(|h| {
             h.ttl -= dt;
             h.ttl > 0.0
         });
         self.tick_phantoms(dt);
+    }
+
+    /// Host-only: flip pause state. Clients follow via snapshot.
+    pub fn toggle_pause(&mut self) {
+        if self.is_authoritative {
+            self.paused = !self.paused;
+        }
     }
 
     fn next_seed(&mut self, tile: (i32, i32)) -> u64 {

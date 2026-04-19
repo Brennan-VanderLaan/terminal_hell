@@ -78,6 +78,9 @@ pub struct Snapshot {
     pub corruption: f32,
     pub marked_player_id: u32, // 0 == no mark
     pub yellow_signs: Vec<SignSnap>,
+    /// Host-controlled pause. When true, clients freeze their local
+    /// particle / phantom ticks in step with the authoritative sim.
+    pub paused: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

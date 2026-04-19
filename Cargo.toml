@@ -5,15 +5,22 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1"
+arboard = { version = "3", default-features = false }
+base32 = "0.5"
 bincode = { version = "2", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 crossterm = { version = "0.28", features = ["event-stream"] }
+getrandom = "0.2"
+hmac = "0.12"
+igd = "0.12"
 include_dir = "0.7"
 rand = { version = "0.8", default-features = false, features = ["small_rng"] }
 ratatui = "0.29"
 renet = "2"
 renet_netcode = "2"
 serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+tiny_http = "0.12"
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

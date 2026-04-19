@@ -12,6 +12,7 @@ use crate::fb::Framebuffer;
 use crate::game::{DestructionBlast, Game};
 use crate::hud;
 use crate::input::Input;
+use crate::menu;
 use crate::net::proto::{self, ClientInput, ClientMsg, ServerMsg};
 use crate::pickup::Pickup;
 use crate::player::Player;
@@ -22,14 +23,27 @@ const TARGET_FRAME: Duration = Duration::from_micros(16_667);
 const INPUT_PERIOD: Duration = Duration::from_micros(16_667); // ~60 Hz
 
 pub fn run_connect(addr: String) -> Result<()> {
-    let server_addr: SocketAddr = parse_server_addr(&addr)?;
+    // Accept either a raw `ip:port` (LAN / manual) or a `TH01...` share
+    // code. Share codes additionally carry the session token which the
+    // host uses to validate the connection.
+    let (server_addr, user_data): (SocketAddr, Option<[u8; 256]>) =
+        if addr.starts_with(crate::share::MAGIC) {
+            let code = crate::share::ShareCode::decode(&addr)?;
+            let server_addr =
+                SocketAddr::from((code.ip, code.game_port));
+            let mut data = [0u8; 256];
+            data[..16].copy_from_slice(&code.token);
+            (server_addr, Some(data))
+        } else {
+            (parse_server_addr(&addr)?, None)
+        };
     let socket = UdpSocket::bind("0.0.0.0:0")?;
     let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
     let client_id = current_time.as_nanos() as u64;
     let auth = ClientAuthentication::Unsecure {
         server_addr,
         client_id,
-        user_data: None,
+        user_data,
         protocol_id: super::PROTOCOL_ID,
     };
     let mut transport = NetcodeClientTransport::new(current_time, auth, socket)?;
@@ -49,6 +63,14 @@ pub fn run_connect(addr: String) -> Result<()> {
     let (aw, ah) = world_size();
     let content = crate::content::ContentDb::load_core()?;
     let mut game = Game::new(Arena::generate(0, aw, ah), content, cols, rows);
+    // Clients don't own the authoritative sim — this flag hides host-only
+    // menu items (notably the pause toggle) and makes toggle_pause a no-op.
+    game.is_authoritative = false;
+    // Client already knows the share code it was invoked with; stash it
+    // so the menu can offer "copy connect string" for re-sharing.
+    if let Ok(code) = crate::share::ShareCode::decode(&addr) {
+        game.share_code = Some(code);
+    }
 
     let mut input = Input::default();
     let mut last_instant = Instant::now();
@@ -84,13 +106,66 @@ pub fn run_connect(addr: String) -> Result<()> {
                     let press =
                         matches!(k.kind, KeyEventKind::Press | KeyEventKind::Repeat);
                     let release = matches!(k.kind, KeyEventKind::Release);
-                    match k.code {
-                        KeyCode::Esc => return Ok(()),
-                        KeyCode::Char('c')
-                            if press && k.modifiers.contains(KeyModifiers::CONTROL) =>
-                        {
-                            return Ok(());
+                    if let KeyCode::Esc = k.code {
+                        if press && !matches!(k.kind, KeyEventKind::Repeat) {
+                            game.menu.toggle();
                         }
+                        continue;
+                    }
+                    if let KeyCode::Char('`') = k.code {
+                        if press && !matches!(k.kind, KeyEventKind::Repeat) {
+                            game.console.toggle();
+                        }
+                        continue;
+                    }
+                    if k.code == KeyCode::Char('c')
+                        && press
+                        && k.modifiers.contains(KeyModifiers::CONTROL)
+                    {
+                        return Ok(());
+                    }
+                    if game.menu.open {
+                        if !press || matches!(k.kind, KeyEventKind::Repeat) {
+                            continue;
+                        }
+                        match k.code {
+                            KeyCode::Up => game.menu.move_up(),
+                            KeyCode::Down => {
+                                let max = game.menu.items(game.is_authoritative).len();
+                                game.menu.move_down(max);
+                            }
+                            KeyCode::Enter => {
+                                let connect_cmd = game
+                                    .share_code
+                                    .as_ref()
+                                    .map(|c| c.connect_command());
+                                let install = game.install_one_liner.clone();
+                                let action = game.menu.activate(
+                                    game.is_authoritative,
+                                    connect_cmd.as_deref(),
+                                    install.as_deref(),
+                                );
+                                match action {
+                                    menu::MenuAction::None => {}
+                                    menu::MenuAction::Close => {}
+                                    menu::MenuAction::Quit => return Ok(()),
+                                    menu::MenuAction::TogglePause => {
+                                        // Clients don't own pause — item should be hidden
+                                        // anyway since is_authoritative == false.
+                                        game.menu.set_feedback("only the host can pause", 1.5);
+                                    }
+                                    menu::MenuAction::Copy(text) => {
+                                        let feedback = menu::copy_to_clipboard(&text);
+                                        eprintln!("\n{}", text);
+                                        game.menu.set_feedback(feedback, 2.0);
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
+                    match k.code {
                         KeyCode::Char(' ') if press => game.mouse.lmb = true,
                         KeyCode::Char(' ') if release => game.mouse.lmb = false,
                         KeyCode::Char('e') | KeyCode::Char('E') if press => {
@@ -137,8 +212,9 @@ pub fn run_connect(addr: String) -> Result<()> {
             }
         }
 
-        // Tick client-side particles (pure visual).
+        // Tick client-side particles (pure visual) + menu feedback timer.
         game.tick_client(dt.as_secs_f32());
+        game.menu.tick(dt.as_secs_f32());
 
         // Send input ~60 Hz.
         if client.is_connected() && welcomed && input_accum >= INPUT_PERIOD {
@@ -191,6 +267,11 @@ pub fn run_connect(addr: String) -> Result<()> {
             hud::draw_wave_banner(
                 &mut out, tc, tr, game.director.wave, game.director.banner_ttl,
             )?;
+            if game.paused {
+                hud::draw_paused_banner(&mut out, tc, tr, game.is_authoritative)?;
+            }
+            game.console.render(&mut out, tc, tr)?;
+            game.menu.render(&mut out, tc, tr, game.is_authoritative, game.paused)?;
         } else {
             fb.blit(&mut out)?;
             hud::draw_connecting(&mut out)?;
@@ -274,6 +355,8 @@ fn handle_unreliable(msg: ServerMsg, game: &mut Game) {
                     ttl_max: sn.ttl_max,
                 });
             }
+            // Mirror host pause state — stops local particle/phantom ticks.
+            game.paused = s.paused;
 
             // Rebuild enemies + projectiles. Authoring stays on the host; the
             // client just draws what it's told.
