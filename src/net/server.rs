@@ -12,7 +12,10 @@ use crate::fb::Framebuffer;
 use crate::game::{Game, PlayerInput};
 use crate::hud;
 use crate::input::Input;
-use crate::net::proto::{self, Blast, PlayerSnap, ProjSnap, EnemySnap, ClientMsg, ServerMsg, Snapshot, Welcome};
+use crate::net::proto::{
+    self, Blast, ClientMsg, EnemySnap, HitscanSnap, PickupSnap, PlayerSnap, ProjSnap, ServerMsg,
+    Snapshot, WeaponLoadout, WeaponSnap, Welcome,
+};
 use crate::terminal;
 
 const TARGET_FRAME: Duration = Duration::from_micros(16_667);
@@ -45,7 +48,13 @@ pub fn run_serve(port: u16) -> Result<()> {
     let mut fb = Framebuffer::new(cols, rows);
     let (aw, ah) = super::client::arena_size(cols, rows);
     let arena = Arena::hand_crafted(aw, ah);
-    let mut game = Game::new(arena, super::client::center_offset(cols, rows, aw, ah));
+    let content = crate::content::ContentDb::load_core()?;
+    tracing::info!(brand = %content.active_brand().id, "content pack loaded");
+    let mut game = Game::new(
+        arena,
+        content,
+        super::client::center_offset(cols, rows, aw, ah),
+    );
 
     // The host plays too — add the local player immediately.
     let local_id = game.add_player();
@@ -107,9 +116,10 @@ pub fn run_serve(port: u16) -> Result<()> {
             }
         }
 
-        // Drain incoming client inputs.
+        // Drain incoming client inputs (Unreliable: movement/aim) and
+        // action events (Reliable: interact / cycle weapon).
         let client_ids: Vec<_> = server.clients_id();
-        for cid in client_ids {
+        for cid in client_ids.iter().copied() {
             while let Some(msg) = server.receive_message(cid, DefaultChannel::Unreliable) {
                 if let Some(ClientMsg::Input(inp)) = proto::decode::<ClientMsg>(&msg) {
                     if let Some(&pid) = client_to_player.get(&cid) {
@@ -126,6 +136,14 @@ pub fn run_serve(port: u16) -> Result<()> {
                     }
                 }
             }
+            while let Some(msg) = server.receive_message(cid, DefaultChannel::ReliableOrdered) {
+                let Some(pid) = client_to_player.get(&cid).copied() else { continue };
+                match proto::decode::<ClientMsg>(&msg) {
+                    Some(ClientMsg::Interact) => game.try_interact(pid),
+                    Some(ClientMsg::CycleWeapon) => game.try_cycle_weapon(pid),
+                    _ => {}
+                }
+            }
         }
 
         // Local input events (host's keyboard + mouse).
@@ -137,7 +155,6 @@ pub fn run_serve(port: u16) -> Result<()> {
                     let release = matches!(k.kind, KeyEventKind::Release);
                     match k.code {
                         KeyCode::Esc => return Ok(()),
-                        KeyCode::Char('q') if press => return Ok(()),
                         KeyCode::Char('c')
                             if press && k.modifiers.contains(KeyModifiers::CONTROL) =>
                         {
@@ -145,6 +162,16 @@ pub fn run_serve(port: u16) -> Result<()> {
                         }
                         KeyCode::Char(' ') if press => game.mouse.lmb = true,
                         KeyCode::Char(' ') if release => game.mouse.lmb = false,
+                        KeyCode::Char('e') | KeyCode::Char('E') if press => {
+                            if !matches!(k.kind, KeyEventKind::Repeat) {
+                                game.try_interact(local_id);
+                            }
+                        }
+                        KeyCode::Char('q') if press => {
+                            if !matches!(k.kind, KeyEventKind::Repeat) {
+                                game.try_cycle_weapon(local_id);
+                            }
+                        }
                         code if press => input.key_event(code, true),
                         code if release => input.key_event(code, false),
                         _ => {}
@@ -230,6 +257,9 @@ pub fn run_serve(port: u16) -> Result<()> {
             .map(|p| p.hp)
             .unwrap_or(0);
         hud::draw_hud(&mut out, game.director.wave, hp, game.kills)?;
+        if let Some(loadout) = game.local_loadout() {
+            hud::draw_loadout(&mut out, &loadout)?;
+        }
         let (tc, tr) = crossterm::terminal::size()?;
         hud::draw_wave_banner(
             &mut out, tc, tr, game.director.wave, game.director.banner_ttl,
@@ -287,6 +317,45 @@ fn build_snapshot(game: &Game) -> Snapshot {
             .projectiles
             .iter()
             .map(|p| ProjSnap { x: p.x, y: p.y })
+            .collect(),
+        pickups: game
+            .pickups
+            .iter()
+            .map(|pk| PickupSnap {
+                id: pk.id,
+                x: pk.x,
+                y: pk.y,
+                rarity: pk.rarity,
+                primitives: pk.primitives.clone(),
+            })
+            .collect(),
+        weapons: game
+            .players
+            .iter()
+            .zip(game.runtimes.iter())
+            .map(|(pl, rt)| WeaponSnap {
+                player_id: pl.id,
+                active_slot: rt.active_slot,
+                slot0: rt.weapons[0].as_ref().map(|w| WeaponLoadout {
+                    rarity: w.rarity,
+                    primitives: w.slots.clone(),
+                }),
+                slot1: rt.weapons[1].as_ref().map(|w| WeaponLoadout {
+                    rarity: w.rarity,
+                    primitives: w.slots.clone(),
+                }),
+            })
+            .collect(),
+        hitscans: game
+            .hitscans
+            .iter()
+            .map(|h| HitscanSnap {
+                from_x: h.from.0,
+                from_y: h.from.1,
+                to_x: h.to.0,
+                to_y: h.to.1,
+                ttl: h.ttl,
+            })
             .collect(),
     }
 }

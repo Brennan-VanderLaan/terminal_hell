@@ -4,6 +4,7 @@ use std::io::stdout;
 use std::time::{Duration, Instant};
 
 pub mod arena;
+pub mod content;
 pub mod enemy;
 pub mod fb;
 pub mod game;
@@ -12,7 +13,9 @@ pub mod input;
 pub mod mouse;
 pub mod net;
 pub mod particle;
+pub mod pickup;
 pub mod player;
+pub mod primitive;
 pub mod projectile;
 pub mod sprite;
 pub mod terminal;
@@ -38,7 +41,9 @@ pub fn run_solo() -> Result<()> {
     let arena = Arena::hand_crafted(aw, ah);
 
     let origin = net::client::center_offset(cols, rows, aw, ah);
-    let mut game = Game::new(arena, origin);
+    let content = content::ContentDb::load_core()?;
+    tracing::info!(brand = %content.active_brand().id, "content pack loaded");
+    let mut game = Game::new(arena, content, origin);
     let local_id = game.add_player();
     game.local_id = Some(local_id);
     let mut input = Input::default();
@@ -60,7 +65,6 @@ pub fn run_solo() -> Result<()> {
                     let release = matches!(k.kind, KeyEventKind::Release);
                     match k.code {
                         KeyCode::Esc => return Ok(()),
-                        KeyCode::Char('q') if press => return Ok(()),
                         KeyCode::Char('c')
                             if press && k.modifiers.contains(KeyModifiers::CONTROL) =>
                         {
@@ -68,6 +72,17 @@ pub fn run_solo() -> Result<()> {
                         }
                         KeyCode::Char(' ') if press => game.mouse.lmb = true,
                         KeyCode::Char(' ') if release => game.mouse.lmb = false,
+                        KeyCode::Char('e') | KeyCode::Char('E') if press => {
+                            if !matches!(k.kind, KeyEventKind::Repeat) {
+                                game.try_interact(local_id);
+                            }
+                        }
+                        KeyCode::Char('q') if press => {
+                            // In solo mode Q toggles weapon slot, not quit.
+                            if !matches!(k.kind, KeyEventKind::Repeat) {
+                                game.try_cycle_weapon(local_id);
+                            }
+                        }
                         code if press => input.key_event(code, true),
                         code if release => input.key_event(code, false),
                         _ => {}
@@ -115,6 +130,9 @@ pub fn run_solo() -> Result<()> {
         fb.blit(&mut stdout)?;
         let hp = game.local_player().map(|p| p.hp).unwrap_or(0);
         hud::draw_hud(&mut stdout, game.director.wave, hp, game.kills)?;
+        if let Some(loadout) = game.local_loadout() {
+            hud::draw_loadout(&mut stdout, &loadout)?;
+        }
         let (tc, tr) = crossterm::terminal::size()?;
         hud::draw_wave_banner(
             &mut stdout,

@@ -25,6 +25,44 @@ pub fn draw_hud<W: Write>(out: &mut W, wave: u32, hp: i32, kills: u32) -> Result
     Ok(())
 }
 
+/// Render a weapon-loadout strip below the main HUD. Each slot shows its
+/// rarity color and the letters of its primitive set; the active slot is
+/// highlighted with a leading `>`.
+pub fn draw_loadout<W: Write>(
+    out: &mut W,
+    loadout: &crate::game::LocalLoadoutView,
+) -> Result<()> {
+    for (i, slot) in loadout.slots.iter().enumerate() {
+        let active = i as u8 == loadout.active_slot;
+        let marker = if active { ">" } else { " " };
+        let label = match slot {
+            Some((rarity, prims)) => {
+                let color = rarity.color();
+                let letters: String = if prims.is_empty() {
+                    "—".to_string()
+                } else {
+                    prims.iter().map(|p| p.glyph()).collect::<String>()
+                };
+                let text = format!("{} S{} [{:<6}] ", marker, i + 1, letters);
+                (color, text)
+            }
+            None => (crate::fb::Pixel::rgb(100, 100, 100),
+                     format!("{} S{} [ empty ] ", marker, i + 1)),
+        };
+        let (color, text) = label;
+        queue!(
+            out,
+            MoveTo(0, 1 + i as u16),
+            SetForegroundColor(Color::Rgb { r: color.r, g: color.g, b: color.b }),
+            SetBackgroundColor(Color::Rgb { r: 20, g: 10, b: 30 }),
+            Print(&text),
+            ResetColor,
+        )?;
+    }
+    out.flush()?;
+    Ok(())
+}
+
 pub fn draw_wave_banner<W: Write>(
     out: &mut W,
     cols: u16,

@@ -13,6 +13,7 @@ use crate::game::{DestructionBlast, Game};
 use crate::hud;
 use crate::input::Input;
 use crate::net::proto::{self, ClientInput, ClientMsg, ServerMsg};
+use crate::pickup::Pickup;
 use crate::player::Player;
 use crate::projectile::Projectile;
 use crate::terminal;
@@ -44,7 +45,12 @@ pub fn run_connect(addr: String) -> Result<()> {
 
     // Start with a placeholder arena — replaced by Welcome.
     let (aw, ah) = arena_size(cols, rows);
-    let mut game = Game::new(Arena::hand_crafted(aw, ah), center_offset(cols, rows, aw, ah));
+    let content = crate::content::ContentDb::load_core()?;
+    let mut game = Game::new(
+        Arena::hand_crafted(aw, ah),
+        content,
+        center_offset(cols, rows, aw, ah),
+    );
 
     let mut input = Input::default();
     let mut last_instant = Instant::now();
@@ -82,7 +88,6 @@ pub fn run_connect(addr: String) -> Result<()> {
                     let release = matches!(k.kind, KeyEventKind::Release);
                     match k.code {
                         KeyCode::Esc => return Ok(()),
-                        KeyCode::Char('q') if press => return Ok(()),
                         KeyCode::Char('c')
                             if press && k.modifiers.contains(KeyModifiers::CONTROL) =>
                         {
@@ -90,6 +95,22 @@ pub fn run_connect(addr: String) -> Result<()> {
                         }
                         KeyCode::Char(' ') if press => game.mouse.lmb = true,
                         KeyCode::Char(' ') if release => game.mouse.lmb = false,
+                        KeyCode::Char('e') | KeyCode::Char('E') if press => {
+                            if !matches!(k.kind, KeyEventKind::Repeat) {
+                                client.send_message(
+                                    DefaultChannel::ReliableOrdered,
+                                    proto::encode(&ClientMsg::Interact),
+                                );
+                            }
+                        }
+                        KeyCode::Char('q') if press => {
+                            if !matches!(k.kind, KeyEventKind::Repeat) {
+                                client.send_message(
+                                    DefaultChannel::ReliableOrdered,
+                                    proto::encode(&ClientMsg::CycleWeapon),
+                                );
+                            }
+                        }
                         code if press => input.key_event(code, true),
                         code if release => input.key_event(code, false),
                         _ => {}
@@ -143,6 +164,9 @@ pub fn run_connect(addr: String) -> Result<()> {
             fb.blit(&mut out)?;
             let hp = game.local_player().map(|p| p.hp).unwrap_or(0);
             hud::draw_hud(&mut out, game.director.wave, hp, game.kills)?;
+            if let Some(loadout) = game.local_loadout() {
+                hud::draw_loadout(&mut out, &loadout)?;
+            }
             let (tc, tr) = crossterm::terminal::size()?;
             hud::draw_wave_banner(
                 &mut out, tc, tr, game.director.wave, game.director.banner_ttl,
@@ -218,7 +242,8 @@ fn handle_unreliable(msg: ServerMsg, game: &mut Game) {
             game.enemies.clear();
             for es in s.enemies {
                 let archetype = crate::enemy::Archetype::from_kind(es.kind);
-                let mut e = Enemy::spawn(archetype, es.x, es.y);
+                let stats = game.content.stats(archetype);
+                let mut e = Enemy::spawn(archetype, stats, es.x, es.y);
                 e.hp = es.hp;
                 game.enemies.push(e);
             }
@@ -231,8 +256,25 @@ fn handle_unreliable(msg: ServerMsg, game: &mut Game) {
                     vy: 0.0,
                     ttl: 0.1,
                     damage: 0,
+                    owner_id: 0,
+                    primitives: Vec::new(),
+                    bounces_left: 0,
+                    pierces_left: 0,
                 });
             }
+            game.pickups.clear();
+            for ps in s.pickups {
+                game.pickups.push(Pickup::new(ps.id, ps.x, ps.y, ps.rarity, ps.primitives));
+            }
+            game.hitscans.clear();
+            for hs in s.hitscans {
+                game.hitscans.push(crate::game::HitscanTrace {
+                    from: (hs.from_x, hs.from_y),
+                    to: (hs.to_x, hs.to_y),
+                    ttl: hs.ttl,
+                });
+            }
+            game.remote_weapons = s.weapons;
         }
         ServerMsg::Blast(b) => {
             let blast = DestructionBlast {

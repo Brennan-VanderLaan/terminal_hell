@@ -3,11 +3,17 @@
 //! - `ReliableOrdered` (0): Welcome, TileUpdate, PlayerJoined/Left, RunEnded
 //! - `Unreliable` (1): Snapshot (positions), Input, Blast (visual-only)
 
+use crate::primitive::{Primitive, Rarity};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ClientMsg {
     Input(ClientInput),
+    /// One-shot "grab the nearest pickup" event. Sent on the press edge of
+    /// the interact key (E) over the reliable-ordered channel.
+    Interact,
+    /// One-shot "swap to next weapon slot" event. Reliable-ordered.
+    CycleWeapon,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Default)]
@@ -56,6 +62,44 @@ pub struct Snapshot {
     pub players: Vec<PlayerSnap>,
     pub enemies: Vec<EnemySnap>,
     pub projectiles: Vec<ProjSnap>,
+    pub pickups: Vec<PickupSnap>,
+    /// Indexed per-player (by order in `players`): which weapon slot is
+    /// active, and a short loadout summary for the HUD.
+    pub weapons: Vec<WeaponSnap>,
+    /// Active enemy hitscan tracers; clients render these until ttl expires.
+    pub hitscans: Vec<HitscanSnap>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct HitscanSnap {
+    pub from_x: f32,
+    pub from_y: f32,
+    pub to_x: f32,
+    pub to_y: f32,
+    pub ttl: f32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PickupSnap {
+    pub id: u32,
+    pub x: f32,
+    pub y: f32,
+    pub rarity: Rarity,
+    pub primitives: Vec<Primitive>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default)]
+pub struct WeaponSnap {
+    pub player_id: u32,
+    pub active_slot: u8,
+    pub slot0: Option<WeaponLoadout>,
+    pub slot1: Option<WeaponLoadout>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct WeaponLoadout {
+    pub rarity: Rarity,
+    pub primitives: Vec<Primitive>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

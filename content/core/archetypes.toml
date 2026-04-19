@@ -1,0 +1,47 @@
+# Core archetype stats. Keys match the Rust `Archetype` enum variants
+# (snake_case). Editable without recompiling — tuning lives here.
+#
+# - hp:            starting HP
+# - speed:         pixels per second
+# - touch_damage:  melee damage on contact (0 = no melee)
+# - hit_radius:    collider radius in pixels for projectile hits
+# - reach:         melee reach in pixels (falls back to hit_radius + 0 if absent)
+# - preferred_distance: ranged stand-off distance; 0 means close aggressively
+# - ranged_damage: hitscan damage for ranged units (0 = non-ranged)
+
+[rusher]
+hp = 60
+speed = 22.0
+touch_damage = 10
+hit_radius = 2.2
+reach = 2.2
+
+[pinkie]
+hp = 140
+speed = 15.0
+touch_damage = 18
+hit_radius = 4.0
+reach = 3.2
+
+[charger]
+hp = 75
+speed = 28.0
+touch_damage = 14
+hit_radius = 3.0
+reach = 2.8
+
+[revenant]
+hp = 55
+speed = 12.0
+touch_damage = 8
+hit_radius = 2.6
+reach = 2.4
+preferred_distance = 22.0
+ranged_damage = 14
+
+[miniboss]
+hp = 550
+speed = 9.0
+touch_damage = 30
+hit_radius = 6.5
+reach = 5.0

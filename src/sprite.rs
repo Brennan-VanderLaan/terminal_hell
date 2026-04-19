@@ -35,6 +35,20 @@ impl Sprite {
         }
     }
 
+    /// Blend every non-transparent pixel toward `target` by `amount` in
+    /// 0..1. 0 is a no-op; 1 replaces the pixel with `target`. Used for hit
+    /// flashes and burn glow.
+    pub fn tint_toward(&mut self, target: Pixel, amount: f32) {
+        let a = amount.clamp(0.0, 1.0);
+        for p in &mut self.pixels {
+            if let Some(c) = p {
+                c.r = lerp(c.r, target.r, a);
+                c.g = lerp(c.g, target.g, a);
+                c.b = lerp(c.b, target.b, a);
+            }
+        }
+    }
+
     /// Draw the sprite centered on `(cx, cy)` in framebuffer pixel coords.
     pub fn blit(&self, fb: &mut Framebuffer, cx: i32, cy: i32) {
         let ox = cx - (self.w as i32) / 2;
@@ -105,10 +119,16 @@ pub fn render_player_barrel(
     }
 }
 
+fn lerp(a: u8, b: u8, t: f32) -> u8 {
+    (a as f32 + (b as f32 - a as f32) * t).round().clamp(0.0, 255.0) as u8
+}
+
 pub fn enemy_sprite(archetype: Archetype) -> Sprite {
     match archetype {
         Archetype::Rusher => rusher(),
         Archetype::Pinkie => pinkie(),
+        Archetype::Charger => charger(),
+        Archetype::Revenant => revenant(),
         Archetype::Miniboss => miniboss(),
     }
 }
@@ -165,6 +185,59 @@ fn pinkie() -> Sprite {
     // Stout legs
     s.fill_rect(0, 8, 3, 2, dark);
     s.fill_rect(7, 8, 3, 2, dark);
+    s
+}
+
+fn charger() -> Sprite {
+    let body = Pixel::rgb(255, 100, 80);
+    let dark = Pixel::rgb(150, 40, 30);
+    let horn = Pixel::rgb(255, 240, 210);
+    let eye = Pixel::rgb(255, 220, 100);
+
+    let mut s = Sprite::new(8, 9);
+    // Horned head — sloped forward, implying charge.
+    s.set(0, 1, horn);
+    s.set(7, 1, horn);
+    s.fill_rect(1, 0, 6, 3, dark);
+    s.set(2, 1, eye);
+    s.set(5, 1, eye);
+    // Wedge torso — leaner than pinkie.
+    s.fill_rect(0, 3, 8, 4, body);
+    s.fill_rect(2, 4, 4, 2, dark);
+    // Sprint legs — one forward one back (frozen in motion).
+    s.fill_rect(0, 7, 2, 2, dark);
+    s.fill_rect(6, 7, 2, 2, dark);
+    s
+}
+
+fn revenant() -> Sprite {
+    let bone = Pixel::rgb(220, 230, 240);
+    let dark = Pixel::rgb(90, 110, 140);
+    let glow = Pixel::rgb(120, 200, 255);
+    let eye = Pixel::rgb(255, 160, 80);
+
+    let mut s = Sprite::new(7, 11);
+    // Skull head
+    s.fill_rect(2, 0, 3, 3, bone);
+    s.set(3, 1, eye);
+    s.set(2, 2, dark);
+    s.set(4, 2, dark);
+    // Ribcage torso
+    s.fill_rect(1, 3, 5, 4, bone);
+    s.set(1, 4, dark);
+    s.set(5, 4, dark);
+    s.set(1, 5, dark);
+    s.set(5, 5, dark);
+    s.set(3, 4, dark);
+    s.set(3, 6, dark);
+    // Shoulder-mounted launcher — glowing tip on one side as a ranged tell.
+    s.fill_rect(5, 3, 2, 2, dark);
+    s.set(6, 3, glow);
+    // Spindly legs
+    s.fill_rect(1, 7, 2, 4, dark);
+    s.fill_rect(4, 7, 2, 4, dark);
+    s.set(1, 10, bone);
+    s.set(5, 10, bone);
     s
 }
 
