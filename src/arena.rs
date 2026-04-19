@@ -54,25 +54,31 @@ impl Arena {
         let w = width as i32;
         let h = height as i32;
 
-        // Perimeter — indestructible-ish feel via extra HP.
-        for x in 0..w {
-            a.set_wall(x, 0, Material::Concrete, WALL_HP * 3);
-            a.set_wall(x, h - 1, Material::Concrete, WALL_HP * 3);
-        }
-        for y in 0..h {
-            a.set_wall(0, y, Material::Concrete, WALL_HP * 3);
-            a.set_wall(w - 1, y, Material::Concrete, WALL_HP * 3);
+        // Thick perimeter (3 pixels) for visual weight. Outer ring is
+        // effectively indestructible via triple HP.
+        for t in 0..3 {
+            for x in 0..w {
+                a.set_wall(x, t, Material::Concrete, WALL_HP * 3);
+                a.set_wall(x, h - 1 - t, Material::Concrete, WALL_HP * 3);
+            }
+            for y in 0..h {
+                a.set_wall(t, y, Material::Concrete, WALL_HP * 3);
+                a.set_wall(w - 1 - t, y, Material::Concrete, WALL_HP * 3);
+            }
         }
 
-        // Interior cover — destructible.
+        // Interior cover — scales with arena width so layouts stay readable
+        // whether the terminal is 120 cols or 300 cols.
         let cx = w / 2;
         let cy = h / 2;
-        place_block(&mut a, cx - 20, cy - 8, 4, 6);
-        place_block(&mut a, cx + 16, cy - 8, 4, 6);
-        place_block(&mut a, cx - 6, cy - 14, 12, 2);
-        place_block(&mut a, cx - 6, cy + 12, 12, 2);
-        place_block(&mut a, cx - 12, cy, 8, 2);
-        place_block(&mut a, cx + 4, cy, 8, 2);
+        let u = (w / 28).max(3); // "unit" — scales cover blocks proportionally
+
+        place_block(&mut a, cx - 8 * u, cy - 3 * u, 2 * u, 3 * u);
+        place_block(&mut a, cx + 6 * u, cy - 3 * u, 2 * u, 3 * u);
+        place_block(&mut a, cx - 4 * u, cy - 5 * u, 8 * u, u.min(3));
+        place_block(&mut a, cx - 4 * u, cy + 5 * u - u.min(3), 8 * u, u.min(3));
+        place_block(&mut a, cx - 5 * u, cy, 3 * u, u.min(2).max(2));
+        place_block(&mut a, cx + 2 * u, cy, 3 * u, u.min(2).max(2));
 
         a
     }
@@ -181,7 +187,9 @@ impl Arena {
     }
 
     pub fn render(&self, fb: &mut Framebuffer, ox: i32, oy: i32) {
-        let floor = Pixel::rgb(18, 10, 32);
+        // Floor renders as nothing — black terminal cells. Walls and rubble
+        // pop against the dark; braille overlays (bullet trails, particles)
+        // can show through on empty tiles.
         for y in 0..self.height {
             for x in 0..self.width {
                 let px = ox + x as i32;
@@ -189,21 +197,22 @@ impl Arena {
                 if px < 0 || py < 0 {
                     continue;
                 }
-                let color = match self.tile(x as i32, y as i32) {
-                    Tile::Floor => floor,
+                match self.tile(x as i32, y as i32) {
+                    Tile::Floor => {}
                     Tile::Wall { material, hp } => {
                         let base = material.intact_color();
-                        // Darken as HP drops, as a damage tell.
-                        let ratio = (hp as f32 / WALL_HP as f32).clamp(0.3, 1.0);
-                        Pixel::rgb(
+                        let ratio = (hp as f32 / WALL_HP as f32).clamp(0.35, 1.0);
+                        let color = Pixel::rgb(
                             (base.r as f32 * ratio) as u8,
                             (base.g as f32 * ratio) as u8,
                             (base.b as f32 * ratio) as u8,
-                        )
+                        );
+                        fb.set(px as u16, py as u16, color);
                     }
-                    Tile::Rubble { material } => material.debris_color(),
-                };
-                fb.set(px as u16, py as u16, color);
+                    Tile::Rubble { material } => {
+                        fb.set(px as u16, py as u16, material.debris_color());
+                    }
+                }
             }
         }
     }

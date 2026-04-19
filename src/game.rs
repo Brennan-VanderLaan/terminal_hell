@@ -136,14 +136,20 @@ impl Game {
             runtime.weapon.tick(dt);
         }
 
-        // Fire weapons.
+        // Fire weapons. Projectiles leave from the *muzzle tip* in the aim
+        // direction — not the body center — so the trail doesn't overlap the
+        // player sprite.
+        let muzzle_offset = 7.5;
         let mut new_projectiles: Vec<Projectile> = Vec::new();
         for (player, runtime) in self.players.iter().zip(self.runtimes.iter_mut()) {
             if runtime.input.firing {
-                let origin = (player.x, player.y);
+                let origin = (
+                    player.x + runtime.input.aim_x * muzzle_offset,
+                    player.y + runtime.input.aim_y * muzzle_offset,
+                );
                 let target = (
-                    player.x + runtime.input.aim_x * 100.0,
-                    player.y + runtime.input.aim_y * 100.0,
+                    origin.0 + runtime.input.aim_x * 100.0,
+                    origin.1 + runtime.input.aim_y * 100.0,
                 );
                 if let Some(p) = runtime.weapon.try_fire(origin, target) {
                     new_projectiles.push(p);
@@ -194,10 +200,9 @@ impl Game {
             }
             for (i, e) in self.enemies.iter().enumerate() {
                 let dx = p.x - e.x;
-                let dy_top = p.y - e.y;
-                let dy_bot = p.y - (e.y + 1.0);
-                let dy = if dy_top.abs() < dy_bot.abs() { dy_top } else { dy_bot };
-                if dx.abs() < 0.9 && dy.abs() < 0.9 {
+                let dy = p.y - e.y;
+                let r = e.hit_radius();
+                if dx * dx + dy * dy < r * r {
                     enemy_hits.push((i, (p.x, p.y), p.damage));
                     return false;
                 }
@@ -359,13 +364,18 @@ impl Game {
 
     fn render_crosshair(&self, fb: &mut Framebuffer) {
         let color = Pixel::rgb(255, 255, 255);
-        let cx = self.mouse.col;
-        let py = self.mouse.row.saturating_mul(2);
-        fb.set(cx, py, color);
-        fb.set(cx, py + 1, color);
-        if cx > 0 {
-            fb.set(cx - 1, py, color);
+        // Cell (col, row) covers pixels (col*2..col*2+2, row*3..row*3+3).
+        let px = self.mouse.col.saturating_mul(2) + 1;
+        let py = self.mouse.row.saturating_mul(3) + 1;
+        // Draw a small + centered on the cell: one pixel up, down, left, right.
+        fb.set(px, py, color);
+        if py > 0 {
+            fb.set(px, py - 1, color);
         }
-        fb.set(cx + 1, py, color);
+        fb.set(px, py + 1, color);
+        if px > 0 {
+            fb.set(px - 1, py, color);
+        }
+        fb.set(px + 1, py, color);
     }
 }

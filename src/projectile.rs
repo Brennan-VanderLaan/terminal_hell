@@ -1,5 +1,6 @@
 use crate::arena::Arena;
-use crate::fb::{Framebuffer, Pixel};
+use crate::fb::Framebuffer;
+use crate::sprite;
 
 pub enum ProjectileOutcome {
     Alive,
@@ -33,11 +34,12 @@ impl Projectile {
     }
 
     pub fn render(&self, fb: &mut Framebuffer, ox: i32, oy: i32) {
-        let px = ox + self.x.round() as i32;
-        let py = oy + self.y.round() as i32;
-        if px < 0 || py < 0 {
-            return;
-        }
-        fb.set(px as u16, py as u16, Pixel::rgb(255, 240, 140));
+        sprite::render_projectile(
+            fb,
+            ox as f32 + self.x,
+            oy as f32 + self.y,
+            self.vx,
+            self.vy,
+        );
     }
 }

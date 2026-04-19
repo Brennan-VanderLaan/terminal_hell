@@ -14,6 +14,7 @@ pub mod net;
 pub mod particle;
 pub mod player;
 pub mod projectile;
+pub mod sprite;
 pub mod terminal;
 pub mod waves;
 pub mod weapon;

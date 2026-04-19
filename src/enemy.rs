@@ -1,14 +1,11 @@
 use crate::arena::Arena;
 use crate::fb::{Framebuffer, Pixel};
+use crate::sprite;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Archetype {
-    /// Small, fast, cheap melee zerg. Imp-ish.
     Rusher,
-    /// Armored brute: slower, higher HP, harder-hitting melee. Pinkie-ish.
     Pinkie,
-    /// Miniboss: huge HP, slow, big contact damage, drops a guaranteed Rare
-    /// (handled by loot system once that ships). Cybermini.
     Miniboss,
 }
 
@@ -59,6 +56,16 @@ impl Enemy {
             Archetype::Rusher => 10,
             Archetype::Pinkie => 18,
             Archetype::Miniboss => 30,
+        }
+    }
+
+    /// Effective hit radius in arena-pixel units. Matches sprite footprint
+    /// so projectiles need to actually *hit the sprite*, not just the center.
+    pub fn hit_radius(&self) -> f32 {
+        match self.archetype {
+            Archetype::Rusher => 2.2,
+            Archetype::Pinkie => 4.0,
+            Archetype::Miniboss => 6.5,
         }
     }
 
@@ -113,8 +120,9 @@ impl Enemy {
         let dx = self.x - px;
         let dy = (self.y - py).abs().min((self.y + 1.0 - py).abs());
         let reach = match self.archetype {
-            Archetype::Miniboss => 1.6,
-            _ => 1.0,
+            Archetype::Miniboss => 5.0,
+            Archetype::Pinkie => 3.2,
+            Archetype::Rusher => 2.2,
         };
         if dx.abs() < reach && dy < reach {
             self.touch_cooldown = 0.5;
@@ -124,19 +132,9 @@ impl Enemy {
     }
 
     pub fn render(&self, fb: &mut Framebuffer, ox: i32, oy: i32) {
-        let px = ox + self.x.round() as i32;
-        let py = oy + self.y.round() as i32;
-        if px < 0 || py < 0 {
-            return;
-        }
-        let c = self.color();
-        fb.set(px as u16, py as u16, c);
-        fb.set(px as u16, (py + 1) as u16, c);
-        // Pinkies and minibosses are wider — paint a second column too.
-        if matches!(self.archetype, Archetype::Pinkie | Archetype::Miniboss) {
-            fb.set((px + 1) as u16, py as u16, c);
-            fb.set((px + 1) as u16, (py + 1) as u16, c);
-        }
+        let cx = ox + self.x.round() as i32;
+        let cy = oy + self.y.round() as i32;
+        sprite::enemy_sprite(self.archetype).blit(fb, cx, cy);
     }
 }
 

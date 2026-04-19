@@ -268,15 +268,19 @@ pub fn wait_for_any_key() -> Result<()> {
     }
 }
 
+/// Fit the arena to the terminal's sextant pixel grid (2 px/col × 3 px/row).
+/// No upper cap — bigger terminal = bigger arena.
 pub fn arena_size(cols: u16, rows: u16) -> (u16, u16) {
-    let pixel_h = rows.saturating_mul(2);
-    let w = cols.min(160).max(40);
-    let h = pixel_h.min(80).max(30);
+    let px_w = cols.saturating_mul(2);
+    let px_h = rows.saturating_mul(3);
+    // Reserve a margin so the arena border doesn't touch the HUD row.
+    let w = px_w.saturating_sub(4).max(80);
+    let h = px_h.saturating_sub(6).max(48);
     (w, h)
 }
 
 pub fn center_offset(cols: u16, rows: u16, aw: u16, ah: u16) -> (i32, i32) {
-    let ox = (cols as i32 - aw as i32) / 2;
-    let oy = (rows as i32 * 2 - ah as i32) / 2;
+    let ox = (cols as i32 * 2 - aw as i32) / 2;
+    let oy = (rows as i32 * 3 - ah as i32) / 2;
     (ox.max(0), oy.max(0))
 }

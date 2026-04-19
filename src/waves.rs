@@ -115,13 +115,19 @@ impl WaveDirector {
 fn pick_spawn(rng: &mut SmallRng, arena: &Arena) -> Option<(f32, f32)> {
     let w = arena.width as i32;
     let h = arena.height as i32;
-    for _ in 0..64 {
+    // Past the 3-pixel perimeter plus a couple pixels of breathing room so
+    // enemies don't spawn with their sprites clipping through the wall.
+    let margin = 6;
+    if w < margin * 3 || h < margin * 3 {
+        return None;
+    }
+    for _ in 0..128 {
         let edge = rng.gen_range(0..4u8);
         let (tx, ty) = match edge {
-            0 => (rng.gen_range(2..w - 2), 2),
-            1 => (rng.gen_range(2..w - 2), h - 3),
-            2 => (2, rng.gen_range(2..h - 2)),
-            _ => (w - 3, rng.gen_range(2..h - 2)),
+            0 => (rng.gen_range(margin..w - margin), margin),
+            1 => (rng.gen_range(margin..w - margin), h - margin - 1),
+            2 => (margin, rng.gen_range(margin..h - margin)),
+            _ => (w - margin - 1, rng.gen_range(margin..h - margin)),
         };
         if arena.is_passable(tx, ty) && arena.is_passable(tx, ty + 1) {
             return Some((tx as f32 + 0.5, ty as f32 + 0.5));

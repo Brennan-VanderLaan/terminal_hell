@@ -1,6 +1,7 @@
 use crate::arena::Arena;
-use crate::fb::{Framebuffer, Pixel};
+use crate::fb::Framebuffer;
 use crate::input::Input;
+use crate::sprite;
 
 pub struct Player {
     pub id: u32,
@@ -8,8 +9,6 @@ pub struct Player {
     pub y: f32,
     pub hp: i32,
     pub speed: f32,
-    /// Aim direction normalized, in pixel-space. Sent by clients; used by the
-    /// host to fan projectiles when the player fires.
     pub aim_x: f32,
     pub aim_y: f32,
     pub firing: bool,
@@ -54,24 +53,17 @@ impl Player {
         }
     }
 
-    pub fn render(&self, fb: &mut Framebuffer, ox: i32, oy: i32, is_self: bool) {
-        let px = ox + self.x.round() as i32;
-        let py = oy + self.y.round() as i32;
-        if px < 0 || py < 0 {
-            return;
-        }
-        // Self is bright cyan, remotes are bright green — fast recognition.
-        let color = if is_self {
-            Pixel::rgb(80, 255, 220)
-        } else {
-            Pixel::rgb(140, 255, 100)
-        };
-        fb.set(px as u16, py as u16, color);
-        fb.set(px as u16, (py + 1) as u16, color);
+    pub fn render(&self, fb: &mut Framebuffer, ox: i32, oy: i32, _is_self: bool) {
+        let cx = ox + self.x.round() as i32;
+        let cy = oy + self.y.round() as i32;
+        sprite::player_body().blit(fb, cx, cy);
+        sprite::render_player_barrel(fb, cx as f32, cy as f32, self.aim_x, self.aim_y);
     }
 }
 
 fn collides(arena: &Arena, x: f32, y: f32) -> bool {
+    // 1×2 collider in pixel space — movement still uses the old tile grid for
+    // wall collision; sprite size is visual-only.
     let tx = x.floor() as i32;
     let ty0 = y.floor() as i32;
     let ty1 = ty0 + 1;
