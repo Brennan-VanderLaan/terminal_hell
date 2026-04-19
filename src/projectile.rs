@@ -1,5 +1,6 @@
 use crate::arena::Arena;
-use crate::fb::Framebuffer;
+use crate::camera::Camera;
+use crate::fb::{Framebuffer, Pixel};
 use crate::primitive::Primitive;
 use crate::sprite;
 
@@ -63,13 +64,22 @@ impl Projectile {
         self.primitives.contains(&p)
     }
 
-    pub fn render(&self, fb: &mut Framebuffer, ox: i32, oy: i32) {
-        sprite::render_projectile(
-            fb,
-            ox as f32 + self.x,
-            oy as f32 + self.y,
-            self.vx,
-            self.vy,
-        );
+    pub fn render(&self, fb: &mut Framebuffer, camera: &Camera) {
+        let (sx, sy) = camera.world_to_screen((self.x, self.y));
+        match camera.mip_level() {
+            0 => {
+                let speed = (self.vx * self.vx + self.vy * self.vy).sqrt().max(0.001);
+                let ux = self.vx / speed;
+                let uy = self.vy / speed;
+                sprite::render_projectile_screen(fb, sx, sy, ux, uy, camera.zoom);
+            }
+            _ => {
+                sprite::render_dot(
+                    fb,
+                    (sx.round() as i32, sy.round() as i32),
+                    Pixel::rgb(255, 245, 150),
+                );
+            }
+        }
     }
 }

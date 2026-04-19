@@ -6,7 +6,9 @@
 //! to the active brand stack, and future waves sample enemies from all
 //! active brands (weighted). Kiosks despawn at vote end.
 
+use crate::camera::Camera;
 use crate::fb::{Framebuffer, Pixel};
+use crate::sprite;
 use std::collections::HashSet;
 
 pub struct VoteKiosk {
@@ -46,39 +48,42 @@ impl VoteKiosk {
         self.flash_phase = (self.flash_phase + dt * 3.0) % 1.0;
     }
 
-    pub fn render(&self, fb: &mut Framebuffer, ox: i32, oy: i32) {
-        let cx = ox + self.x.round() as i32;
-        let cy = oy + self.y.round() as i32;
+    pub fn render(&self, fb: &mut Framebuffer, camera: &Camera) {
+        let (sx, sy) = camera.world_to_screen((self.x, self.y));
+        let cx = sx.round() as i32;
+        let cy = sy.round() as i32;
 
-        let pulse = 0.6 + 0.4 * (self.flash_phase * std::f32::consts::TAU).sin().abs();
-        let halo = Pixel::rgb(
-            (self.brand_color.r as f32 * pulse) as u8,
-            (self.brand_color.g as f32 * pulse) as u8,
-            (self.brand_color.b as f32 * pulse) as u8,
-        );
-        let core = self.brand_color;
-        let stand = Pixel::rgb(80, 80, 100);
+        match camera.mip_level() {
+            0 => {
+                let pulse = 0.6 + 0.4 * (self.flash_phase * std::f32::consts::TAU).sin().abs();
+                let halo = Pixel::rgb(
+                    (self.brand_color.r as f32 * pulse) as u8,
+                    (self.brand_color.g as f32 * pulse) as u8,
+                    (self.brand_color.b as f32 * pulse) as u8,
+                );
+                let core = self.brand_color;
+                let stand = Pixel::rgb(80, 80, 100);
 
-        // Pedestal.
-        for dx in -2..=2_i32 {
-            set(fb, cx + dx, cy + 3, stand);
-            set(fb, cx + dx, cy + 4, stand);
-        }
-        // Glass panel (core).
-        for dy in -2..=2_i32 {
-            for dx in -1..=1_i32 {
-                set(fb, cx + dx, cy + dy, core);
+                for dx in -2..=2_i32 {
+                    set(fb, cx + dx, cy + 3, stand);
+                    set(fb, cx + dx, cy + 4, stand);
+                }
+                for dy in -2..=2_i32 {
+                    for dx in -1..=1_i32 {
+                        set(fb, cx + dx, cy + dy, core);
+                    }
+                }
+                set(fb, cx - 2, cy - 2, halo);
+                set(fb, cx - 2, cy + 2, halo);
+                set(fb, cx + 2, cy - 2, halo);
+                set(fb, cx + 2, cy + 2, halo);
+                set(fb, cx, cy - 3, halo);
+                for i in 0..self.votes.min(4) as i32 {
+                    set(fb, cx - 1 + i, cy - 4, Pixel::rgb(255, 255, 255));
+                }
             }
-        }
-        // Halo frame.
-        set(fb, cx - 2, cy - 2, halo);
-        set(fb, cx - 2, cy + 2, halo);
-        set(fb, cx + 2, cy - 2, halo);
-        set(fb, cx + 2, cy + 2, halo);
-        set(fb, cx, cy - 3, halo);
-        // Vote-count marker: a ring of bright dots at the top, one per vote.
-        for i in 0..self.votes.min(4) as i32 {
-            set(fb, cx - 1 + i, cy - 4, Pixel::rgb(255, 255, 255));
+            1 => sprite::render_blob(fb, (cx, cy), self.brand_color),
+            _ => sprite::render_dot(fb, (cx, cy), self.brand_color),
         }
     }
 }

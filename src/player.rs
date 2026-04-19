@@ -1,5 +1,6 @@
 use crate::arena::Arena;
-use crate::fb::Framebuffer;
+use crate::camera::Camera;
+use crate::fb::{Framebuffer, Pixel};
 use crate::input::Input;
 use crate::sprite;
 
@@ -66,13 +67,42 @@ impl Player {
         }
     }
 
-    pub fn render(&self, fb: &mut Framebuffer, ox: i32, oy: i32, _is_self: bool, marked: bool) {
-        let cx = ox + self.x.round() as i32;
-        let cy = oy + self.y.round() as i32;
-        sprite::player_body().blit(fb, cx, cy);
-        sprite::render_player_barrel(fb, cx as f32, cy as f32, self.aim_x, self.aim_y);
-        if marked {
-            sprite::render_hastur_mark(fb, cx, cy);
+    pub fn render(
+        &self,
+        fb: &mut Framebuffer,
+        camera: &Camera,
+        is_self: bool,
+        marked: bool,
+    ) {
+        let (sx, sy) = camera.world_to_screen((self.x, self.y));
+        let center = (sx.round() as i32, sy.round() as i32);
+        let self_color = Pixel::rgb(80, 255, 220);
+        let other_color = Pixel::rgb(140, 255, 100);
+        let tint = if is_self { self_color } else { other_color };
+
+        match camera.mip_level() {
+            0 => {
+                let body = sprite::player_body();
+                body.blit_scaled(fb, center, camera.zoom);
+                sprite::render_player_barrel(fb, sx, sy, self.aim_x, self.aim_y, camera.zoom);
+                if marked {
+                    sprite::render_hastur_mark(fb, center.0, center.1);
+                }
+            }
+            1 => {
+                sprite::render_blob(fb, center, tint);
+                if marked {
+                    sprite::render_hastur_mark(fb, center.0, center.1);
+                }
+            }
+            _ => {
+                sprite::render_dot(fb, center, tint);
+                // Even at max zoom-out, marked survivors keep a tiny crown
+                // so the team can locate them on the overview.
+                if marked && center.1 >= 2 {
+                    fb.set(center.0 as u16, (center.1 - 2) as u16, Pixel::rgb(255, 220, 80));
+                }
+            }
         }
     }
 }

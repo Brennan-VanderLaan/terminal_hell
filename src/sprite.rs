@@ -49,18 +49,36 @@ impl Sprite {
         }
     }
 
-    /// Draw the sprite centered on `(cx, cy)` in framebuffer pixel coords.
+    /// Draw the sprite centered on `(cx, cy)` in framebuffer pixel coords
+    /// at 1:1 scale. Kept for callers that don't need scaling.
     pub fn blit(&self, fb: &mut Framebuffer, cx: i32, cy: i32) {
-        let ox = cx - (self.w as i32) / 2;
-        let oy = cy - (self.h as i32) / 2;
-        for y in 0..self.h {
-            for x in 0..self.w {
-                let idx = (y as usize) * (self.w as usize) + (x as usize);
-                if let Some(color) = self.pixels[idx] {
-                    let px = ox + x as i32;
-                    let py = oy + y as i32;
-                    if px >= 0 && py >= 0 {
-                        fb.set(px as u16, py as u16, color);
+        self.blit_scaled(fb, (cx, cy), 1.0);
+    }
+
+    /// Scaled blit: at `scale = 1.0` each sprite pixel fills one screen
+    /// pixel; at `scale = 2.0` each sprite pixel fills a 2×2 screen block;
+    /// etc. `scale < 1.0` is clamped to 1.0 — callers should switch to the
+    /// L1/L2 simplified representations instead of downscaling.
+    pub fn blit_scaled(&self, fb: &mut Framebuffer, center: (i32, i32), scale: f32) {
+        let scale = scale.max(1.0);
+        let w_px = (self.w as f32 * scale).round() as i32;
+        let h_px = (self.h as f32 * scale).round() as i32;
+        let ox = center.0 - w_px / 2;
+        let oy = center.1 - h_px / 2;
+
+        for sy in 0..self.h {
+            for sx in 0..self.w {
+                let idx = (sy as usize) * (self.w as usize) + (sx as usize);
+                let Some(color) = self.pixels[idx] else { continue };
+                let x0 = ox + (sx as f32 * scale).round() as i32;
+                let y0 = oy + (sy as f32 * scale).round() as i32;
+                let x1 = ox + ((sx + 1) as f32 * scale).round() as i32;
+                let y1 = oy + ((sy + 1) as f32 * scale).round() as i32;
+                for py in y0..y1 {
+                    for px in x0..x1 {
+                        if px >= 0 && py >= 0 {
+                            fb.set(px as u16, py as u16, color);
+                        }
                     }
                 }
             }
@@ -97,21 +115,25 @@ pub fn player_body() -> Sprite {
     s
 }
 
-/// Draw the player's weapon barrel extending from their body center in the
-/// aim direction. Simple 4-pixel ray with a bright muzzle tip.
+/// Draw the player's weapon barrel extending from their body center on
+/// the screen in the aim direction. Scales with zoom so the barrel stays
+/// visually proportional to the zoomed-in player sprite.
 pub fn render_player_barrel(
     fb: &mut Framebuffer,
-    cx: f32,
-    cy: f32,
+    screen_cx: f32,
+    screen_cy: f32,
     aim_x: f32,
     aim_y: f32,
+    zoom: f32,
 ) {
     let shaft = Pixel::rgb(200, 220, 255);
     let tip = Pixel::rgb(255, 245, 150);
+    let scale = zoom.max(1.0);
+    let start_offset = 2.5 * scale;
     for step in 1..=5 {
-        let t = step as f32;
-        let px = (cx + aim_x * (t + 2.5)).round() as i32;
-        let py = (cy + aim_y * (t + 2.5)).round() as i32;
+        let t = step as f32 * scale;
+        let px = (screen_cx + aim_x * (t + start_offset)).round() as i32;
+        let py = (screen_cy + aim_y * (t + start_offset)).round() as i32;
         if px >= 0 && py >= 0 {
             let color = if step == 5 { tip } else { shaft };
             fb.set(px as u16, py as u16, color);
@@ -121,6 +143,29 @@ pub fn render_player_barrel(
 
 fn lerp(a: u8, b: u8, t: f32) -> u8 {
     (a as f32 + (b as f32 - a as f32) * t).round().clamp(0.0, 255.0) as u8
+}
+
+/// Low-detail mip: 3×3 filled block at the screen position. Used when the
+/// camera is zoomed out past full-sprite visibility but still wants to
+/// communicate presence + color.
+pub fn render_blob(fb: &mut Framebuffer, center: (i32, i32), color: Pixel) {
+    for dy in -1..=1_i32 {
+        for dx in -1..=1_i32 {
+            let px = center.0 + dx;
+            let py = center.1 + dy;
+            if px >= 0 && py >= 0 {
+                fb.set(px as u16, py as u16, color);
+            }
+        }
+    }
+}
+
+/// Lowest mip: a single screen pixel in the entity color. Used at max
+/// zoom-out — enemies and players become moving motes.
+pub fn render_dot(fb: &mut Framebuffer, center: (i32, i32), color: Pixel) {
+    if center.0 >= 0 && center.1 >= 0 {
+        fb.set(center.0 as u16, center.1 as u16, color);
+    }
 }
 
 /// Draw Hastur's gaze halo above a marked player: a yellow crown of 4 dots
@@ -412,18 +457,28 @@ fn miniboss() -> Sprite {
     s
 }
 
-/// Draw a projectile as a bright 2×2 core, a sextant smoke trail, and a
-/// finer braille dot trail. The braille layer only renders where the sextant
-/// trail hasn't painted, so we get two levels of temporal detail for free.
-pub fn render_projectile(fb: &mut Framebuffer, x: f32, y: f32, vx: f32, vy: f32) {
+/// Draw a projectile at the given screen position with an optional motion
+/// trail. `ux, uy` are the unit motion vector (in world space, but it's
+/// just a direction so zoom doesn't matter). `zoom` controls how chunky
+/// the core + trail render.
+pub fn render_projectile_screen(
+    fb: &mut Framebuffer,
+    screen_x: f32,
+    screen_y: f32,
+    ux: f32,
+    uy: f32,
+    zoom: f32,
+) {
     let core = Pixel::rgb(255, 245, 150);
     let trail = Pixel::rgb(200, 110, 40);
     let spark = Pixel::rgb(255, 230, 170);
+    let scale = zoom.max(1.0);
 
-    let cx = x.round() as i32;
-    let cy = y.round() as i32;
-    for dy in 0..2 {
-        for dx in 0..2 {
+    let cx = screen_x.round() as i32;
+    let cy = screen_y.round() as i32;
+    let size = (2.0 * scale).round() as i32;
+    for dy in 0..size {
+        for dx in 0..size {
             let px = cx + dx;
             let py = cy + dy;
             if px >= 0 && py >= 0 {
@@ -432,32 +487,23 @@ pub fn render_projectile(fb: &mut Framebuffer, x: f32, y: f32, vx: f32, vy: f32)
         }
     }
 
-    let speed2 = vx * vx + vy * vy;
-    if speed2 < 1.0 {
+    if ux == 0.0 && uy == 0.0 {
         return;
     }
-    let inv = speed2.sqrt().recip();
-    let ux = vx * inv;
-    let uy = vy * inv;
 
-    // Sextant smoke trail — a couple chunky pixels immediately behind the
-    // core. Short on purpose so projectiles just spawned at the muzzle tip
-    // don't paint a trail across the player's sprite.
     for step in 1..=2 {
-        let t = step as f32 * 1.2;
-        let px = (x - ux * t).round() as i32;
-        let py = (y - uy * t).round() as i32;
+        let t = step as f32 * 1.2 * scale;
+        let px = (screen_x - ux * t).round() as i32;
+        let py = (screen_y - uy * t).round() as i32;
         if px >= 0 && py >= 0 {
             fb.set(px as u16, py as u16, trail);
         }
     }
 
-    // Braille dust — finer sparks continuing past the sextant trail. Capped
-    // short enough that a freshly-fired bullet doesn't dust the player.
     for step in 1..=5 {
-        let t = 2.5 + step as f32 * 0.9;
-        let px = x - ux * t;
-        let py = y - uy * t;
+        let t = (2.5 + step as f32 * 0.9) * scale;
+        let px = screen_x - ux * t;
+        let py = screen_y - uy * t;
         let bx = px.round() as i32;
         let by = (py * 4.0 / 3.0).round() as i32;
         if bx >= 0 && by >= 0 {

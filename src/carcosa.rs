@@ -10,8 +10,9 @@
 //! about them. This keeps per-player hallucinations cheap without requiring
 //! per-player render divergence on the server.
 
+use crate::camera::Camera;
 use crate::fb::{Framebuffer, Pixel};
-use crate::sprite::Sprite;
+use crate::sprite::{self, Sprite};
 
 /// A visible Yellow Sign appearing in the arena. The first portion of its
 /// lifetime is a "tell" (dim flash), then it blooms to full visibility, then
@@ -48,48 +49,49 @@ impl YellowSign {
         }
     }
 
-    pub fn render(&self, fb: &mut Framebuffer, ox: i32, oy: i32) {
-        let cx = ox + self.x.round() as i32;
-        let cy = oy + self.y.round() as i32;
+    pub fn render(&self, fb: &mut Framebuffer, camera: &Camera) {
+        let (sx, sy) = camera.world_to_screen((self.x, self.y));
+        let cx = sx.round() as i32;
+        let cy = sy.round() as i32;
         let t = 1.0 - (self.ttl / self.ttl_max);
         let bloom = (t / (1.0 - Self::BLOOM_START)).clamp(0.0, 1.0);
 
-        // Dim halo ring.
-        let halo = Pixel::rgb(
-            (200.0 * (0.4 + bloom * 0.6)) as u8,
-            (140.0 * (0.4 + bloom * 0.6)) as u8,
-            (30.0 * (0.4 + bloom * 0.6)) as u8,
-        );
-        for dy in -4..=4_i32 {
-            for dx in -4..=4_i32 {
-                let d2 = dx * dx + dy * dy;
-                if d2 > 20 && d2 < 25 {
-                    set(fb, cx + dx, cy + dy, halo);
-                }
-            }
-        }
-
-        // Yellow Sign glyph — a branching three-tine pattern.
-        let sign = Pixel::rgb(
+        let sign_color = Pixel::rgb(
             (255.0 * (0.5 + bloom * 0.5)) as u8,
             (220.0 * (0.5 + bloom * 0.5)) as u8,
             (60.0 * (0.3 + bloom * 0.7)) as u8,
         );
-        // Vertical stem.
-        for dy in -3..=3_i32 {
-            set(fb, cx, cy + dy, sign);
+
+        match camera.mip_level() {
+            0 => {
+                let halo = Pixel::rgb(
+                    (200.0 * (0.4 + bloom * 0.6)) as u8,
+                    (140.0 * (0.4 + bloom * 0.6)) as u8,
+                    (30.0 * (0.4 + bloom * 0.6)) as u8,
+                );
+                for dy in -4..=4_i32 {
+                    for dx in -4..=4_i32 {
+                        let d2 = dx * dx + dy * dy;
+                        if d2 > 20 && d2 < 25 {
+                            set(fb, cx + dx, cy + dy, halo);
+                        }
+                    }
+                }
+                for dy in -3..=3_i32 {
+                    set(fb, cx, cy + dy, sign_color);
+                }
+                set(fb, cx - 1, cy - 2, sign_color);
+                set(fb, cx - 2, cy - 1, sign_color);
+                set(fb, cx - 3, cy, sign_color);
+                set(fb, cx + 1, cy - 2, sign_color);
+                set(fb, cx + 2, cy - 1, sign_color);
+                set(fb, cx + 3, cy, sign_color);
+                set(fb, cx - 1, cy + 3, sign_color);
+                set(fb, cx + 1, cy + 3, sign_color);
+            }
+            1 => sprite::render_blob(fb, (cx, cy), sign_color),
+            _ => sprite::render_dot(fb, (cx, cy), sign_color),
         }
-        // Left branch.
-        set(fb, cx - 1, cy - 2, sign);
-        set(fb, cx - 2, cy - 1, sign);
-        set(fb, cx - 3, cy, sign);
-        // Right branch.
-        set(fb, cx + 1, cy - 2, sign);
-        set(fb, cx + 2, cy - 1, sign);
-        set(fb, cx + 3, cy, sign);
-        // Base curl.
-        set(fb, cx - 1, cy + 3, sign);
-        set(fb, cx + 1, cy + 3, sign);
     }
 }
 
@@ -112,22 +114,27 @@ impl Phantom {
         self.ttl > 0.0
     }
 
-    pub fn render(&self, fb: &mut Framebuffer, ox: i32, oy: i32) {
-        let cx = ox + self.x.round() as i32;
-        let cy = oy + self.y.round() as i32;
+    pub fn render(&self, fb: &mut Framebuffer, camera: &Camera) {
+        let (sx, sy) = camera.world_to_screen((self.x, self.y));
+        let cx = sx.round() as i32;
+        let cy = sy.round() as i32;
         let archetype = crate::enemy::Archetype::from_kind(self.archetype_kind);
-        let mut s = crate::sprite::enemy_sprite(archetype);
-        // Bright ghost-white tint on spawn (the tell), fading to a dim
-        // translucent yellow over life.
-        let t = 1.0 - (self.ttl / self.ttl_max);
-        let spawn_flash = if t < 0.08 { 0.9 } else { 0.0 };
-        if spawn_flash > 0.0 {
-            s.tint_toward(Pixel::rgb(255, 255, 255), spawn_flash);
-        } else {
-            s.tint_toward(Pixel::rgb(180, 140, 40), 0.55);
+
+        match camera.mip_level() {
+            0 => {
+                let mut s: Sprite = sprite::enemy_sprite(archetype);
+                let t = 1.0 - (self.ttl / self.ttl_max);
+                let spawn_flash = if t < 0.08 { 0.9 } else { 0.0 };
+                if spawn_flash > 0.0 {
+                    s.tint_toward(Pixel::rgb(255, 255, 255), spawn_flash);
+                } else {
+                    s.tint_toward(Pixel::rgb(180, 140, 40), 0.55);
+                }
+                s.blit_scaled(fb, (cx, cy), camera.zoom);
+            }
+            1 => sprite::render_blob(fb, (cx, cy), Pixel::rgb(180, 140, 40)),
+            _ => sprite::render_dot(fb, (cx, cy), Pixel::rgb(180, 140, 40)),
         }
-        s.blit(fb, cx, cy);
-        drop::<Sprite>(s);
     }
 }
 

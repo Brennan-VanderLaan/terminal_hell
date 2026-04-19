@@ -2,9 +2,11 @@
 //! active weapon. No on-ground swap / litter; pickups despawn when taken or
 //! when their TTL expires so the arena doesn't clog with 30-minute-old loot.
 
+use crate::camera::Camera;
 use crate::fb::{Framebuffer, Pixel};
 use crate::primitive::{Primitive, Rarity};
 use crate::weapon::Weapon;
+use crate::sprite;
 
 const DEFAULT_TTL: f32 = 45.0;
 
@@ -40,50 +42,49 @@ impl Pickup {
         6.0
     }
 
-    pub fn render(&self, fb: &mut Framebuffer, ox: i32, oy: i32) {
-        let cx = ox + self.x.round() as i32;
-        let cy = oy + self.y.round() as i32;
+    pub fn render(&self, fb: &mut Framebuffer, camera: &Camera) {
+        let (sx, sy) = camera.world_to_screen((self.x, self.y));
+        let cx = sx.round() as i32;
+        let cy = sy.round() as i32;
 
         let rarity = self.rarity.color();
-        // Pulsing outer halo.
-        let pulse = 0.6 + 0.4 * (self.flash_phase * std::f32::consts::TAU).sin().abs();
-        let halo = Pixel::rgb(
-            (rarity.r as f32 * pulse) as u8,
-            (rarity.g as f32 * pulse) as u8,
-            (rarity.b as f32 * pulse) as u8,
-        );
-
-        // 5×5 halo.
-        for dy in -2..=2_i32 {
-            for dx in -2..=2_i32 {
-                if dx.abs() == 2 || dy.abs() == 2 {
-                    set(fb, cx + dx, cy + dy, halo);
+        match camera.mip_level() {
+            0 => {
+                let pulse = 0.6 + 0.4 * (self.flash_phase * std::f32::consts::TAU).sin().abs();
+                let halo = Pixel::rgb(
+                    (rarity.r as f32 * pulse) as u8,
+                    (rarity.g as f32 * pulse) as u8,
+                    (rarity.b as f32 * pulse) as u8,
+                );
+                for dy in -2..=2_i32 {
+                    for dx in -2..=2_i32 {
+                        if dx.abs() == 2 || dy.abs() == 2 {
+                            set(fb, cx + dx, cy + dy, halo);
+                        }
+                    }
+                }
+                let slot_colors: Vec<Pixel> = self.primitives.iter().map(|p| p.color()).collect();
+                let mut i = 0;
+                for dy in -1..=1_i32 {
+                    for dx in -1..=1_i32 {
+                        let color = if slot_colors.is_empty() {
+                            rarity
+                        } else {
+                            slot_colors[i % slot_colors.len()]
+                        };
+                        set(fb, cx + dx, cy + dy, color);
+                        i += 1;
+                    }
+                }
+                if self.ttl < 8.0 {
+                    let dim = Pixel::rgb(40, 30, 50);
+                    if (self.flash_phase * 8.0).floor() as i32 % 2 == 0 {
+                        set(fb, cx, cy, dim);
+                    }
                 }
             }
-        }
-        // 3×3 inner core painted in primitive colors — shows at a glance
-        // what the weapon carries.
-        let slot_colors: Vec<Pixel> =
-            self.primitives.iter().map(|p| p.color()).collect();
-        let mut i = 0;
-        for dy in -1..=1_i32 {
-            for dx in -1..=1_i32 {
-                let color = if slot_colors.is_empty() {
-                    rarity
-                } else {
-                    slot_colors[i % slot_colors.len()]
-                };
-                set(fb, cx + dx, cy + dy, color);
-                i += 1;
-            }
-        }
-
-        // Late-TTL fading: pickups about to despawn dim and blink faster.
-        if self.ttl < 8.0 {
-            let dim = Pixel::rgb(40, 30, 50);
-            if (self.flash_phase * 8.0).floor() as i32 % 2 == 0 {
-                set(fb, cx, cy, dim);
-            }
+            1 => sprite::render_blob(fb, (cx, cy), rarity),
+            _ => sprite::render_dot(fb, (cx, cy), rarity),
         }
     }
 }

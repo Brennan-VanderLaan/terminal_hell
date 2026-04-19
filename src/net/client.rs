@@ -43,14 +43,12 @@ pub fn run_connect(addr: String) -> Result<()> {
     let (cols, rows) = crossterm::terminal::size()?;
     let mut fb = Framebuffer::new(cols, rows);
 
-    // Start with a placeholder arena — replaced by Welcome.
-    let (aw, ah) = arena_size(cols, rows);
+    // Start with a placeholder arena — replaced by Welcome with the real
+    // seed (client regenerates locally to save bandwidth on the 1600×800
+    // world).
+    let (aw, ah) = world_size();
     let content = crate::content::ContentDb::load_core()?;
-    let mut game = Game::new(
-        Arena::generate(0, aw, ah),
-        content,
-        center_offset(cols, rows, aw, ah),
-    );
+    let mut game = Game::new(Arena::generate(0, aw, ah), content, cols, rows);
 
     let mut input = Input::default();
     let mut last_instant = Instant::now();
@@ -122,13 +120,18 @@ pub fn run_connect(addr: String) -> Result<()> {
                     match m.kind {
                         MouseEventKind::Down(MouseButton::Left) => game.mouse.lmb = true,
                         MouseEventKind::Up(MouseButton::Left) => game.mouse.lmb = false,
+                        MouseEventKind::ScrollUp => {
+                            game.camera.adjust_zoom(crate::camera::ZOOM_STEP);
+                        }
+                        MouseEventKind::ScrollDown => {
+                            game.camera.adjust_zoom(1.0 / crate::camera::ZOOM_STEP);
+                        }
                         _ => {}
                     }
                 }
                 Event::Resize(w, h) => {
                     fb.resize(w, h);
-                    let (aw2, ah2) = arena_size(w, h);
-                    game.set_origin(center_offset(w, h, aw2, ah2));
+                    game.resize_viewport(w, h);
                 }
                 _ => {}
             }
@@ -158,6 +161,7 @@ pub fn run_connect(addr: String) -> Result<()> {
         transport.send_packets(&mut client).ok();
 
         // Render.
+        game.update_camera_follow();
         fb.clear();
         if welcomed {
             let (tint_color, tint_amount) = game.corruption_tint();
@@ -181,7 +185,9 @@ pub fn run_connect(addr: String) -> Result<()> {
                 hud::draw_loadout(&mut out, &loadout)?;
             }
             hud::draw_intermission(&mut out, &game)?;
+            hud::draw_kiosk_labels(&mut out, &game)?;
             let (tc, tr) = crossterm::terminal::size()?;
+            hud::draw_zoom_indicator(&mut out, tc, game.camera.zoom)?;
             hud::draw_wave_banner(
                 &mut out, tc, tr, game.director.wave, game.director.banner_ttl,
             )?;
@@ -212,11 +218,13 @@ fn handle_reliable(
 ) {
     match msg {
         ServerMsg::Welcome(w) => {
-            if let Some(new_arena) =
-                Arena::decode_tiles(w.arena_w, w.arena_h, &w.arena_tiles)
-            {
-                game.arena = new_arena;
-            }
+            // Rebuild arena from the server-sent seed; all peers run the
+            // same generator so layouts match without shipping the raw
+            // tile blob over UDP.
+            game.arena = crate::arena::Arena::generate(w.arena_seed, w.arena_w, w.arena_h);
+            // Recenter the camera on the arena so it's not stuck at (0,0)
+            // until the first snapshot arrives.
+            game.camera.center = (w.arena_w as f32 / 2.0, w.arena_h as f32 / 2.0);
             game.local_id = Some(w.your_id);
             *welcomed = true;
         }
@@ -364,19 +372,12 @@ pub fn wait_for_any_key() -> Result<()> {
     }
 }
 
-/// Fit the arena to the terminal's sextant pixel grid (2 px/col × 3 px/row).
-/// No upper cap — bigger terminal = bigger arena.
-pub fn arena_size(cols: u16, rows: u16) -> (u16, u16) {
-    let px_w = cols.saturating_mul(2);
-    let px_h = rows.saturating_mul(3);
-    // Reserve a margin so the arena border doesn't touch the HUD row.
-    let w = px_w.saturating_sub(4).max(80);
-    let h = px_h.saturating_sub(6).max(48);
-    (w, h)
-}
+/// Fixed world size (independent of terminal). 10× the previous ~160×80
+/// arena so players have somewhere to explore and the camera is doing
+/// something interesting.
+pub const WORLD_W: u16 = 1600;
+pub const WORLD_H: u16 = 800;
 
-pub fn center_offset(cols: u16, rows: u16, aw: u16, ah: u16) -> (i32, i32) {
-    let ox = (cols as i32 * 2 - aw as i32) / 2;
-    let oy = (rows as i32 * 3 - ah as i32) / 2;
-    (ox.max(0), oy.max(0))
+pub fn world_size() -> (u16, u16) {
+    (WORLD_W, WORLD_H)
 }

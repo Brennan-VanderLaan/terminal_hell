@@ -46,7 +46,7 @@ pub fn run_serve(port: u16) -> Result<()> {
 
     let (cols, rows) = crossterm::terminal::size()?;
     let mut fb = Framebuffer::new(cols, rows);
-    let (aw, ah) = super::client::arena_size(cols, rows);
+    let (aw, ah) = super::client::world_size();
     let arena_seed = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos() as u64)
@@ -55,11 +55,7 @@ pub fn run_serve(port: u16) -> Result<()> {
     let arena = Arena::generate(arena_seed, aw, ah);
     let content = crate::content::ContentDb::load_core()?;
     tracing::info!(brand = %content.active_brand().id, "content pack loaded");
-    let mut game = Game::new(
-        arena,
-        content,
-        super::client::center_offset(cols, rows, aw, ah),
-    );
+    let mut game = Game::new(arena, content, cols, rows);
 
     // The host plays too — add the local player immediately.
     let local_id = game.add_player();
@@ -94,7 +90,6 @@ pub fn run_serve(port: u16) -> Result<()> {
                         your_id: pid,
                         arena_w: game.arena.width,
                         arena_h: game.arena.height,
-                        arena_tiles: game.arena.encode_tiles(),
                         arena_seed,
                     });
                     server.send_message(
@@ -189,13 +184,18 @@ pub fn run_serve(port: u16) -> Result<()> {
                     match m.kind {
                         MouseEventKind::Down(MouseButton::Left) => game.mouse.lmb = true,
                         MouseEventKind::Up(MouseButton::Left) => game.mouse.lmb = false,
+                        MouseEventKind::ScrollUp => {
+                            game.camera.adjust_zoom(crate::camera::ZOOM_STEP);
+                        }
+                        MouseEventKind::ScrollDown => {
+                            game.camera.adjust_zoom(1.0 / crate::camera::ZOOM_STEP);
+                        }
                         _ => {}
                     }
                 }
                 Event::Resize(w, h) => {
                     fb.resize(w, h);
-                    let (aw2, ah2) = super::client::arena_size(w, h);
-                    game.set_origin(super::client::center_offset(w, h, aw2, ah2));
+                    game.resize_viewport(w, h);
                 }
                 _ => {}
             }
@@ -255,6 +255,7 @@ pub fn run_serve(port: u16) -> Result<()> {
         transport.send_packets(&mut server);
 
         // Render the host's own view.
+        game.update_camera_follow();
         fb.clear();
         {
             let (tint_color, tint_amount) = game.corruption_tint();
@@ -282,7 +283,9 @@ pub fn run_serve(port: u16) -> Result<()> {
             hud::draw_loadout(&mut out, &loadout)?;
         }
         hud::draw_intermission(&mut out, &game)?;
+        hud::draw_kiosk_labels(&mut out, &game)?;
         let (tc, tr) = crossterm::terminal::size()?;
+        hud::draw_zoom_indicator(&mut out, tc, game.camera.zoom)?;
         hud::draw_wave_banner(
             &mut out, tc, tr, game.director.wave, game.director.banner_ttl,
         )?;

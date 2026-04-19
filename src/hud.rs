@@ -142,6 +142,69 @@ fn short_brand(id: &str) -> &str {
     }
 }
 
+/// Label each active kiosk with its brand name + vote count, positioned
+/// above the kiosk glyph in screen space. Only renders labels that fit
+/// on-screen. Color is the brand signature color.
+pub fn draw_kiosk_labels<W: Write>(
+    out: &mut W,
+    game: &crate::game::Game,
+) -> Result<()> {
+    if game.kiosks.is_empty() {
+        return Ok(());
+    }
+    let camera = &game.camera;
+    let total_cols = camera.viewport_w / 2;
+    let total_rows = camera.viewport_h / 3;
+    for kiosk in &game.kiosks {
+        let (sx, sy) = camera.world_to_screen((kiosk.x, kiosk.y));
+        let col = (sx / 2.0) as i32;
+        // Draw 2 terminal rows above the kiosk.
+        let row = ((sy / 3.0) as i32) - 3;
+        if row < 0 || row >= total_rows as i32 {
+            continue;
+        }
+        let text = format!("{} ({})", kiosk.brand_name, kiosk.votes);
+        let half = (text.len() as i32) / 2;
+        let start_col = (col - half).max(0);
+        if start_col >= total_cols as i32 {
+            continue;
+        }
+        let color = kiosk.brand_color;
+        queue!(
+            out,
+            MoveTo(start_col as u16, row as u16),
+            SetForegroundColor(Color::Rgb { r: color.r, g: color.g, b: color.b }),
+            SetBackgroundColor(Color::Rgb { r: 20, g: 10, b: 30 }),
+            Print(&text),
+            ResetColor,
+        )?;
+    }
+    out.flush()?;
+    Ok(())
+}
+
+/// Small badge in the upper-right showing current zoom level + a hint that
+/// mouse-wheel adjusts it. Helpful when players are first getting used to
+/// the camera.
+pub fn draw_zoom_indicator<W: Write>(
+    out: &mut W,
+    cols: u16,
+    zoom: f32,
+) -> Result<()> {
+    let text = format!(" ZOOM {:>4.2}x ", zoom);
+    let col = cols.saturating_sub(text.len() as u16);
+    queue!(
+        out,
+        MoveTo(col, 0),
+        SetForegroundColor(Color::Rgb { r: 200, g: 220, b: 255 }),
+        SetBackgroundColor(Color::Rgb { r: 20, g: 10, b: 30 }),
+        Print(&text),
+        ResetColor,
+    )?;
+    out.flush()?;
+    Ok(())
+}
+
 pub fn draw_wave_banner<W: Write>(
     out: &mut W,
     cols: u16,

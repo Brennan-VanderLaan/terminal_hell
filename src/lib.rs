@@ -4,6 +4,7 @@ use std::io::stdout;
 use std::time::{Duration, Instant};
 
 pub mod arena;
+pub mod camera;
 pub mod carcosa;
 pub mod content;
 pub mod enemy;
@@ -39,9 +40,7 @@ pub fn run_solo() -> Result<()> {
 
     let (cols, rows) = crossterm::terminal::size()?;
     let mut fb = Framebuffer::new(cols, rows);
-    let (aw, ah) = net::client::arena_size(cols, rows);
-    // Roll a fresh arena seed each solo run so layouts vary; deterministic
-    // within a single run for destruction/particle seeding.
+    let (aw, ah) = net::client::world_size();
     let arena_seed = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos() as u64)
@@ -49,10 +48,9 @@ pub fn run_solo() -> Result<()> {
     tracing::info!(seed = arena_seed, "arena seed");
     let arena = Arena::generate(arena_seed, aw, ah);
 
-    let origin = net::client::center_offset(cols, rows, aw, ah);
     let content = content::ContentDb::load_core()?;
     tracing::info!(brand = %content.active_brand().id, "content pack loaded");
-    let mut game = Game::new(arena, content, origin);
+    let mut game = Game::new(arena, content, cols, rows);
     let local_id = game.add_player();
     game.local_id = Some(local_id);
     let mut input = Input::default();
@@ -103,13 +101,18 @@ pub fn run_solo() -> Result<()> {
                     match m.kind {
                         MouseEventKind::Down(MouseButton::Left) => game.mouse.lmb = true,
                         MouseEventKind::Up(MouseButton::Left) => game.mouse.lmb = false,
+                        MouseEventKind::ScrollUp => {
+                            game.camera.adjust_zoom(camera::ZOOM_STEP);
+                        }
+                        MouseEventKind::ScrollDown => {
+                            game.camera.adjust_zoom(1.0 / camera::ZOOM_STEP);
+                        }
                         _ => {}
                     }
                 }
                 Event::Resize(w, h) => {
                     fb.resize(w, h);
-                    let (aw2, ah2) = net::client::arena_size(w, h);
-                    game.set_origin(net::client::center_offset(w, h, aw2, ah2));
+                    game.resize_viewport(w, h);
                 }
                 _ => {}
             }
@@ -134,6 +137,7 @@ pub fn run_solo() -> Result<()> {
             tick_accum -= SIM_DT;
         }
 
+        game.update_camera_follow();
         fb.clear();
         {
             let (tint_color, tint_amount) = game.corruption_tint();
@@ -158,6 +162,9 @@ pub fn run_solo() -> Result<()> {
             hud::draw_loadout(&mut stdout, &loadout)?;
         }
         hud::draw_intermission(&mut stdout, &game)?;
+        hud::draw_kiosk_labels(&mut stdout, &game)?;
+        let (tc_z, _) = crossterm::terminal::size()?;
+        hud::draw_zoom_indicator(&mut stdout, tc_z, game.camera.zoom)?;
         let (tc, tr) = crossterm::terminal::size()?;
         hud::draw_wave_banner(
             &mut stdout,

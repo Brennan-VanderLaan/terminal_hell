@@ -41,10 +41,8 @@ pub struct Welcome {
     pub your_id: u32,
     pub arena_w: u16,
     pub arena_h: u16,
-    pub arena_tiles: Vec<u8>,
-    /// Seed used to generate this arena. Clients can regenerate locally if
-    /// they prefer, though sending the encoded tile state keeps things
-    /// robust to generator-version drift across builds.
+    /// Seed used to generate this arena. Clients regenerate locally — the
+    /// 10× world size makes sending raw tile state impractical over UDP.
     pub arena_seed: u64,
 }
 

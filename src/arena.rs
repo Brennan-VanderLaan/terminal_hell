@@ -2,6 +2,7 @@
 //! framebuffer). Walls have HP and a material; destruction reports back
 //! which color to paint the glyph-confetti with.
 
+use crate::camera::Camera;
 use crate::fb::{Framebuffer, Pixel};
 use rand::Rng;
 use rand::SeedableRng;
@@ -55,18 +56,17 @@ impl Arena {
         Self { width, height, tiles: vec![Tile::Floor; n] }
     }
 
-    /// Seed-driven procedural arena. Deterministic given `(seed, width,
-    /// height)`. Layout: thick perimeter, an open central disc for player
-    /// spawn + kiosk placement, and 14–22 cover blobs scattered in the
-    /// surrounding annulus. Each blob rolls a random aspect ratio so the
-    /// arena doesn't feel tiled.
+    /// Seed-driven procedural arena. Scales blob + breaker counts with
+    /// arena area so a 10× world feels populated, not sparse. Layout:
+    /// thick perimeter, an open central disc for player spawn + kiosk
+    /// placement, and rectangular cover blobs + long sightline breakers
+    /// scattered across the annulus.
     pub fn generate(seed: u64, width: u16, height: u16) -> Self {
         let mut a = Self::new_empty(width, height);
         let w = width as i32;
         let h = height as i32;
         let mut rng = SmallRng::seed_from_u64(seed);
 
-        // Thick perimeter.
         for t in 0..3 {
             for x in 0..w {
                 a.set_wall(x, t, Material::Concrete, WALL_HP * 3);
@@ -80,19 +80,24 @@ impl Arena {
 
         let cx = w / 2;
         let cy = h / 2;
-        // Keep a central disc open for spawns, kiosks, and initial movement.
         let core_radius = (w.min(h * 2) / 6).max(10);
         let core_r2 = core_radius * core_radius;
 
-        // Scatter cover blobs.
-        let blob_count = rng.gen_range(14..=22);
+        // Density-driven counts: roughly one blob per 4000 world pixels,
+        // one breaker per 20000.
+        let area = w.max(1) * h.max(1);
+        let blob_count = (area / 4000).clamp(14, 600);
+        let breaker_count = (area / 20000).clamp(3, 120);
+
         let margin = 5;
         for _ in 0..blob_count {
             let bw = rng.gen_range(3..=10) as i32;
             let bh = rng.gen_range(2..=6) as i32;
+            if w <= margin * 2 + bw || h <= margin * 2 + bh {
+                continue;
+            }
             let x = rng.gen_range(margin..w - margin - bw);
             let y = rng.gen_range(margin..h - margin - bh);
-            // Skip blobs overlapping the central disc.
             let dx = x + bw / 2 - cx;
             let dy = y + bh / 2 - cy;
             if dx * dx + dy * dy < core_r2 {
@@ -101,11 +106,13 @@ impl Arena {
             place_block(&mut a, x, y, bw, bh);
         }
 
-        // A handful of long sightline-breakers.
-        for _ in 0..rng.gen_range(3..=6) {
+        for _ in 0..breaker_count {
             let horizontal = rng.gen_bool(0.5);
             if horizontal {
-                let len = rng.gen_range(8..=(w / 3).max(10)) as i32;
+                let len = rng.gen_range(8..=(w / 6).max(10)) as i32;
+                if w <= margin * 2 + len {
+                    continue;
+                }
                 let x = rng.gen_range(margin..w - margin - len);
                 let y = rng.gen_range(margin..h - margin - 2);
                 let dx = x + len / 2 - cx;
@@ -115,7 +122,10 @@ impl Arena {
                 }
                 place_block(&mut a, x, y, len, 2);
             } else {
-                let len = rng.gen_range(6..=(h / 3).max(8)) as i32;
+                let len = rng.gen_range(6..=(h / 6).max(8)) as i32;
+                if h <= margin * 2 + len {
+                    continue;
+                }
                 let x = rng.gen_range(margin..w - margin - 2);
                 let y = rng.gen_range(margin..h - margin - len);
                 let dx = x - cx;
@@ -284,41 +294,49 @@ impl Arena {
         }
     }
 
-    pub fn render(&self, fb: &mut Framebuffer, ox: i32, oy: i32) {
-        // Floor renders as nothing — black terminal cells. Walls and rubble
-        // pop against the dark; braille overlays (bullet trails, particles)
-        // can show through on empty tiles.
-        for y in 0..self.height {
-            for x in 0..self.width {
-                let px = ox + x as i32;
-                let py = oy + y as i32;
-                if px < 0 || py < 0 {
-                    continue;
-                }
-                match self.tile(x as i32, y as i32) {
-                    Tile::Floor => {}
+    pub fn render(&self, fb: &mut Framebuffer, camera: &Camera) {
+        let (wx0, wy0, wx1, wy1) = camera.world_viewport();
+        let ix0 = (wx0.floor() as i32).max(0);
+        let iy0 = (wy0.floor() as i32).max(0);
+        let ix1 = (wx1.ceil() as i32).min(self.width as i32);
+        let iy1 = (wy1.ceil() as i32).min(self.height as i32);
+
+        for wy in iy0..iy1 {
+            for wx in ix0..ix1 {
+                let color = match self.tile(wx, wy) {
+                    Tile::Floor => continue,
                     Tile::Wall { material, hp } => {
                         let base = material.intact_color();
                         let ratio = (hp as f32 / WALL_HP as f32).clamp(0.35, 1.0);
-                        let color = Pixel::rgb(
+                        Pixel::rgb(
                             (base.r as f32 * ratio) as u8,
                             (base.g as f32 * ratio) as u8,
                             (base.b as f32 * ratio) as u8,
-                        );
-                        fb.set(px as u16, py as u16, color);
+                        )
                     }
-                    Tile::Rubble { material } => {
-                        fb.set(px as u16, py as u16, material.debris_color());
-                    }
+                    Tile::Rubble { material } => material.debris_color(),
                     Tile::Carcosa => {
-                        // Yellow-ochre Carcosa tile; subtle two-color pattern
-                        // so cells read as "wrong" without being blinding.
-                        let pattern = ((x ^ y) & 1) == 0;
-                        let color = if pattern {
+                        let pattern = ((wx ^ wy) & 1) == 0;
+                        if pattern {
                             Pixel::rgb(180, 140, 20)
                         } else {
                             Pixel::rgb(110, 80, 10)
-                        };
+                        }
+                    }
+                };
+
+                // Screen rect for this world tile. Nearest-neighbor fill:
+                // at zoom > 1 we upscale; at zoom < 1 multiple tiles map to
+                // the same screen pixel and last-write wins (acceptable).
+                let (sx0, sy0) = camera.world_to_screen((wx as f32, wy as f32));
+                let (sx1, sy1) =
+                    camera.world_to_screen(((wx + 1) as f32, (wy + 1) as f32));
+                let x0 = (sx0.floor() as i32).max(0);
+                let y0 = (sy0.floor() as i32).max(0);
+                let x1 = (sx1.ceil() as i32).min(camera.viewport_w as i32);
+                let y1 = (sy1.ceil() as i32).min(camera.viewport_h as i32);
+                for py in y0..y1 {
+                    for px in x0..x1 {
                         fb.set(px as u16, py as u16, color);
                     }
                 }

@@ -3,6 +3,7 @@
 //! `(tick, source_id, tile_id)` and every client draws identical particles
 //! without syncing them over the wire.
 
+use crate::camera::Camera;
 use crate::fb::{Framebuffer, Pixel};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
@@ -30,10 +31,15 @@ impl Particle {
         self.ttl > 0.0
     }
 
-    pub fn render(&self, fb: &mut Framebuffer, ox: i32, oy: i32) {
-        let px = ox + self.x.round() as i32;
-        let py = oy + self.y.round() as i32;
+    pub fn render(&self, fb: &mut Framebuffer, camera: &Camera) {
+        let (sx, sy) = camera.world_to_screen((self.x, self.y));
+        let px = sx.round() as i32;
+        let py = sy.round() as i32;
         if px < 0 || py < 0 {
+            return;
+        }
+        // Skip particles that fall outside the viewport entirely.
+        if (px as u16) >= camera.viewport_w || (py as u16) >= camera.viewport_h {
             return;
         }
         // Linear fade to black over TTL.

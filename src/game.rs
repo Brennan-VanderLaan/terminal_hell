@@ -1,4 +1,5 @@
 use crate::arena::{Arena, Material, Tile};
+use crate::camera::Camera;
 use crate::carcosa::{Phantom, YellowSign};
 use crate::content::ContentDb;
 use crate::enemy::{Archetype, Enemy};
@@ -90,7 +91,6 @@ pub struct Game {
     pub active_brands: Vec<String>,
     pub director: WaveDirector,
     pub mouse: Mouse,
-    pub origin: (i32, i32),
     pub kills: u32,
     pub alive: bool,
     pub elapsed_secs: f32,
@@ -110,6 +110,9 @@ pub struct Game {
     next_sign_id: u32,
     /// Client-side phantom enemies (pure hallucination; never synced).
     pub phantoms: Vec<Phantom>,
+    /// Rendering camera owned by Game so every render path shares it. Sim
+    /// never reads from this.
+    pub camera: Camera,
     pub local_id: Option<u32>,
     seed_counter: u64,
     next_player_id: u32,
@@ -131,8 +134,10 @@ pub struct Game {
 }
 
 impl Game {
-    pub fn new(arena: Arena, content: ContentDb, origin: (i32, i32)) -> Self {
+    pub fn new(arena: Arena, content: ContentDb, cols: u16, rows: u16) -> Self {
         let default_brand = content.default_brand.clone();
+        let mut camera = Camera::new(cols, rows);
+        camera.center = (arena.width as f32 / 2.0, arena.height as f32 / 2.0);
         Self {
             arena,
             content,
@@ -146,7 +151,6 @@ impl Game {
             active_brands: vec![default_brand],
             director: WaveDirector::new(0xC0FFEE),
             mouse: Mouse::default(),
-            origin,
             kills: 0,
             alive: true,
             elapsed_secs: 0.0,
@@ -158,6 +162,7 @@ impl Game {
             daemon_timer: 30.0,
             next_sign_id: 1,
             phantoms: Vec::new(),
+            camera,
             local_id: None,
             seed_counter: 0x9E3779B97F4A7C15,
             next_player_id: 1,
@@ -216,8 +221,8 @@ impl Game {
         })
     }
 
-    pub fn set_origin(&mut self, origin: (i32, i32)) {
-        self.origin = origin;
+    pub fn resize_viewport(&mut self, cols: u16, rows: u16) {
+        self.camera.resize(cols, rows);
     }
 
     pub fn add_player(&mut self) -> u32 {
@@ -686,12 +691,19 @@ impl Game {
         self.pickups.retain_mut(|p| p.tick(dt));
 
         let mut events: Vec<WaveEvent> = Vec::new();
+        let anchors: Vec<(f32, f32)> = self
+            .players
+            .iter()
+            .filter(|p| p.hp > 0)
+            .map(|p| (p.x, p.y))
+            .collect();
         self.director.tick(
             &self.arena,
             &mut self.enemies,
             &self.content,
             &self.active_brands,
             &mut events,
+            &anchors,
             dt,
         );
         for kiosk in &mut self.kiosks {
@@ -1083,36 +1095,36 @@ impl Game {
     }
 
     pub fn render(&self, fb: &mut Framebuffer) {
-        let (ox, oy) = self.origin;
-        self.arena.render(fb, ox, oy);
+        let camera = &self.camera;
+        self.arena.render(fb, camera);
         for part in &self.particles {
-            part.render(fb, ox, oy);
+            part.render(fb, camera);
         }
         for pk in &self.pickups {
-            pk.render(fb, ox, oy);
+            pk.render(fb, camera);
         }
         for kiosk in &self.kiosks {
-            kiosk.render(fb, ox, oy);
+            kiosk.render(fb, camera);
         }
         for h in &self.hitscans {
-            render_tracer(fb, ox, oy, h);
+            render_tracer(fb, camera, h);
         }
         for sign in &self.yellow_signs {
-            sign.render(fb, ox, oy);
+            sign.render(fb, camera);
         }
         for phantom in &self.phantoms {
-            phantom.render(fb, ox, oy);
+            phantom.render(fb, camera);
         }
         for e in &self.enemies {
-            e.render(fb, ox, oy);
+            e.render(fb, camera);
         }
         for p in &self.projectiles {
-            p.render(fb, ox, oy);
+            p.render(fb, camera);
         }
         for pl in &self.players {
             let is_self = Some(pl.id) == self.local_id;
             let marked = Some(pl.id) == self.marked_player_id;
-            pl.render(fb, ox, oy, is_self, marked);
+            pl.render(fb, camera, is_self, marked);
         }
         self.render_crosshair(fb);
     }
@@ -1130,7 +1142,7 @@ impl Game {
 
     pub fn aim_target_for_local(&self) -> Option<(f32, f32)> {
         let player = self.local_player()?;
-        let target = self.mouse.aim_target(self.origin);
+        let target = self.mouse.aim_target(&self.camera);
         let dx = target.0 - player.x;
         let dy = target.1 - player.y;
         let len2 = dx * dx + dy * dy;
@@ -1141,6 +1153,17 @@ impl Game {
         Some((dx * inv, dy * inv))
     }
 
+    /// Recompute camera center based on the local player + mouse look-ahead.
+    /// Call once per render frame. No-op when there is no local player.
+    pub fn update_camera_follow(&mut self) {
+        let (px, py) = match self.local_player() {
+            Some(p) => (p.x, p.y),
+            None => return,
+        };
+        let mouse_screen = self.mouse.screen_pos();
+        self.camera.follow((px, py), mouse_screen);
+    }
+
     #[allow(dead_code)]
     fn _render_crosshair_below(&self, _fb: &mut Framebuffer) {}
 
@@ -1148,15 +1171,21 @@ impl Game {
         let color = Pixel::rgb(255, 255, 255);
         let px = self.mouse.col.saturating_mul(2) + 1;
         let py = self.mouse.row.saturating_mul(3) + 1;
-        fb.set(px, py, color);
-        if py > 0 {
-            fb.set(px, py - 1, color);
+        if px < self.camera.viewport_w && py < self.camera.viewport_h {
+            fb.set(px, py, color);
+            if py > 0 {
+                fb.set(px, py - 1, color);
+            }
+            if py + 1 < self.camera.viewport_h {
+                fb.set(px, py + 1, color);
+            }
+            if px > 0 {
+                fb.set(px - 1, py, color);
+            }
+            if px + 1 < self.camera.viewport_w {
+                fb.set(px + 1, py, color);
+            }
         }
-        fb.set(px, py + 1, color);
-        if px > 0 {
-            fb.set(px - 1, py, color);
-        }
-        fb.set(px + 1, py, color);
     }
 }
 
@@ -1171,8 +1200,9 @@ fn brand_color(id: &str) -> Pixel {
     }
 }
 
-/// Draw a tracer line between two world-space points, fading toward the end.
-fn render_tracer(fb: &mut Framebuffer, ox: i32, oy: i32, trace: &HitscanTrace) {
+/// Draw a tracer line between two world-space points, camera-transformed
+/// and fading with ttl. Used for enemy hitscan visuals.
+fn render_tracer(fb: &mut Framebuffer, camera: &Camera, trace: &HitscanTrace) {
     let intensity = (trace.ttl / 0.14).clamp(0.0, 1.0);
     let base = Pixel::rgb(255, 120, 40);
     let faded = Pixel::rgb(
@@ -1180,17 +1210,15 @@ fn render_tracer(fb: &mut Framebuffer, ox: i32, oy: i32, trace: &HitscanTrace) {
         (base.g as f32 * intensity) as u8,
         (base.b as f32 * intensity) as u8,
     );
-    let from_x = ox as f32 + trace.from.0;
-    let from_y = oy as f32 + trace.from.1;
-    let to_x = ox as f32 + trace.to.0;
-    let to_y = oy as f32 + trace.to.1;
-    let dx = to_x - from_x;
-    let dy = to_y - from_y;
+    let (fx, fy) = camera.world_to_screen(trace.from);
+    let (tx, ty) = camera.world_to_screen(trace.to);
+    let dx = tx - fx;
+    let dy = ty - fy;
     let steps = (dx.abs().max(dy.abs()).ceil() as i32).max(1);
     for i in 0..=steps {
         let t = i as f32 / steps as f32;
-        let px = (from_x + dx * t).round() as i32;
-        let py = (from_y + dy * t).round() as i32;
+        let px = (fx + dx * t).round() as i32;
+        let py = (fy + dy * t).round() as i32;
         if px >= 0 && py >= 0 {
             fb.set(px as u16, py as u16, faded);
         }

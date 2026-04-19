@@ -116,6 +116,7 @@ impl WaveDirector {
         content: &ContentDb,
         active_brands: &[String],
         events: &mut Vec<WaveEvent>,
+        player_anchors: &[(f32, f32)],
         dt: f32,
     ) {
         self.banner_ttl = (self.banner_ttl - dt).max(0.0);
@@ -125,7 +126,7 @@ impl WaveDirector {
                 self.spawn_timer -= dt;
                 while self.wave_budget > 0 && self.spawn_timer <= 0.0 {
                     let archetype = self.next_archetype();
-                    if let Some((sx, sy)) = pick_spawn(&mut self.rng, arena) {
+                    if let Some((sx, sy)) = pick_spawn(&mut self.rng, arena, player_anchors) {
                         let stats = content.stats(archetype);
                         enemies.push(Enemy::spawn(archetype, stats, sx, sy));
                     }
@@ -145,7 +146,6 @@ impl WaveDirector {
             WaveState::Intermission(phase) => {
                 self.phase_timer -= dt;
                 if self.phase_timer <= 0.0 {
-                    // Emit transition event BEFORE the phase actually swaps.
                     if phase == IntermissionPhase::Vote {
                         events.push(WaveEvent::ExitVote);
                     }
@@ -158,10 +158,9 @@ impl WaveDirector {
                             }
                         }
                         None => {
-                            // End of intermission → start the next wave.
                             self.wave += 1;
                             self.banner_ttl = 2.5;
-                            self.plan_wave(arena, enemies, content, active_brands);
+                            self.plan_wave(arena, enemies, content, active_brands, player_anchors);
                             events.push(WaveEvent::WaveStart(self.wave));
                             self.state = WaveState::Spawning;
                         }
@@ -177,13 +176,11 @@ impl WaveDirector {
         enemies: &mut Vec<Enemy>,
         content: &ContentDb,
         active_brands: &[String],
+        player_anchors: &[(f32, f32)],
     ) {
-        // Miniboss every 5 waves — pick from the FIRST active brand's
-        // miniboss entry so the brand that opened the run sets the boss
-        // flavor at each checkpoint.
         if self.wave % 5 == 0 && self.wave > 0 {
             if let Some(boss) = first_miniboss(content, active_brands) {
-                if let Some((sx, sy)) = pick_spawn(&mut self.rng, arena) {
+                if let Some((sx, sy)) = pick_spawn(&mut self.rng, arena, player_anchors) {
                     let stats = content.stats(boss);
                     enemies.push(Enemy::spawn(boss, stats, sx, sy));
                 }
@@ -258,13 +255,41 @@ fn archetype_from_name(name: &str) -> Result<Archetype, ()> {
     }
 }
 
-fn pick_spawn(rng: &mut SmallRng, arena: &Arena) -> Option<(f32, f32)> {
+/// Pick a spawn tile near one of the player anchors (offscreen-ish but
+/// reachable in a few seconds) rather than at the distant arena edge.
+/// Falls back to an edge-spawn if the anchor list is empty (no players).
+fn pick_spawn(
+    rng: &mut SmallRng,
+    arena: &Arena,
+    player_anchors: &[(f32, f32)],
+) -> Option<(f32, f32)> {
     let w = arena.width as i32;
     let h = arena.height as i32;
     let margin = 6;
     if w < margin * 3 || h < margin * 3 {
         return None;
     }
+
+    // Preferred: pick near a random player anchor at 45–95 world pixels
+    // (well beyond zoom=1 viewport, close enough to path to the player in
+    // a few seconds).
+    if !player_anchors.is_empty() {
+        for _ in 0..192 {
+            let anchor = player_anchors[rng.gen_range(0..player_anchors.len())];
+            let angle: f32 = rng.r#gen::<f32>() * std::f32::consts::TAU;
+            let dist: f32 = rng.gen_range(45.0..=95.0);
+            let tx = (anchor.0 + angle.cos() * dist).round() as i32;
+            let ty = (anchor.1 + angle.sin() * dist).round() as i32;
+            if tx < margin || ty < margin || tx >= w - margin || ty >= h - margin {
+                continue;
+            }
+            if arena.is_passable(tx, ty) && arena.is_passable(tx, ty + 1) {
+                return Some((tx as f32 + 0.5, ty as f32 + 0.5));
+            }
+        }
+    }
+
+    // Fallback: edge spawn (matches old behavior).
     for _ in 0..128 {
         let edge = rng.gen_range(0..4u8);
         let (tx, ty) = match edge {

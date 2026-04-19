@@ -1,4 +1,5 @@
 use crate::arena::Arena;
+use crate::camera::Camera;
 use crate::content::ArchetypeStats;
 use crate::fb::{Framebuffer, Pixel};
 use crate::primitive::BurnStatus;
@@ -283,20 +284,36 @@ impl Enemy {
         0
     }
 
-    pub fn render(&self, fb: &mut Framebuffer, ox: i32, oy: i32) {
-        let cx = ox + self.x.round() as i32;
-        let cy = oy + self.y.round() as i32;
-        let mut s = sprite::enemy_sprite(self.archetype);
-        if self.hit_flash > 0.0 {
-            s.tint_toward(Pixel::rgb(255, 255, 255), self.hit_flash.min(0.75));
-        } else if self.tell_timer > 0.0 {
-            // Ranged charging tell — strong pale-white lean so players have
-            // time to break line-of-sight.
-            s.tint_toward(Pixel::rgb(255, 245, 230), 0.55);
-        } else if self.burn.is_some() {
-            s.tint_toward(Pixel::rgb(255, 140, 40), 0.35);
+    pub fn render(&self, fb: &mut Framebuffer, camera: &Camera) {
+        let (sx, sy) = camera.world_to_screen((self.x, self.y));
+        let center = (sx.round() as i32, sy.round() as i32);
+
+        match camera.mip_level() {
+            0 => {
+                let mut s = sprite::enemy_sprite(self.archetype);
+                if self.hit_flash > 0.0 {
+                    s.tint_toward(Pixel::rgb(255, 255, 255), self.hit_flash.min(0.75));
+                } else if self.tell_timer > 0.0 {
+                    s.tint_toward(Pixel::rgb(255, 245, 230), 0.55);
+                } else if self.burn.is_some() {
+                    s.tint_toward(Pixel::rgb(255, 140, 40), 0.35);
+                }
+                s.blit_scaled(fb, center, camera.zoom);
+            }
+            1 => {
+                // Blob keeps the signature color and picks up burn/tell
+                // feedback via a flat fill color swap.
+                let color = if self.tell_timer > 0.0 {
+                    Pixel::rgb(255, 245, 230)
+                } else if self.burn.is_some() {
+                    Pixel::rgb(255, 140, 40)
+                } else {
+                    self.color()
+                };
+                sprite::render_blob(fb, center, color);
+            }
+            _ => sprite::render_dot(fb, center, self.color()),
         }
-        s.blit(fb, cx, cy);
     }
 }
 
