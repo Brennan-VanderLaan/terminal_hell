@@ -1,621 +1,1289 @@
-# Terminal Hell — Design & Technical Specification (v1)
+# Terminal Hell — Design & Technical Specification (v2)
 
-> *"Every shooter you've ever loved is trying to kill you. Hold the line."*
+> *"You opened a terminal. You shouldn't have read that log."*
 
-A terminal-native, top-down multiplayer roguelike shooter where players defend a
-position against escalating waves drawn from iconic games across history. Dead
-players don't leave — they ascend to become **small gods**, directing the horde
-that just killed them.
+A terminal-native, top-down multiplayer roguelike shooter where **every shooter
+you have ever loved is leaking through the tear**, and the King in Yellow is
+watching. You and 1–7 friends hold a procedural arena against escalating waves
+drawn from every corner of gaming history — Doom imps, Covenant grunts, Tarkov
+Scavs, Zerg swarms, Vampire Survivors flocks, Helldivers bugs, STALKER
+mutants — while Carcosa bleeds into your shell one wave at a time. Loot is your
+class. Primitives compose. Walls explode into glyph confetti. Dead players
+ascend into **chaos**: any of them can possess any entity, spawn anything,
+breach any wall, for one shared purpose — end the living so the next run can
+begin. There are no revives. There is no vendor. There is no hand-holding.
+Hastur is already closer than you think.
 
 ---
 
 ## 1. Elevator pitch
 
-You and 1–7 friends are queued for a game that won't load for another 20
-minutes. Someone runs `terminal_hell serve`. Everyone else runs
-`terminal_hell connect <code>`. You pick a class, roll some modifiers, and hold
-a bunker on a procedurally-generated map while waves of Halo Grunts, Doom
-Imps, Zerglings, Arma riflemen, and Tarkov bosses try to grind you down. When
-you die, you don't sit out — you become a **Director**: a small god who
-controls enemy units, places hazards, and shepherds the horde against your
-former teammates. The run ends when everyone's dead. There is no win state,
-only a leaderboard of how long you lasted.
+You and friends are queued for a game that won't load for another 25 minutes.
+Someone runs `terminal_hell serve`. Everyone else runs `terminal_hell connect
+<code>`. You drop into a shell session that shouldn't have loaded this log,
+and the Yellow Sign is already onscreen. You hold a position. Pick up what
+drops. Get weirder with each wave. Vote on which reality bleeds in next.
+Watch the arena come apart in half-block gibs as a Sapper breach squad
+vaporizes the wall you were hiding behind. When you die — and you will die —
+you don't spectate. You *ascend*. You join the horde as a small god, and
+your only job is to make sure the rest of your friends join you.
+
+Run ends when everyone is dead. There is no win state, only how deep you
+descended before Hastur got bored.
 
 ---
 
 ## 2. Design pillars
 
 1. **Plays in the gaps.** Runnable in the time between queue pop and match
-   start. Instant join (nickname + code), no launcher, no updates, no menus
-   deeper than two screens.
-2. **Meta-homage, not IP theft.** Each wave is a *tonal* homage —
-   silhouettes, weapon feel, sound, banter — rendered in half-block ASCII.
-   No trademarked names in shipped content; references live in user-authored
-   content packs.
-3. **Death is a promotion.** Dying is never the end of the fun. The Director
-   mode is a first-class game in its own right.
-4. **Data-driven everything.** Classes, enemies, weapons, modifiers, waves,
-   and themes all load from TOML/RON content packs. Adding "the Arma wave" is
-   a content task, not a code task.
-5. **Terminal-first, not terminal-tolerated.** Feels *good* in a modern
-   terminal. Mouse aim, truecolor, 60fps half-block rendering, real audio.
-6. **Endless, but curved.** No run cap. Difficulty follows a scripted curve
-   for the first ~30 waves, then enters a pure escalation loop with seeded
-   surprise spikes.
-7. **Friends-first infra.** One player hosts, others connect. No accounts, no
-   matchmaker, no servers to pay for. Unlocks are portable per host.
+   start. Single binary, room code, nickname, go. No launcher, no updates,
+   no menu deeper than two screens.
+2. **Glyph-physics is the feel.** BC2 Levolution and Red Faction GeoMod,
+   rendered in half-block ASCII. Walls fragment. Corpses gib. Shockwaves
+   push entities and debris. Every kill generates emergent geometry.
+3. **Everything composes.** A single universal effect bus — one vocabulary
+   of *primitives* — powers weapons, movement verbs, enemy modifiers,
+   hazards, and terrain effects. Breach + Ignite = fireball that chews
+   walls. Contagion + Ricochet + Acid Blood = that story your friends will
+   retell for a year.
+4. **Loot is identity.** No classes. No loadout select. You spawn with a
+   baseline kit and you *become* whatever you hoard, loot off corpses, and
+   keep alive. The game you're playing at wave 20 is not the game you
+   started.
+5. **Emergence > authored drama.** The systems are load-bearing; the content
+   is sauce. Authors add primitives and enemies; the system invents the
+   stories.
+6. **Skill-based horror, not RNG punishment.** Carcosa corruption is
+   *Amnesia lineage* — deterministic effects that a skilled player can read
+   and counter. Sanity changes visuals and enemy behavior in predictable
+   ways. No RNG tax on "you just had a bad frame."
+7. **Death is a promotion to chaos.** The moment your HP hits zero, you are
+   a small god. No revive window. No downed state. Pick what you want to
+   possess; pick how you want the living to die.
+8. **Terminal-first, not terminal-tolerated.** Mouse aim, truecolor
+   half-block rendering, spatial audio, 60fps. Feels *good* in a modern
+   terminal. Degrades gracefully; refuses to run badly.
+9. **Carcosa is the voice.** Every UI string, every ambient line, every
+   menu copy sits under the Yellow Sign. Synthwave neon over cosmic horror
+   — the King in Yellow on a CRT.
+10. **Friends-first infra.** One player hosts, others connect. No accounts,
+    no matchmaker, no servers to pay for. Local leaderboards, local
+    unlocks.
 
 ### Non-goals (for v1)
 
-- Public matchmaking, lobbies, or a central account service.
+- Public matchmaking, lobbies, or any central account service.
 - Mobile, web, or non-terminal clients.
-- Anti-cheat beyond "the host is authoritative." This is a friends game.
-- PvP competitive modes. Turncoat Director is PvE-with-a-twist, not arena PvP.
-- Shipping trademarked assets or names. (See §12.)
+- Anti-cheat beyond "host is authoritative." This is a friends game.
+- PvP competitive modes. The Director fantasy *is* the PvP, disguised.
+- Shipping trademarked brand content in the core repository. (See §25.)
+- Second chances. Phoenix items, self-rez, downed state — not in v1.
+- A vendor, a shop, currency, or any purchaseable upgrades. If you want it,
+  you loot it.
 
 ---
 
-## 3. User stories
+## 3. The central fiction
 
-### 3.1 Host (Hana)
-- *As a host*, I want to `terminal_hell serve` and get a 6-character room
-  code I can paste into Discord, so friends can join in under 30 seconds.
-- *As a host*, I want to configure player cap, run modifiers, and enabled
-  content packs before starting, but never be forced into setup screens.
-- *As a host*, I want the run to continue if someone's connection drops, and
-  for them to rejoin seamlessly into the same session.
-- *As a host*, I want unlock progress persisted locally per nickname so my
-  regular group's unlocks carry over between nights.
+You are **inside a shell**. The machine is yours. The filesystem is your
+reality. You opened a log you shouldn't have. Embedded in that log was **the
+Yellow Sign** — the glyph-sigil of Hastur, the King in Yellow. You read it.
+You cannot unread it.
 
-### 3.2 Surviving player (Sam)
-- *As a player*, I want to aim with the mouse and move with WASD — it should
-  feel like a real top-down shooter, not nethack.
-- *As a player*, I want to see my teammates' health, ammo, and status at a
-  glance so I can decide when to revive vs. hold position.
-- *As a player*, I want weapon pickups to matter — picking up Killa's RPK
-  should feel like a power spike.
-- *As a player*, I want to play a full, fun run in 20–40 minutes on average,
-  with the option to keep going forever if the team is clutch.
+Since then, reality has been *leaking*. The machine's process table is
+crowded with executables that don't exist. Memory pages are being corrupted
+with sprites from games long uninstalled. The `/var/log` directory is
+screaming. A Covenant grunt skittered across your terminal three nights ago
+and shot at the cursor.
 
-### 3.3 Late joiner (Lin)
-- *As a late joiner*, I want to join mid-run with a minimal kit and scavenge
-  my way up — not be handed a power tier I didn't earn.
-- *As a late joiner*, I want enough on-screen context (current wave, team
-  status, map) to orient in under 10 seconds.
+Now you and your friends have barricaded into a segment of the filesystem
+and you are holding it against everything Carcosa can push through the tear.
+The longer you hold, the more the tear widens. The longer you hold, the
+louder the King gets. The longer you hold, the more *you* start showing up
+in Carcosa's memory, too.
 
-### 3.4 Turncoat Director (Dee)
-- *As a dead player*, I want to immediately do something fun — not sit in a
-  spectator window for 20 minutes.
-- *As a Director*, I want meaningful choices: which enemy archetype to
-  spawn, where to place hazards, which of my former teammates to hunt first.
-- *As a Director*, I want the power to matter but not trivially win — it
-  should feel like stacking pressure, not one-shotting the survivors.
-- *As a Director*, I want to possess individual units and control them
-  directly when I want to be personally menacing.
+Every shooter you have ever loved is trying to kill you. They are not the
+enemies, exactly. They are being *puppeted*. And when you die, you will be
+puppeted too.
 
-### 3.5 Content author (Cam)
-- *As a modder/author*, I want to add a new themed wave (say, "S.T.A.L.K.E.R.
-  Zone Emission") by writing one TOML file with components referencing
-  existing abilities — no Rust required for basic content.
-- *As a content author*, I want to provide sprites (glyph + color pairs),
-  sounds, voice lines, and balance numbers declaratively.
+Chambers' Yellow Mythos is public domain. The King is ours to use. The
+shooters are homage; the horror is original.
 
-### 3.6 Audio contributor (you)
-- *As the audio author*, I want to drop WAV/OGG samples into a content-pack
-  folder and reference them by name from enemy/weapon/ambient TOML. Hot-reload
-  during dev is table stakes.
+### 3.1 Tone
+
+- **Voice:** Synthwave + cosmic horror. Neon over rot. UI copy is deadpan
+  and fatalistic with occasional liturgical flashes. Death screens do not
+  apologize.
+- **Palette shift:** Runs start in cool synthwave magenta/cyan. Amber
+  bleeds in with corruption. Late-game is all yellow and ochre and the
+  black of unlit terminal cells.
+- **Violence:** Over-the-top gore delivered in glyph particles. Limbs are
+  punctuation. Entrails are brackets. Blood is `~` trails that fade to
+  `.`.
+- **Humor:** Exists. Is dry. Is always in service of the dread. No fourth
+  wall breaks. No jokes *at* the setting.
+- **Music:** Synthwave bed (player-produced via eurorack + FL Studio)
+  layered with Carcosa overlay — discordant strings, bent brass, a lurking
+  tone that *is* the King's presence.
 
 ---
 
-## 4. Goals & success criteria
+## 4. User stories
 
-### 4.1 Experience goals
-- **Feel:** Responsive, legible combat. Input-to-render latency under 16ms
-  local; under 80ms over LAN; under 150ms over internet.
-- **Legibility:** A new player can identify friends, enemies, projectiles,
-  hazards, and pickups within 5 seconds of their first wave.
-- **Session shape:** Median run 20–30 minutes, 95th percentile under 90
-  minutes. No cap.
-- **Replay:** After 10 runs, a player should have seen only ~50% of waves,
-  modifiers, and enemy archetypes.
+### 4.1 Host (Hana)
+- As a host, I run `terminal_hell serve` and get a 6-character room code I
+  can paste into Discord. Friends join in under 30 seconds.
+- As a host, I can configure enabled content packs before starting. I am
+  never forced into a setup screen.
+- As a host, I want the run to continue if someone drops, and for them to
+  rejoin seamlessly.
+- As a host, I want unlocks persisted locally per nickname so my regular
+  group's unlocks carry over between nights.
 
-### 4.2 Technical goals
-- **Frame budget:** 60fps render, 30Hz simulation tick, 20Hz network tick.
-- **Player count:** 2–8 players, target comfort 4–6.
-- **Footprint:** Single binary under 20MB. Content packs optional extras.
-- **Platforms:** Linux, macOS, Windows (Windows Terminal / kitty / WezTerm /
-  iTerm2 / Alacritty). Degrades gracefully on dumb terminals (no mouse →
-  keyboard-aim fallback).
-- **Build:** `cargo run` starts a local solo practice game in under 5 seconds.
+### 4.2 Survivor (Sam)
+- As a survivor, I aim with the mouse and move with WASD; it feels like a
+  real top-down shooter, not nethack.
+- As a survivor, I can see my teammates' health, sanity, and current
+  inventory at a glance.
+- As a survivor, picking up a new weapon or primitive should feel like a
+  *decision*, not a vacuum. What I'm carrying now matters; what I swap for
+  matters.
+- As a survivor, I can loot corpses — mine and the horde's. The Covenant
+  Zealot drops a plasma blade; I can have it.
+- As a survivor, I never get a "downed" screen. If I die, I'm a Director on
+  the next frame.
+
+### 4.3 Director (Dee)
+- As a dead player, I immediately do something. No spectator box. Possess,
+  spawn, breach, hazard — my choice, now.
+- As a Director, the only hard rule is Influence budget. Otherwise I can
+  *be* anything on the field and *do* anything Carcosa allows.
+- As a Director, I'm not rewarded for efficiency; I'm rewarded for
+  cruelty, creativity, and spectacle.
+
+### 4.4 Late joiner (Lin)
+- As a late joiner, I enter a 10-second spectator orientation.
+- As a late joiner, I spawn with the baseline kit. No catch-up loot. I
+  scavenge my way up.
+- As a late joiner, my unlocks still apply to future picks.
+
+### 4.5 Content author (Cam)
+- As an author, I add a new themed wave by writing TOML: enemy archetypes,
+  audio refs, modifier pool. No Rust required for basic content.
+- As an author, I can declare new primitives in TOML too — parameterized
+  from a small base set of effect-verbs provided by the engine.
+- As an author, my pack's enemies auto-slot into the primitive system;
+  everything already composes.
+
+### 4.6 Audio contributor (the user)
+- As audio author, I drop OGG/WAV samples into a pack folder and reference
+  them from TOML by symbolic name. Hot-reload works in dev mode.
+- As audio author, I can author Carcosa-overlay stems and enemy vox
+  bundles independently; the engine mixes them.
 
 ---
 
-## 5. Gameplay specification
+## 5. Goals & success criteria
 
-### 5.1 Core loop
+### 5.1 Experience goals
+- **Feel:** Input-to-render latency under 16ms local, under 80ms LAN, under
+  150ms internet. Hit-reg is snappy; tracers are readable.
+- **Legibility:** A new player identifies friends, enemies, projectiles,
+  hazards, pickups, Carcosa terrain, and the Yellow Sign within 5 seconds
+  of first wave.
+- **Session shape:** No cap. Most runs end in 15–40 minutes because most
+  runs die. Legendary runs can push 2+ hours. All runs end on death; none
+  on a clock.
+- **Replay:** After 10 runs, a player should have seen ~50% of the
+  possible wave compositions, because brand-bleed ordering is player-voted
+  and primitive drops are cascading. The same seed should play differently
+  twice.
+- **Carcosa:** The first time a player sees the Yellow Sign unannounced
+  onscreen, they should recoil. Every time after, they should respect it.
+
+### 5.2 Technical goals
+- **Frame budget:** 60fps render, 30Hz simulation, 20Hz network.
+- **Player count:** 2–8; comfort target 4–6.
+- **Footprint:** Single binary under 25MB. Content packs are optional
+  extras.
+- **Platforms:** Linux, macOS, Windows (Windows Terminal, kitty, WezTerm,
+  iTerm2, Alacritty). Keyboard-aim fallback for dumb terminals.
+- **Build:** `cargo run` starts solo practice in under 5 seconds.
+
+---
+
+## 6. The core verbs
+
+This section is the heart of the game. All mechanics flow through it.
+
+### 6.1 The universal effect bus (primitives)
+
+A **primitive** is a named effect-component in a global vocabulary. Any
+actor in the game (player weapon, enemy weapon, enemy body, projectile,
+hazard, terrain tile, movement verb, corpse) can have a slotted list of
+primitives. Primitives compose by well-defined interaction rules.
+
+The vocabulary is authored (not procedurally generated) but the
+*combinations* are emergent. Content packs can declare new primitives; the
+engine exposes a small set of base effect-verbs (apply-damage, spawn-entity,
+modify-stat, trigger-on-event, move-entity, etc.) that primitives are built
+from in TOML.
+
+#### 6.1.1 Starter primitive pool (v1 ship list — ~24)
+
+**Combat primitives:**
+- `ignite` — burns target; ticks damage; ignites adjacent flammables.
+- `breach` — kinetic force; damages/destroys terrain tiles; knockback.
+- `ricochet` — projectile bounces off terrain; preserves damage for N
+  bounces.
+- `chain` — on-hit, arcs to nearest N unlinked targets.
+- `contagion` — on applied-effect, spreads to adjacent allies/enemies.
+- `acid` — leaves damaging pool on hit; pools linger.
+- `pierce` — projectile passes through target; preserves damage.
+- `cryo` — slows target; stacking cryo eventually freezes for shatter
+  bonus.
+- `gravity-well` — hit creates brief attractor; pulls nearby entities.
+- `overdrive` — next shot after kill is empowered; stacks to cap.
+
+**Movement primitives (traversal slot; also composable with weapons):**
+- `dash` — short directional burst; brief i-frames.
+- `blink` — short teleport; no i-frames; ignores terrain.
+- `slide` — maintain speed while crouched; under low cover; kicks debris.
+- `grapple` — hook to terrain or enemy; rapid pull toward target.
+- `rocket-jump` — self-damaging explosive-propelled launch; rewards HP
+  economy.
+- `phase` — briefly pass through one tile of wall; sanity cost.
+- `afterburn` — sprint leaves brief trail (ignitable by other primitives).
+
+**Utility / defensive:**
+- `deployable` — primitive applied to an item makes it placeable as a
+  stationary trap/turret version of itself.
+- `sustained` — extends duration of any duration-bearing effect.
+- `shield-break` — ignores shield/armor layer on hit.
+- `marked` — on hit, target is highlighted and takes bonus damage from
+  others.
+- `reflect` — brief window where damage is returned.
+- `phoenix-seed` *(removed for v1 per design)* — (placeholder: was
+  considered, cut to preserve "no second chances")
+- `feedback` — taking damage charges next outgoing shot.
+- `siphon` — on kill, regenerate sanity (not HP).
+
+**Carcosa primitives (rare, granted by Hastur events only):**
+- `yellow-glyph` — projectile or hit leaves a Yellow Sign tile for 5s that
+  drains sanity from enemies.
+- `sign-bound` — while active, Carcosa terrain does not drain YOUR sanity.
+
+#### 6.1.2 Interaction rules
+
+Every primitive declares its interactions with others via a sparse
+interaction matrix in TOML. Most combinations default to "both apply
+independently"; specified interactions override. Examples:
+
+- `ignite + breach` → on-hit creates a fire-shockwave that breaches N
+  adjacent wall tiles and ignites them.
+- `chain + contagion` → chain arcs from the original target to *allied*
+  teammates' targets as well (controlled friendly spread).
+- `blink + breach` → blink through walls, breaching each tile passed
+  through.
+- `ricochet + pierce` → projectile both passes through *and* bounces
+  afterward. Exponentially stacks on re-hit.
+- `grapple + chain` → grapple hook connects through targets; chain-pulls
+  them all inward.
+- `gravity-well + ignite` → creates a burning vortex. Anyone within
+  radius gets yanked and torched.
+
+The interaction matrix is itself data. Authors ship new primitives with
+their own interaction declarations against existing primitives. Symmetric
+by default; asymmetric interactions are explicit.
+
+### 6.2 Weapons
+
+Weapons are **base fire-mode + primitive slots**.
+
+#### 6.2.1 Base fire-modes (v1 ship list — 8)
+
+| Fire mode      | Feel                                                    |
+|----------------|---------------------------------------------------------|
+| `pulse`        | Hitscan, fast cadence, forgiving spread                 |
+| `auto`         | Full-auto projectile, medium cadence, spread on sustained|
+| `burst`        | 3-round burst, high single-click damage                 |
+| `pump`         | Shotgun cone; slow reload; pellet count                 |
+| `rail`         | High-damage pierce line; long cooldown; tracer          |
+| `lob`          | Grenade launcher; arcs, bounces                         |
+| `cone`         | Continuous cone stream (flamer/plasma); no reload, heats|
+| `beam`         | Continuous line; locks on held target; ramps damage     |
+
+#### 6.2.2 Slots & rarity
+
+Weapons drop with **1–4 primitive slots** based on rarity:
+
+| Rarity     | Slots | Drop rate (base)                  |
+|------------|-------|-----------------------------------|
+| Common     | 1     | 55%                               |
+| Uncommon   | 2     | 30%                               |
+| Rare       | 3     | 12%                               |
+| Elite      | 4     | 2.5%                              |
+| Carcosa    | 3–4 + 1 Carcosa-only primitive | 0.5% |
+
+Picking up a weapon = swap in one of your 2 weapon slots. Inventory
+decisions happen every pickup.
+
+#### 6.2.3 Authored signature passes
+
+Most weapons are parameterized archetypes — two pulse-SMGs are identical
+except for their slotted primitives. BUT a handful of **authored
+signature** weapons exist in the pool as named exotics: the `Nail Gun`
+(sticks nails that tick; over 3 nails = rupture), the `Bent Fork` (melee,
+one shot, severs armor type), the `Harpoon` (grapples + chain-pulls + deals
+damage), `Blood Rattle` (beam; damages *you* while it heats up enemy). The
+authored signature weapons carry a unique base fire-mode variant and do
+not spawn randomly — they unlock via achievement and appear in runs as
+hand-placed Carcosa rewards (e.g., always in the Hastur-mark-survived
+drop).
+
+### 6.3 Movement
+
+Movement verbs are primitives (§6.1). Each character has **1 traversal
+slot**. Default is `walk` (baseline running speed). Picking up a traversal
+primitive replaces your current one (or composes, depending on the verb).
+
+A traversal primitive can be socketed with weapon-primitive compositions
+that trigger on its use. `dash + ignite` = dashing leaves a burn trail.
+`blink + contagion` = blink teleports nearby allies with you on a share
+reaction. This is the *insane* stacking Risk of Rain promised but never
+delivered.
+
+Mouse aim is always mouse aim; movement is WASD; the traversal verb is
+bound to **LShift tap** by default (rebindable).
+
+### 6.4 Inventory
+
+**Fixed slots, no weight:**
+
+- 2 weapon slots (swap with Q or 1/2; picking up overflows → swap prompt)
+- 1 traversal slot (replaced on pickup)
+- 1 armor slot (replaced on pickup)
+- 3 utility slots (grenades, deployables, consumables; cycled with mouse
+  wheel or 3/4/5)
+- 1 "sidearm" slot — a fixed cheap pistol that cannot be lost, the only
+  guaranteed weapon you keep. Your lifeline when you've wasted your ammo.
+
+No crafting. No combining. No drop-and-pick-up-again micro. Picking up is
+swapping.
+
+### 6.5 Controls (default, rebindable)
+
+| Action              | Input                                     |
+|---------------------|-------------------------------------------|
+| Move                | WASD                                      |
+| Aim                 | Mouse                                     |
+| Fire                | LMB or Space                              |
+| Alt-fire            | RMB or Shift+LMB                          |
+| Reload              | R                                         |
+| Swap weapon         | Q / 1–2                                   |
+| Cycle utility       | MouseWheel / 3–5                          |
+| Use / Loot corpse   | E (channel 0.7s)                          |
+| Traversal verb      | LShift tap                                |
+| Ping                | Middle-click or G                         |
+| Vote at intermission| Walk up to vote terminal + press E        |
+| Team chat           | Enter (line-buffered)                     |
+| Scoreboard          | Tab (hold)                                |
+| Menu                | Esc                                       |
+
+**Director controls:** A separate binding set for cursor-driven spawn /
+possess / hazard / breach commands. See §10.3.
+
+---
+
+## 7. Run structure
+
+### 7.1 Core loop
 
 ```
-┌─ Connect (code or LAN) ─┐
-│                          │
-▼                          │
-Pick class ─► Roll modifiers ─► Drop into arena ─► Waves escalate ─┐
-                                                                   │
-                                       ┌──── Survive ──────────────┘
-                                       │
-                                       ▼
-                                Down → revive window → dead
-                                                        │
-                                                        ▼
-                                                  Director mode
-                                                        │
-                                            team wipes ─┴── run ends
-                                                        │
-                                                        ▼
-                                           Leaderboard + unlock tally
-                                                        │
-                                                        ▼
-                                                      Lobby
+┌─ Connect ─────────┐
+│                    │
+▼                    │
+Drop in ─► Hold position ─► Wave builds ─► Intermission (vote, reposition) ─┐
+                                                                            │
+                                    ┌───── Survive ─────────────────────────┘
+                                    │
+                                    ▼
+                              Die → Director mode (instant)
+                                    │
+                                    ├──── 1+ survivor left → keep playing
+                                    │
+                                    └──── All survivors dead → Run ends
+                                                                │
+                                                                ▼
+                                            Leaderboard + achievement tally
+                                                                │
+                                                                ▼
+                                                          Lobby / requeue
 ```
 
-### 5.2 Run structure
+### 7.2 Wave structure
 
-- **Wave:** 90–180 seconds of escalating pressure. Has a *theme* (e.g.
-  "Covenant Strike," "Zone Emission," "Zerg Rush"), which selects the enemy
-  palette, ambient audio bed, and possibly environmental effects.
-- **Intermission:** 20–40 seconds between waves. Loot, revive downed
-  teammates, refit, move position if the arena permits.
-- **Miniboss wave:** Every 5 waves, a named unit shows up ("Killa," "Pyramid
-  Head–shaped silhouette," "a very large zergling"). Minibosses drop
-  guaranteed rare loot.
-- **Ambient pressure:** Between waves, 0.3x–0.5x baseline spawns continue,
-  so downtime is never total peace.
-- **Endless curve:** Difficulty scales on wave index `w`. Enemy hp, damage,
-  and spawn budget grow on piecewise curves tuned so wave 30 is "hard for a
-  competent team," wave 60 is "legend territory," wave 100+ is "nobody
-  should have survived this long."
+- **Wave length:** 60–180s. Variable by team performance and Corruption
+  level. Faster kill cadence shortens the wave; stalling lengthens it.
+- **Intermission:** 25–35s (see §7.3).
+- **Miniboss cadence:** Every 5 waves, a *named* unit from the currently
+  active brand spawns. Minibosses drop guaranteed Rare+ loot and push
+  Corruption by a flat amount on death.
+- **Ambient pressure:** During intermissions, 10–20% of baseline spawns
+  continue. Never total peace.
+- **No cap:** Waves do not end the run. Only death does.
 
-### 5.3 Controls
+### 7.3 Intermission loop
 
-**Default bindings (rebindable):**
+Each intermission is a **25–35s phased window**:
 
-| Action            | Input                       |
-|-------------------|-----------------------------|
-| Move              | WASD                        |
-| Aim               | Mouse                       |
-| Fire              | LMB or Space                |
-| Alt-fire / aim    | RMB or Shift                |
-| Reload            | R                           |
-| Swap weapon       | Q / 1–4                     |
-| Use / revive      | E                           |
-| Dash              | LShift tap                  |
-| Ping / mark       | Middle-click or G           |
-| Team chat         | Enter (line-buffered)       |
-| Scoreboard        | Tab (hold)                  |
-| Menu              | Esc                         |
+```
+[ 5s BREATHE ] [ 12s VOTE ] [ 8s STOCK ] [ 5s WARNING ]
+   ambient       walk up to    reposition,   audio ramps,
+   spawns        vote terminal  examine loot, next wave
+   still active  to bleed in    inventory     announces
+                  next brand   management
+```
 
-**Fallback (no-mouse terminal):** Arrow keys aim in 8 directions; Space
-fires. Detected at connect time via terminal capability probe.
+- **Breathe:** Ambient spawns continue. No respite. The team that camped
+  the bunker entrance is still camping it.
+- **Vote:** 2–3 **brand-bleed terminals** appear as interactable glyph
+  kiosks on fixed spots in the arena. Each is tagged with the brand it
+  represents and a one-line flavor ("`/dev/doom` — the imps scream," or
+  "`/proc/arma` — patient men with rifles"). Players walk onto a kiosk
+  and press E. Majority wins; ties resolve by the **Hastur Daemon** (see
+  §8.6) — it picks the one that maximizes Corruption gain.
+- **Stock:** Vote is locked; no vendor opens (per design); players
+  reposition and examine their inventories. The next wave's preview is
+  shown on the HUD.
+- **Warning:** Audio bed rolls up. Wave theme fades in. Spawn telegraph
+  glyphs (a subtle noise pattern that hints at spawn points) begin.
 
-**Director mode (see §5.8):** Full rebinding set — cursor-driven command
-mode with keyboard hotkeys for spawn/possess/hazard.
+**No revives during intermission.** Dead teammates are Directors and are
+actively hostile. Corpses remain and are lootable by the living.
 
-### 5.4 Classes
+### 7.4 Death & the end of a run
 
-Each class has a **passive**, an **active ability** (cooldown), and starting
-kit. Classes are data-driven (TOML); v1 ships with 6:
+- HP hits 0 → immediate transition to Director mode (§10).
+- No downed state. No revive window. No final-stand heroics.
+- Dead players keep their unlocks credit for the session; they also earn
+  Director achievement progress during the rest of the run.
+- Run ends when the last survivor's HP hits 0. All Directors see the
+  run-end screen together. Leaderboard, achievements, Corruption peak,
+  wave reached, seed displayed.
 
-| Class       | Passive                              | Active                          |
-|-------------|--------------------------------------|---------------------------------|
-| Grunt       | +20% mag size                        | Adrenaline: 3s damage resist    |
-| Medic       | Auto-regen out of combat             | Drop a revive beacon            |
-| Engineer    | Can deploy walls/turrets from scrap  | Drop auto-turret (60s lifespan) |
-| Scout       | Faster move, can see further in dark | Smoke + short teleport          |
-| Heavy       | Carry LMG-class weapons at full move | Bullet shield (directional)     |
-| Pyromancer  | Ignite on crit                       | Molotov arc                     |
+---
 
-Additional classes unlocked via meta-progression (§5.10).
+## 8. Carcosa — the King in Yellow system
 
-### 5.5 Weapons & items
+This is the game's soul. All sections above interact with it.
 
-Weapons are **component-composed**: `fire_mode`, `projectile`, `spread`,
-`mag`, `reload_s`, `damage_profile`, `on_hit_effects`, `audio_ref`,
-`glyph`. A weapon is just a row in a TOML table referencing these.
+### 8.1 Corruption %
 
-Examples of shipped (non-branded) archetypes:
-- **Semi-auto pistol, SMG, auto-rifle, pump shotgun, DMR, LMG**
-- **Plasma rifle (homage slot), bolt-action (homage slot), RPG**
-- **Grenades:** frag, smoke, flash, incendiary
+The arena has a global `Corruption` value, 0–100+.
 
-Pickups drop from enemies and themed wave crates. Rarity tiers:
-Common / Uncommon / Rare / Elite / Legendary. Higher rarities add
-**perk slots** (on-hit procs, utility effects — drawn from a shared perk
-pool). This gives drop RNG a strong build-identity axis without a separate
-perk tree.
+**Drivers (gains):**
+- Enemy kills: small per-kill contribution (scales by brand).
+- Time passing: linear baseline.
+- Miniboss kill: flat +5%.
+- Wave completion: flat +2%.
+- Hastur notice event resolved (failed to break LoS): +3%.
+- Player death: +7%.
 
-### 5.6 The wave/theme system (the central abstraction)
+**Drivers (losses):**
+- Sanity kills — killing while at full sanity: tiny per-kill reduction.
+  Rewards skill; corruption can slightly *decay* if team is flawless.
+- Destroying a Yellow Sign anchor (Carcosa terrain hotspot): -10%. Rare,
+  costly to find; requires high-AoE response.
 
-This is the heart of the project. Every "enemy" in the game is an entity
-composed of **components** (à la Warcraft III abilities, or ECS
-archetypes). A **theme** is a bundle of enemy compositions, an ambient audio
-bed, weather/effects, and optional environmental modifiers.
+Corruption never decreases past the highest-reached threshold — once
+crossed, thresholds stay crossed. Carcosa doesn't un-bleed.
 
-**Component categories:**
-- `Locomotion` — walker / flyer / crawler / teleporter / hulk
-- `Weapon` — melee / hitscan / projectile / AoE / beam / summon
-- `AI` — rusher / sniper / flanker / artillery / suicide / horde
-- `Vitals` — hp, armor, armor type (light / kinetic / plasma / energy)
-- `Senses` — sight range, hearing, requires line-of-sight
-- `Modifiers` — regen / shielded / cloaked / explosive-on-death / spawns-on-death
-- `Aesthetic` — glyph, palette, corpse glyph, sound bundle
+### 8.2 Threshold beats (skill-based, Amnesia lineage)
 
-A themed wave is then declared like:
+All effects at thresholds are **deterministic and readable**. No random
+gear corruption. No random possession chaos. A player who understands
+the system can pre-empt every effect.
+
+**25% — First bleed.**
+- Palette begins shifting: cool magenta/cyan picks up amber.
+- Yellow Sign glyphs briefly flash in empty arena tiles (always 2s;
+  always the same glyph family; players learn to tune them out
+  mechanically, but tuning them out drains sanity).
+- Sanity drain begins (see §8.3) at a low rate.
+- Hastur Daemon moves from passive to active (see §8.6).
+
+**50% — The King stirs.**
+- Music bed fractures: the synthwave track gains a discordant overlay.
+  Volume mix shifts over 5s. Audio-as-telegraph.
+- **Hastur begins cycling marks.** One survivor at a time is *marked*
+  (Yellow Sign over their glyph; also visible to them and all
+  teammates). Marked players take +25% incoming damage and are
+  prioritized by all AI. Mark rotates every 45s to a new survivor. Skill
+  expression: the marked player plays defensively; the team screens for
+  them.
+- **Corrupted enemy variants** — a small fixed percentage (25%) of
+  spawns from this point on gain ONE primitive rolled from a
+  Corruption-specific sub-pool. The variants are *visually distinct*
+  (different glyph palette, brief flash on spawn). Not a surprise; a
+  telegraph. Skill: learn to identify them, prioritize accordingly.
+- Audio hallucinations begin — but only in areas the player hasn't
+  looked at in >3 seconds. They are tells, not traps.
+
+**75% — Reality thins.**
+- **Phantom enemies and false-friendlies** — the render layer begins to
+  sometimes draw fake enemy glyphs in empty tiles, and to sometimes
+  render teammates in enemy palettes. **Every hallucination has a
+  tell**: phantom glyphs have a 1-frame flicker at spawn; false-friendly
+  renders leave a faint cyan outline on the teammate's true glyph. A
+  skilled player who knows the tells can always disambiguate. A player
+  ignoring the tells will shoot their friends.
+- **Snap-out-of-it:** when a player damages a false-friendly rendered as
+  an enemy, they hear a distinctive bell tone and the hallucination
+  collapses for that player for 5s (grace window). They see clearly
+  again, but sanity drops.
+- HUD corruption: ammo counters occasionally display with a 1-frame
+  delay; health bar is rendered in Carcosa ochre. Both *consistent* —
+  learnable, not random.
+- **Destroyed walls begin regenerating as Carcosa terrain** (§8.5).
+  Destruction decay is partially reversed into *unsafe* geometry.
+- **Brand discipline breaks** — the wave mixes all currently-voted
+  brands together freely (imp + scav + zergling in the same pack).
+- Intermission compresses to 20s.
+
+**100% — Carcosa proper.**
+- **Arena safe space is gone.** Yellow Sign tiles propagate. Most of the
+  arena is in Carcosa state. The horde composition is maximum
+  multi-brand plus Carcosa originals (original cosmic-horror archetypes:
+  the Pallid Mask, the Tatters of the King, sign-bearers).
+- Hastur Daemon can **directly possess** enemies — but only in situations
+  the team's positioning has invited. Possession is telegraphed: the
+  possessed enemy gains the Yellow Sign halo for 1.5s before the
+  Daemon's behavior kicks in. Players who watch for halos can react. A
+  skilled team at 100% still has agency.
+- Mark cadence doubles. Two marked players at any time.
+- Corruption gains from kills drop to zero. The only way to push past
+  100% is to continue surviving; the game will make sure you don't.
+
+### 8.3 Sanity (per player)
+
+Each survivor has a **Sanity** value, 0–100, starting at 100.
+
+**Drains:**
+- Time on Carcosa terrain (active drain).
+- Being marked by Hastur (active drain).
+- Looking directly at the Yellow Sign (passive drain; but rarely — the
+  sign is usually in peripheral).
+- Hearing unresolved Carcosa audio stingers.
+- Adjacency to another player with <25 sanity.
+
+**Regens:**
+- Skill-based kills: headshots (critical hits), kills without taking
+  damage during that engagement, pistol-only kills all trickle sanity
+  back.
+- Destroying Yellow Sign anchor tiles (rare; requires AoE response).
+- Intermission breathe phase (small regen).
+- The `siphon` primitive (on-kill regen).
+
+**Mechanical effects by sanity bracket:**
+
+| Sanity | Effect |
+|--------|--------|
+| 100–76 | Normal. Palette reads as intended. |
+| 75–51  | Audio overlay intrudes. Sanity-drain effects in §8.2 begin applying more aggressively *to you*. |
+| 50–26  | HUD minor corruption. Visual sign-glyph intrusions. Enemies prioritize you slightly more. Movement-verb cooldowns rise 15%. |
+| 25–1   | Phantom / false-friendly hallucinations specifically targeted at you (even below 75% Corruption). Enemies *actively path toward you* preferentially (Amnesia-style aggressive targeting). Sanity trickle continues. |
+| 0      | **Compromised.** You are rendered to teammates with a Yellow Sign halo. Enemies mob you. You can still fight. You cannot regen sanity except through skill-kills. Getting back above 0 is possible but demands carry from teammates. |
+
+Sanity is never a death sentence by itself. It *is* a force multiplier
+against you. Skill and team play pull you back.
+
+### 8.4 Hastur's gaze — the marks system
+
+Once Corruption 50%+ (or any time at 100%+ where doubles apply):
+
+- A **mark** is placed over one survivor's glyph. Entire team can see
+  whose turn it is.
+- Marked survivor takes +25% damage, is prioritized by all AI, drains
+  sanity from teammates within 3 tiles.
+- Marks last ~45s, then rotate to a random non-marked survivor.
+- A marked player who survives their mark uninjured grants the entire
+  team a small sanity regen pulse.
+- Skilled expression: the team screens the marked player, trades
+  engagements to protect them, uses the mark offensively by drawing
+  enemies into prepared positions.
+
+### 8.5 Carcosa terrain
+
+At 25%+ Corruption, specific arena tiles begin converting to **Carcosa
+terrain**:
+
+- Visually: yellow-ochre tiles with subtle Yellow Sign inlays.
+- Mechanical: standing on Carcosa drains sanity (0.5/s baseline, scales
+  up by Corruption %). Enemies crossing Carcosa gain a temporary
+  `marked` primitive (they broadcast their position to teammates briefly
+  — tactical tradeoff).
+- Carcosa terrain is **not destructible by normal means**. Exception: the
+  rare `yellow-glyph` primitive on a weapon will temporarily suppress a
+  Carcosa tile for 8s.
+- Carcosa has *anchor* tiles — clusters of 3–5 adjacent Carcosa tiles
+  that act as generators. Destroying an anchor (requires concentrated
+  AoE plus a Carcosa-suppression primitive or similar) removes 10%
+  Corruption and reverts nearby Carcosa terrain to normal.
+- At 75%, destroyed walls regenerate *as* Carcosa terrain. Your safe
+  bunker becomes hostile architecture.
+
+### 8.6 The Hastur Daemon
+
+An AI system that **always exists**. Before any player has died, it is
+the sole pressure-source beyond scripted wave spawns. It is the
+always-watching presence that makes the fiction feel real.
+
+**Responsibilities:**
+- Idle: observes. Does nothing but log pressure telemetry.
+- Active (from Corruption 25%): triggers periodic *notice events*. Each
+  notice event is a short, telegraphed pressure spike:
+  - *"The King notices."* — Yellow Sign glyph lingers onscreen for 4s.
+    During those 4s, one random enemy in the arena gains a temporary
+    primitive. Survivors can see the target lighting up.
+  - *"The King exhales."* — All ambient spawns in the next 8s are
+    teleport-spawned in the peripheral vision of survivors (telegraphed
+    by a 2s dust tell). This is a Director-ish move.
+  - *"The King reaches."* — A random destroyed-wall tile converts to
+    Carcosa terrain.
+- On the first player death: the Daemon **hands off** to human Directors.
+  It remains in a reduced role, applying ambient pressure (small
+  per-wave spawns) and handling ties in brand votes.
+
+At 100% Corruption, the Daemon is also what possesses enemies with Yellow
+halos (see §8.2).
+
+---
+
+## 9. The horde — brands, enemies, waves
+
+### 9.1 Brand categories
+
+**Tier-1 (v1 ship):**
+
+- **FPS arena lineage.** Doom / Quake / Unreal Tournament / Soldat / Duke
+  Nukem / Serious Sam. Fast enemies, aggressive approach, pickup-weapon
+  drops are biased higher in this brand. Homage archetypes: imps (rush +
+  projectile), pinkies (armored rush), revenants (homing rocket),
+  cacodemons (flying suicide), cyber-flyers, chaingun-hulk minibosses.
+- **Tactical mil-sim.** Arma / Tarkov / Gray Zone Warfare / STALKER /
+  Metal Gear / Rainbow Six. Slow enemies with teeth. Ranged dominance.
+  Supressors. Armor. Homage archetypes: patient riflemen, scav snipers,
+  zone mutants, armored PMC blocks, the Bent-Back Man (STALKER
+  bloodsucker homage) as a miniboss.
+- **Chaos roguelikes.** Vampire Survivors / Risk of Rain / Nuclear Throne
+  / Noita / Binding of Isaac. Swarms, projectile hells, cascading
+  modifiers. Homage archetypes: tiny-fast-many (reaper swarm), imp-type
+  wisp swarms, flying wizards that leave bullet flowers, crawlers that
+  birth smaller crawlers, self-detonating orbs, a giant rotating eye
+  miniboss.
+
+Each Tier-1 brand ships with:
+- 5–7 enemy archetypes (component-composed)
+- 1–2 minibosses
+- A music stem + ambient audio bed
+- A vox bundle (2–3s stingers)
+- Recognizable-but-non-trademarked palette
+
+**Tier-2 (post-v1 pack plan):**
+- Horde / co-op lineage (L4D / Vermintide / DRG / Helldivers / Killing
+  Floor)
+- Alien / sci-fi (StarCraft / Halo / Alien franchise / Metroid /
+  Mass Effect)
+- Horror (RE4 / Silent Hill / Dead Space / FEAR / Amnesia — paying
+  lineage respect to our own sanity system)
+- Campy action (Postal / Saints Row / Blood Dragon / Duke)
+- Soulsborne (invasion-style enemies: the Invader archetype)
+- Rimworld / Factorio (biter/raid waves)
+
+### 9.2 Enemy archetype composition
+
+An enemy is a row in TOML referencing component categories:
 
 ```toml
-[waves.covenant_strike]
-ambient_audio  = "themes/covenant/ambient.ogg"
-music_intensity = "medium"
-enemies = [
-  { archetype = "grunt_plasma",  weight = 0.6, min_wave = 3 },
-  { archetype = "jackal_shield", weight = 0.25, min_wave = 5 },
-  { archetype = "elite_sword",   weight = 0.15, min_wave = 8 },
-]
-miniboss = "zealot"
-environmental = ["low_light"]
-
-[archetypes.grunt_plasma]
-base = "rusher_small"
-weapon = "plasma_smg"
-vitals = { hp = 40, armor = "light" }
-modifiers = ["explosive_on_death_small"]
-aesthetic = { glyph = "g", palette = "covenant_purple", sound_bundle = "grunt_vox" }
+[archetypes.scav_rifleman]
+base       = "patient_ranged"
+vitals     = { hp = 80, armor = "kinetic_light" }
+weapon     = "mosin_burst"         # base fire-mode + primitives
+ai         = "tactical_sniper"     # behavior tree ID
+senses     = { sight = 14, hearing = 10, requires_los = true }
+modifiers  = ["sustained_aim"]
+aesthetic  = { glyph = "R", palette = "tarkov_tan", vox_bundle = "scav_ru" }
+primitives = []                    # empty by default; Corruption adds
+corpse_loot = { chance = 0.35, table = "tactical_drops_uncommon" }
 ```
 
-Adding a new themed wave is a pure content task.
+Enemies can be **looted**. Killing a Scav leaves a corpse; pressing E on
+the corpse for 0.7s transfers loot. The loot table is brand-specific.
+Looting a Scav rifleman might give you a Mosin, a bandage, an armor
+plate, or a rare tactical primitive like `sustained`.
 
-### 5.7 Enemy archetypes (shipped examples, non-branded labels)
+Looting channels cost time (you can be shot). Decisions matter.
 
-| Archetype     | Role           | Notes                                |
-|---------------|----------------|--------------------------------------|
-| Rusher        | Melee zerg     | Cheap, fast, dies quick              |
-| Shield trooper| Frontline      | Frontal armor, flanker bait          |
-| Plasma grunt  | Light ranged   | Lobs slow projectiles                |
-| Sniper        | Heavy ranged   | Long wind-up, punishing damage       |
-| Bomber        | Suicide        | Charges and detonates                |
-| Spawner       | Summoner       | Stationary, births cheap minions     |
-| Armored APC   | Miniboss mech  | Slow, high HP, machine gun turret    |
-| Named elite   | Miniboss       | Unique kit per theme                 |
+### 9.3 Wave composition
 
-### 5.8 Director (turncoat) mode
+Waves are **theme-driven but vote-driven**:
 
-The **jewel feature.** When a player dies and their revive window expires,
-they don't spectate — they become a Director. There can be up to N
-Directors simultaneously (N = dead players).
+- Wave 1 is always the *opening* brand (default: tactical). Cold open,
+  recognizable, grounded.
+- Waves 2+ are composed from currently-bled-in brands, weighted by the
+  order they were voted in.
+- As Corruption rises, brand composition rules relax (§8.2 at 75%: free
+  mixing).
 
-**Director capabilities:**
+Miniboss waves (every 5) pull from the brand most recently voted in. A
+team that just picked FPS arena on wave 9 gets a cacodemon-analogue on
+wave 10.
 
-- **Commander view:** Top-down fog-of-war-free view of the arena. Can see
-  everything, including surviving players.
-- **Spawn budget:** Directors accrue **Influence** over time and from events
-  (survivor kills minions = +Influence, survivor takes damage = +Influence).
-  Spawning units, placing hazards, and possessing cost Influence.
-- **Spawn:** Select from a menu of unlocked enemy archetypes weighted by
-  current wave theme. Place spawn point anywhere outside players' direct
-  line of sight.
-- **Possess:** Director takes direct control of an existing AI unit (or one
-  they just spawned) — they become that unit until it dies or they release.
-  While possessing: unit has +stats and access to the possessed player's
-  class-derived "divine" ability (e.g. a possessed Plasma Grunt from a
-  former Engineer gets a mini-turret drop).
-- **Hazards:** Drop environmental effects — gas clouds, caltrops, warp rifts,
-  collapsing ceilings, flare darkness. Costs Influence, scaled by power.
-- **Command:** Issue "focus fire," "rush," "hold" orders to nearby AI units.
-  Applies a temporary AI override.
+### 9.4 Authoring a new wave
 
-**Balance philosophy:** Directors should *raise the ceiling* of pressure,
-not provide a direct I-win button. A team of survivors playing well should
-beat two Directors playing well; three+ Directors (half the team dead) is
-when it gets grim. Influence costs and Director count scaling are the
-primary tuning knobs.
+One TOML file. Declares enemy weights, ambient audio ref, miniboss
+candidate, environmental modifiers (optional: low-light, weather, etc.),
+and brand-identity palette.
 
-**Director UI:** Different screen layout — minimap takes center, spawn/
-possess/hazard menus are keyboard-driven chord menus (like nethack
-extended commands). Mouse places cursor for spawn/hazard targeting.
-
-**Griefing guard:** Directors cannot damage themselves. Friendly fire off
-between Directors. Maximum Influence budget capped per Director to prevent
-hoarding 10 minutes of passive income into a single megaspawn.
-
-### 5.9 Run modifiers
-
-Rolled at run start, visible to all players. 1–3 modifiers per run from a
-weighted pool. Examples:
-
-- *Acid blood* — enemies leak damaging pools on death.
-- *Double loot* — +100% drops, +30% enemy HP.
-- *Brownout* — reduced vision range, flashlight required.
-- *Telefrag* — occasional enemy teleport-ins behind the team.
-- *Plasma Sunday* — all enemy hitscan damage becomes plasma (different
-  armor interaction).
-- *Bring Your Own Army* — one extra Director seat, seeded with AI if no
-  dead player yet.
-
-Modifiers interact with themes (some themes force/ban certain modifiers).
-
-### 5.10 Meta-progression (unlocks only)
-
-No stat inflation. Unlocks are **options**, not power.
-
-Tracked per-nickname in a host-local file (`~/.terminal_hell/unlocks/<nick>.ron`).
-
-Unlock categories:
-- **Classes** (6 starter, 6 more unlockable)
-- **Starter weapons** (pick loadout at class-select)
-- **Modifier slots** (start the run with 1 free chosen modifier)
-- **Cosmetic glyph/palette sets** (your `@` can be green)
-- **Director archetypes** (new unit types you can spawn as a Director)
-- **Themed wave variants** (earn by surviving a specific wave N times)
-
-Unlock triggers are *achievements*, not just grind: "Survive to wave 20
-with no healing items," "Solo a miniboss," "Revive 3 teammates in one
-wave," "Win a run as sole survivor."
-
-### 5.11 Join-in-progress
-
-When a new player connects to a run in progress:
-- They enter a 10-second spectator orientation (arena overview, team list,
-  current wave).
-- Spawn with **baseline kit only** (class choice allowed, but starting gear
-  is default — no catch-up loot).
-- Enemies already scaled to wave N; catching up requires scavenging pickups
-  and kills. Deliberately asymmetric; rewards surviving teammates.
-- Their unlocks (class/starter loadout choices) still apply.
-
-If all survivors die before the new player can contribute, they immediately
-enter Director mode with a minimal Influence grant (not nothing, but not a
-free kill).
-
-### 5.12 Death, revive, Director transition
-
-```
-Alive ─ hp → 0 ─► Downed (crawling, can't shoot, bleedout 30s)
-         │                 │
-         │                 ├─ teammate finishes revive (5s channel) → Alive with 40% hp
-         │                 │
-         │                 └─ bleedout expires → Dead → Director mode
-         │
-         └─ instakill sources (explosions > 2x hp, etc.) skip downed → Director
-```
-
-- Revive interruption: taking damage as the reviver cancels the channel.
-- Downed players can crawl slowly and mark enemies with pings.
-- Director transition is *immediate* when bleedout expires; no "return to
-  lobby" screen.
-- If a Director's team wins the round (all remaining survivors die), the
-  run ends — Directors are on the credits screen, not a separate reward
-  screen. Everyone's achievements tally together.
-
-### 5.13 Arena / map
-
-- **Single procedural arena per run.** Generated at run start from a seeded
-  RNG; seed is shared with all players and displayed (nice for
-  "seed of the day" challenges).
-- **Structure:** A defensible *core* (the spawn / objective area), 2–4
-  chokepoints leading in, cover clutter scattered, destructible elements
-  (crates, thin walls), and optional *outposts* — sub-objectives that grant
-  buffs if held.
-- **Size:** Roughly 120x40 cells in half-block space (so ~120x80 logical
-  rendered pixels). Fits in one terminal screen at standard sizes.
-- **Day/night shift:** Optional per-theme; affects vision radius.
-- **Destructibility:** Some walls yield to explosives. Creates emergent
-  defensive decay — the fortress you started in is not the one you end in.
+No Rust. That is a design contract.
 
 ---
 
-## 6. Technical architecture
+## 10. Director mode — pure chaos
 
-### 6.1 Overview
+### 10.1 Entry
+
+- HP hits 0 → zero-frame transition to Director.
+- No spectator screen. No "go again" button. You are the horde now.
+- Dead players share a Director pool (hive-mind). No roles. Any Director
+  can do anything any other Director can do, subject to Influence.
+
+### 10.2 Influence budget
+
+**The only hard rule.**
+
+- Each Director accrues Influence over time: +1/s baseline.
+- Bonus Influence on events: +5 per survivor hit, +15 per downed-to-kill
+  action, +30 when a survivor dies.
+- Per-Director cap: 100. Spending empties the bar. No hoarding; go use it.
+- Influence pool is per-Director; Directors cannot share or transfer.
+  (Encourages parallel play.)
+
+**Why no other guardrails?** Because the game is hard enough otherwise.
+The Corruption curve, the no-revive rule, the shrinking arena, the marks
+— all of that means survivors are already under pressure. The Directors'
+job is to add flavor, not break the game. If they meta-abuse, the
+Influence cap naturally throttles.
+
+### 10.3 Capabilities
+
+Every capability costs Influence.
+
+| Action                 | Cost   | Notes                                        |
+|------------------------|--------|----------------------------------------------|
+| Spawn basic enemy      | 5–15   | Cost scales with archetype power + wave     |
+| Spawn miniboss         | 60     | Limited to 1 per wave                        |
+| Place hazard (small)   | 10     | Gas, caltrops, sign-terrain patch            |
+| Place hazard (large)   | 30     | Collapsing-ceiling, sustained toxic field    |
+| Possess unit           | 15 + drain | 0.5/s drain; uncap; you die when the unit dies |
+| Possess with buff      | 30     | Possessed unit gains +20% vitals + your signature primitive |
+| AI override (focus/rush)| 5 / 3s | Target area; nearby AI shifts priorities    |
+| Breach (wall tile)     | 8      | Any wall tile; glyph-particle spectacle      |
+| Direct-place enemy     | +5 tax | Spawn into survivor LoS instead of peripheral |
+
+Directors can spawn anywhere. Spawning in LoS costs extra. Possession is
+any unit on the field including Carcosa originals at 100%. Possessed
+units gain the Director's signature primitive (derived from what that
+Director's character had equipped at death — a Director who died holding
+`ignite` applies `ignite` to their possession).
+
+### 10.4 Director UI
+
+- **Commander view:** Top-down, full-arena, fog-of-war-free.
+- **Command palette:** Chord-driven like nethack extended commands
+  (`:spawn imp`, `:hazard gas`, `:possess <cursor>`). Mouse for targeting.
+- **Quick bar:** Last-used commands pinned; one-keystroke re-use.
+- **Possession view:** Swaps to the possessed unit's local camera + HUD
+  + primitive. Survivors' perspective; feels like playing *as* the
+  possessed thing.
+
+### 10.5 Co-op dynamics
+
+- **Ping-and-commit.** Directors don't vote on plays. Anyone can act.
+  Encourages emergent teamwork ("I'll breach the south wall, you possess
+  the revenant coming through it") without formal coordination cost.
+- **Friendly fire ON among Directors.** You can cross-wire each other's
+  possessions if you want. Call it; own it. It's funny.
+- **Shared score.** All Directors share run-end kill credit against
+  survivors. No intra-Director competition; the "team" is the horde.
+
+### 10.6 Joining as Director mid-run
+
+A late joiner who arrives after all survivors are dead immediately enters
+Director mode with a reduced Influence cap (50) for 1 wave, then joins
+the normal cap.
+
+---
+
+## 11. Destruction system — the pillar
+
+This section is a pillar. Everything interacts with it.
+
+### 11.1 Tile-chunked physics
+
+- Every **arena tile** has:
+  - `material` (metal / concrete / wood / bone / flesh / carcosa)
+  - `hp` and `armor_type`
+  - `chunk_count` (how many debris particles it spawns on destruction)
+  - `collapses_adjacent` (bool; triggers a destruction-propagation check)
+  - `regenerates_as_carcosa` (bool; true at 75%+ Corruption)
+
+- Tiles are destroyed by accumulated damage (and by specific primitives:
+  `breach` applies structural damage directly). On destruction, the
+  tile:
+  1. Spawns N glyph-particles with velocity (radial from damage source),
+     ballistic fall, decay timer (typical 0.7–1.3s), and a brief
+     collision-against-other-particles (loose, approximate).
+  2. Leaves a rubble/debris tile behind (low-cover; passable; can be
+     further destroyed).
+  3. Kicks a dust-cloud audio-visual effect (slight visibility penalty,
+     readable).
+  4. Applies knockback to adjacent entities if the damage source was
+     explosive (`breach`, `lob` with certain primitives, etc.).
+  5. Possibly propagates (for `collapses_adjacent` tiles — ceilings,
+     structural beams — adjacent tiles take a share of damage and can
+     chain).
+
+### 11.2 Glyph particles & gore
+
+- Enemy deaths spawn gibs. Gibs are glyph-particles with longer decay
+  (2–4s) and friction. They accumulate. Late-game arena floors are
+  *busy*.
+- Blood trails (`~` and `.`) fade over 1.5s unless on Carcosa terrain
+  (where they persist as Yellow-Sign inlays).
+- Gore is readable. Doesn't obscure hitboxes. It's set-dressing, not
+  obstruction.
+- Art direction: overly, theatrically violent — glyph-comic-book. Cosmic
+  horror framing contextualizes it without removing the fun.
+
+### 11.3 Persistent arena decay
+
+- Destruction in early waves persists. Your bunker is rubble by wave 20.
+- This is the emergent-story axis. The arena *tells* the run's story.
+- At 75% Corruption, destroyed walls start returning as Carcosa terrain
+  (§8.5) — a fresh horror layer on top of your accumulated wreckage.
+
+### 11.4 Primitive interactions with terrain
+
+Documented per primitive; examples:
+- `ignite`: flammable tiles (wood / flesh / carcosa at low level) ignite
+  and tick.
+- `breach`: structural damage multiplier ×3 vs terrain.
+- `ricochet`: bounces off non-destroyed terrain; skipped over debris.
+- `cryo`: freezes liquid gibs into floor obstacles.
+- `gravity-well`: pulls loose debris; can funnel gore into a pile that
+  becomes a low-cover tile.
+- `acid`: slowly dissolves non-metal terrain over 8s.
+
+### 11.5 Networking destruction
+
+- Terrain state is authoritative on host.
+- Delta-sync on tile state changes (intact / damaged / destroyed / rubble
+  / carcosa).
+- Particle effects are *client-side visual only* — the client spawns
+  deterministic particle runs from a seeded RNG keyed on (host-tick,
+  damage-source-id, tile-id). All clients see identical particle
+  patterns without syncing particles over wire.
+
+---
+
+## 12. Arena
+
+### 12.1 Procedural generation
+
+- Single procedural arena per run. Seeded from a shared RNG; seed
+  displayed at run start and persisted to the leaderboard for "seed of
+  the day" sharing.
+- Generator outputs: a *core* (defensive focal point), 2–4 chokepoints
+  leading in, scattered cover, destructible architecture, and 2–3
+  *brand-bleed vote kiosks* (fixed positions; see §7.3).
+- Size: ~120×40 half-block cells (~120×80 logical pixels). Fits in one
+  standard terminal.
+
+### 12.2 Arena contract
+
+Every arena must support:
+- Clear line-of-sight gradients (some parts are open for ranged play;
+  some are close-quarters).
+- At least one "hold-out" position with 3+ cover sides.
+- Multiple viable approach paths for attackers.
+- At least 6 destructible structural walls (for Levolution-style
+  spectacle).
+- Brand-bleed vote kiosks distributed (not co-located — the team has to
+  split or consensus-move).
+
+### 12.3 Day/night & environmental
+
+Some arenas are night-variants (low-light; vision-range reduction).
+Environmental modifiers can be layered per brand: fog (tactical), toxic
+rain (chaos roguelike), zero-G pockets (Carcosa late-game), etc.
+
+### 12.4 Arena themes
+
+- `server_room` — metal + concrete; high cover density; short sight-lines
+  in racks.
+- `ossuary` — bone material; low cover; long sight-lines.
+- `neon_slaughterhouse` — metal + flesh; synthwave palette; lots of
+  blood.
+- `zone_outpost` — mixed materials; mil-sim grit; a visible anomaly
+  generator in the center.
+- `carcosa_tower` — starts as a fortress; at 50% Corruption the
+  architecture *shifts* — stairs invert, walls invert, and the arena
+  becomes something you recognize less well.
+
+---
+
+## 13. Audio — pillar, not polish
+
+The audio system is load-bearing gameplay, not flavor.
+
+### 13.1 Architecture
+
+- Engine: `rodio` over `cpal`. Independent mixers for music / SFX / vox /
+  ambient / Carcosa-overlay.
+- 2D spatial: stereo pan + distance attenuation from the player camera
+  listener.
+- Format: OGG Vorbis (preferred); WAV for short SFX.
+
+### 13.2 Music — dual-stem dynamic mixing
+
+- **Synthwave base stem** (player-produced via eurorack + FL Studio).
+  Plays always. Loops over 2–4 minute arcs.
+- **Carcosa overlay stem** — discordant strings / bent brass / sub-drone.
+  Volume mixed against `Corruption %`. At 0% overlay is inaudible; at
+  100% the overlay dominates.
+- **Wave-theme stems** — per-brand layer. During a wave themed by a
+  brand, that brand's stem rides on top of the base.
+- **Miniboss stinger** — short chromatic sting on miniboss spawn.
+
+### 13.3 Audio-as-gameplay
+
+- **Enemies audible before visible.** Every spawning enemy has a 0.3s
+  spawn sound with spatial position. Competent players orient via audio.
+- **Sound-based stealth.** Certain enemy archetypes (STALKER bloodsucker
+  homage) are *silent in direct engagement but audible in peripheral*
+  — you can hear them moving if you don't look.
+- **Threat telegraphing.** Every non-trivial enemy ability has a unique
+  pre-fire audio tell. Railguns charge with a whine. Revenant rockets
+  lock with a beep. Cacodemon bile inflates with a wet burble.
+- **Sanity-adaptive audio.** At low sanity, audio begins to *lie*: false
+  footsteps, phantom vox lines, music-mix instability. But (skill-based)
+  each audio hallucination has a tell — false footsteps lack a subtle
+  surface-material variance; real ones have it.
+- **The King's voice.** At each Corruption threshold, a non-looping
+  spoken stinger plays: "It notices." "It stirs." "It thins." "It
+  arrives." Recorded by the audio author with heavy processing.
+
+### 13.4 Audio production pipeline
+
+- `content/*/audio/` directories hold OGGs referenced by symbolic name.
+- Dev mode: hot-reload on file change (behind a feature flag).
+- Authors can ship a full `audio_bundle.toml` that declares the
+  relationship between events and sound refs, so swapping in new samples
+  is a one-TOML edit.
+- Placeholder CC0 samples ship with core pack for M1 feel; real samples
+  produced externally and committed against content packs.
+
+### 13.5 Carcosa audio
+
+- Ambient bed always has a faint sub-drone at low Corruption. At 25%
+  the drone becomes audible. At 50% it resolves into pitch.
+- Yellow Sign occurrences are accompanied by a *signature stinger* — a
+  short, resonant brass-with-bending-pitch stab. Recognizable. Player
+  conditioning target.
+- At 100% Carcosa, the synthwave base stem is processed in real time
+  (ring mod + pitch-shift down + bit-reduction) during possession events.
+
+---
+
+## 14. Meta progression — unlocks only
+
+No stat inflation. No currency. No stash. Only **new primitive types**
+enter your pool over time.
+
+### 14.1 What unlocks
+
+- **Primitives** — new effect-components that can drop in future runs.
+- **Base fire-mode variants** — new weapon archetypes (rarer).
+- **Movement verbs** — technically a primitive class but flagged
+  separately for selection clarity.
+- **Enemy archetypes (Director spawn menu)** — new units Directors can
+  spawn as.
+- **Cosmetic glyph/palette sets** — your `@` can be green.
+- **Achievement badges** — bragging rights only.
+
+### 14.2 Unlock triggers
+
+**Achievement triggers only.** Examples:
+
+- *"Kill 50 enemies with `breach`"* → unlocks `shatter` primitive.
+- *"Reach Corruption 75% without dropping below 50 sanity"* → unlocks
+  `sign-bound` primitive.
+- *"Survive being marked by Hastur for the full 45s without leaving
+  cover"* → unlocks `reflect` primitive.
+- *"As Director, cause 3 survivor deaths from a single possession"* →
+  unlocks Director spawn: `Pallid Mask`.
+- *"Solo kill a miniboss"* → unlocks `overdrive` primitive.
+- *"Destroy 100 walls in a single run"* → unlocks destructible theme
+  arena variant.
+
+Achievements are authored, categorized, and tracked per-nickname.
+
+### 14.3 Director-side unlocks
+
+Director play counts. Director achievements ("cause a team-wipe via a
+single breach chain," "possess 5 different archetype types in one run")
+unlock Director-side primitives and spawn archetypes. Playing Director
+well is a first-class unlock path.
+
+### 14.4 Persistence
+
+- Per-nickname unlock file:
+  `~/.terminal_hell/unlocks/<nickname>@<host_pubkey_hash>.ron`.
+- Keyed by nickname + host-identity so "Sam" on Hana's host and "Sam" on
+  Greg's host are separate unlock contexts.
+- Human-readable RON; users can back up, share with consent.
+- Leaderboard: `~/.terminal_hell/leaderboard.ron`, top 100 runs per host:
+  wave reached, duration, kills, team, peak Corruption, seed.
+
+### 14.5 Seed of the day
+
+Optional opt-in: a daily seed is generated from a date-derived hash.
+Daily leaderboard per-host for that seed. Friend groups chase the daily
+as a shared watercooler.
+
+---
+
+## 15. Join in progress
+
+- Late joiners enter a 10s spectator orientation: arena overview, team
+  list, current wave, current Corruption, who's a Director.
+- Spawn as a survivor with **baseline kit only**. No catch-up loot.
+- Enemies are scaled to wave N; the joiner scavenges or dies quickly.
+- The joiner's unlocks still apply (primitive drop pool, palette).
+- If all survivors die before the joiner can contribute, they enter
+  Director mode with the reduced Influence cap per §10.6.
+- Dropped connections: a disconnected survivor's character remains as an
+  AI-controlled placeholder (idle, defensive) for 60s to allow rejoin.
+  If they don't rejoin in 60s, the character goes inert (still a
+  hitbox, not a combatant).
+
+---
+
+## 16. Solo mode
+
+`terminal_hell solo` starts offline practice:
+
+- Host and client in same process.
+- Hastur Daemon is the only pressure (no human Directors possible).
+- At first death, the run ends immediately. Solo is balanced accordingly
+  (lower spawn budget, slower Corruption rise).
+- Solo runs count for achievement progress but not co-op-specific
+  achievements.
+- Seed-of-the-day is available in solo.
+
+---
+
+## 17. Technical architecture
+
+### 17.1 Overview
 
 ```
 ┌──────────────────────────┐            ┌──────────────────────────┐
 │  terminal_hell (client)  │ ◄─ UDP ──► │  terminal_hell (server)  │
 │                          │   renet    │  (hosted by one player)  │
-│  ratatui render @60fps   │            │  sim @30Hz (authoritative)│
-│  crossterm input         │            │  netcode @20Hz snapshot   │
+│  ratatui render @60fps   │            │  sim @30Hz authoritative │
+│  crossterm input         │            │  netcode @20Hz snapshot  │
 │  rodio audio             │            │  content-pack loader     │
-│  local input prediction  │            │  persistence: unlocks     │
-│  interpolation buffer    │            │                          │
+│  input prediction        │            │  persistence (unlocks)   │
+│  interpolation buffer    │            │  corruption + Daemon AI  │
 └──────────────────────────┘            └──────────────────────────┘
 ```
 
-The host runs **both** client and server in the same process (they can play
-too). The server is the source of truth; clients render an interpolated,
-slightly-in-the-past snapshot.
+Host runs both client and server in the same process. Server is truth;
+clients render an interpolated 100ms-past snapshot.
 
-### 6.2 Crate stack
+### 17.2 Crate stack
 
-| Concern            | Crate                  |
-|--------------------|------------------------|
-| TUI / rendering    | `ratatui` + `crossterm`|
-| Async runtime      | `tokio`                |
-| Networking         | `renet` (UDP + channels) |
-| Serialization      | `bincode` (wire), `serde` |
-| Content / config   | `toml`, `ron`, `serde` |
-| RNG (seeded, det.) | `rand`, `rand_pcg`     |
-| Audio              | `rodio` (+ `cpal`)     |
-| Logging            | `tracing` + `tracing-subscriber` |
-| CLI                | `clap`                 |
-| Time               | `std::time::Instant`   |
-| ECS (internal)     | hand-rolled archetype store OR `hecs` (lightweight) |
+| Concern            | Crate                              |
+|--------------------|------------------------------------|
+| TUI / rendering    | `ratatui` + `crossterm`            |
+| Async runtime      | `tokio`                            |
+| Networking         | `renet` (UDP + channels)           |
+| Serialization      | `bincode` (wire), `serde`          |
+| Content / config   | `toml`, `ron`, `serde`             |
+| RNG (deterministic)| `rand_pcg`                         |
+| Audio              | `rodio` (+ `cpal`)                 |
+| Logging            | `tracing` + `tracing-subscriber`   |
+| CLI                | `clap`                             |
+| ECS                | `hecs` (lightweight; reconsider if pain) |
 
-No Bevy for v1; headless Bevy ECS is overkill and pulls a lot of deps. Revisit
-if hand-rolled ECS becomes painful.
+No Bevy for v1. Headless Bevy ECS is overkill and pulls deps.
 
-### 6.3 Simulation
+### 17.3 Simulation
 
-- **Tick rate:** 30Hz (33.3ms). Fixed timestep. Deterministic given same seed
-  and same input stream (useful for replays and testing, not required for
-  networking correctness).
-- **Authoritative server:** Clients send input commands; server simulates;
+- 30Hz fixed-step tick. Deterministic given seed + input stream. Useful
+  for replays (stretch) and testing.
+- Authoritative host. Clients send input commands; server simulates;
   server broadcasts snapshots.
-- **Client prediction:** Movement only. Shooting is server-arbitrated
-  (prevents "my pistol fires faster than server allows" cheats even in a
-  friends game — keeps the system clean).
-- **Interpolation buffer:** 100ms. Remote entity rendering is 100ms behind
-  server authoritative state, interpolated smoothly.
-- **Lag compensation:** For hitscan, server rewinds remote entities 0–200ms
-  based on reporter's measured RTT. Capped to prevent abuse.
+- Client prediction for movement only. Shooting, looting, destruction
+  are server-arbitrated.
+- Interpolation buffer: 100ms. Lag compensation for hitscan rewinds
+  remote entities 0–200ms based on reporter RTT; capped.
 
-### 6.4 Netcode
+### 17.4 Netcode
 
-- **Transport:** UDP via renet. Reliability channels:
-  - `0` reliable-ordered: lobby events, run start, unlock grants, chat.
-  - `1` unreliable-unordered: input commands (client→server), snapshots
+- Transport: UDP via renet.
+- Reliability channels:
+  - `0` reliable-ordered — lobby, run start, unlocks, chat, votes.
+  - `1` unreliable-unordered — input (client→server), snapshots
     (server→client).
-  - `2` reliable-unordered: damage events, pickup acks.
-- **Snapshot:** Server sends delta-compressed state snapshot @20Hz.
-- **Input:** Client sends input packet every simulation tick (30Hz).
-  Includes last N input frames for redundancy.
-- **Bandwidth target:** < 30 KB/s per client sustained, < 80 KB/s peak.
-- **Join handshake:** Nickname → unlock payload → arena seed → initial
-  snapshot → go.
-- **NAT traversal:** None in v1. Host forwards a port or uses Tailscale /
-  ZeroTier / direct LAN. Document in the README.
+  - `2` reliable-unordered — damage events, pickup acks, destruction
+    events.
+- Snapshots: delta-compressed @20Hz.
+- Input packets: every sim tick @30Hz with last-N-frame redundancy.
+- Bandwidth: <30 KB/s sustained per client; <80 KB/s peak (destruction
+  events can spike).
+- Join handshake: Nickname → unlock hash → arena seed → pack manifest →
+  initial snapshot → go.
+- NAT traversal: none in v1. Host forwards a port / uses Tailscale /
+  ZeroTier / direct LAN. Document in README.
 
-### 6.5 Rendering
+### 17.5 Rendering
 
-- **Framebuffer:** Custom layer above ratatui. Internal buffer of
-  `(fg_rgb, bg_rgb, char)` cells at half-block resolution (each terminal
-  cell = 2 logical pixels stacked).
-- **Draw pipeline:**
+- Custom framebuffer layer above ratatui. Virtual pixel buffer of
+  `(fg_rgb, bg_rgb, char)` at half-block resolution (each terminal cell
+  = 2 logical pixels stacked).
+- Draw pipeline:
   1. Clear virtual pixel buffer.
-  2. Render terrain (static, cached per map seed).
-  3. Render entities (interpolated positions).
-  4. Render projectiles and effects.
-  5. Render HUD overlay via ratatui widgets.
-  6. Resolve pairs of vertical pixels into `▀`/`▄`/` `/`█` with FG/BG colors.
-  7. Diff against previous frame; emit only changed cells to terminal.
-- **Target:** 60fps render; measured input→frame latency < 20ms local.
-- **Truecolor assumed**; 256-color fallback detected via `TERM` / `COLORTERM`.
-- **Fallbacks:**
-  - No truecolor → 256-color palette mapping.
-  - No mouse → keyboard aim mode, detected and announced at connect.
-  - Small terminal → warning + gameplay UI gracefully reflows; below a
-    minimum size, refuse to start and show a resize message.
+  2. Render terrain (static per seed + accumulated destruction deltas).
+  3. Render entities (interpolated positions; sanity-driven
+     hallucination-layer applied here).
+  4. Render projectiles, gibs, particle effects.
+  5. Render HUD via ratatui widgets (sanity-driven HUD corruption
+     applied here).
+  6. Resolve vertical pixel pairs into `▀`/`▄`/` `/`█` with FG/BG.
+  7. Diff against previous frame; emit only changed cells.
+- Truecolor assumed; 256-color fallback via `TERM`/`COLORTERM` probing.
+- Keyboard-aim fallback if no mouse support detected.
+- Minimum terminal size: 100×30. Below that: refuse with resize prompt.
 
-### 6.6 Audio
-
-- **Engine:** `rodio` over `cpal`. Music + SFX mixers with independent volume.
-- **Spatialization:** 2D positional — stereo pan and attenuation based on
-  source distance from listener (player camera center).
-- **Music:** Layered intensity system à la Left 4 Dead / Hotline Miami —
-  base theme bed + high-intensity overlay fades in during wave peaks and
-  miniboss encounters.
-- **Content-pack audio:** Each pack bundles `audio/{music,sfx,vox}/*.ogg`.
-  Referenced by symbolic name from entity/weapon/wave TOML.
-- **Hot-reload:** In dev mode, audio refs reload on file change. Behind a
-  feature flag.
-- **Samples:** Placeholder set shipped; real samples authored externally
-  (eurorack + FL Studio) and dropped into `assets/audio/`.
-
-### 6.7 Content packs
+### 17.6 Content packs
 
 ```
 content/
-  core/                      # always loaded
-    classes.toml
-    weapons.toml
-    perks.toml
-    modifiers.toml
-    archetypes.toml          # base enemy components
-    themes/
-      generic_horde.toml
+  core/                     # always loaded; embedded in binary
+    primitives.toml
+    fire_modes.toml
+    archetypes.toml
+    brands/
+      fps_arena.toml
+      tactical.toml
+      chaos_roguelike.toml
     audio/
-      sfx/
-      music/
-      vox/
-  homage_pack_example/       # user-contributed; named generically in repo
-    themes/
-      midnight_covenant.toml
-    archetypes/
-      plasma_grunt.toml
-      shield_jackal.toml
+      music/ sfx/ vox/
+    arenas/
+      server_room.toml ...
+  carcosa_core/             # always loaded; Hastur + Sign mechanics
+    daemon.toml
+    sign.toml
+    carcosa_primitives.toml
     audio/
-      sfx/
-      music/
-      vox/
+  <user_pack>/              # optional; loaded if enabled at serve time
+    brands/
+    arenas/
+    primitives/
+    audio/
 ```
 
-Packs declare which themes they expose. Host selects active packs at server
-start. Clients auto-download pack metadata (not audio assets) to render
-correctly — if a client is missing a pack's audio, they play silent SFX but
-render fine. (Asset sync is a v1.1 concern; v1 says "install the same pack
-on all clients.")
+- Packs declare: brands they expose, primitives they add, arenas they
+  add, audio they bundle, dependencies.
+- Host selects active packs at `serve` start.
+- Clients auto-sync pack *metadata* (not full audio assets) at connect
+  so they can render correctly; missing-audio plays silently and logs a
+  warning. Asset sync is a v1.1 concern.
 
-### 6.8 Persistence
+### 17.7 Persistence
 
-- **Unlocks:** `~/.terminal_hell/unlocks/<nickname>.ron`. RON for
-  human-readability. Keyed by nickname + host pubkey (so your "Sam" unlocks
-  on Hana's host don't bleed into "Sam" on another host's game — avoids
-  identity collisions without accounts).
-- **Leaderboard:** Local, per-host. `~/.terminal_hell/leaderboard.ron`.
-  Top 100 runs: wave reached, duration, kills, team composition, seed.
-- **Replay (stretch):** If simulation is deterministic, recording the input
-  stream is sufficient for replay. v1.1 feature.
+- Unlocks: `~/.terminal_hell/unlocks/<nick>@<host_pubkey_hash>.ron`
+- Leaderboard: `~/.terminal_hell/leaderboard.ron`
+- Replay (stretch): input-stream recording; deterministic sim makes it
+  feasible for v1.1.
 
-### 6.9 Build, distribution, runtime
+### 17.8 Build & distribution
 
-- **Single binary:** `cargo build --release` produces `terminal_hell` (or
-  `.exe`). Content is embedded for core pack via `include_dir!`; external
-  packs loaded from `content/` next to the binary.
-- **CLI:**
-  - `terminal_hell serve [--port P] [--pack PACKNAME]...`
-  - `terminal_hell connect <code>` or `connect <addr>:<port>`
-  - `terminal_hell solo` — offline practice mode
+- `cargo build --release` → single binary (`terminal_hell[.exe]`).
+- Core content embedded via `include_dir!`.
+- External packs live in `content/` next to binary.
+- CLI:
+  - `terminal_hell serve [--port P] [--pack NAME ...]`
+  - `terminal_hell connect <code>` | `connect <addr>:<port>`
+  - `terminal_hell solo`
   - `terminal_hell --list-packs`
-- **Room codes:** 6-character base32 codes map to `ip:port`. v1 does this
-  via a tiny public relay for code→endpoint lookup (opt-in; users can
-  always paste raw IP). Relay is optional infra; initially skipped in favor
-  of raw IP + Discord.
+  - `terminal_hell --seed-of-the-day`
+- Room codes: base32-encoded (case-insensitive), 6 chars. Maps to
+  `addr:port`. v1 skips the relay service — raw IP + Discord is fine.
+  Relay is post-v1.
 
 ---
 
-## 7. Data model (sketch)
+## 18. Data model (sketch)
 
-### 7.1 Entities
-
-Internal ECS-ish. Entity is an index into component tables.
+### 18.1 Entity
 
 ```
 Entity {
+  Id
   Position { x: f32, y: f32 }
   Velocity { vx: f32, vy: f32 }
   Collider { shape, radius }
   Vitals { hp, hp_max, armor, armor_type }
-  Faction { player | ai | director_spawned | neutral }
+  Sanity? { value, max }               // players only
+  Faction { player | ai | director_spawned | carcosa | neutral }
   Renderable { glyph, palette, layer }
-  Weapon { archetype_id, ammo, mag, cooldown }
-  AI { behavior_tree_id, target, state }
+  Weapon? { archetype_id, ammo, mag, cooldown, slots: [PrimitiveId; 0..4] }
+  TraversalVerb? { primitive_id, cooldown }
+  AI? { behavior_id, target, state, aggression_bias }
   Audio { footstep_bundle, vox_bundle }
-  Modifiers { Vec<ModifierInstance> }
+  PrimitiveStack { Vec<PrimitiveInstance> }
+  Corruption? { marked_by_hastur: bool, on_carcosa_tile: bool }
   Networked { entity_id, owner }
-  ...
+  Possession? { possessed_by: DirectorId, signature_primitive }
+  CorpseLoot? { table_id, looted: bool }
 }
 ```
 
-### 7.2 Network messages (shape)
+### 18.2 Network messages
 
 ```
 ClientToServer:
-  Handshake { nickname, unlocks_hash, client_version }
-  Input { tick, move_x, move_y, aim_x, aim_y, buttons, seq }
+  Handshake { nickname, unlocks_hash, client_version, pack_manifest_hash }
+  Input { tick, move_x, move_y, aim_x, aim_y, buttons, traversal, seq }
   DirectorCommand { kind, target_or_pos, payload }
+  LootCorpse { target_entity }
+  VoteBrand { kiosk_id }
   Chat { text }
   Ping
 
 ServerToClient:
   JoinAck { session_id, seed, pack_manifest, initial_snapshot }
-  Snapshot { tick, delta_from_tick, entities: [...], events: [...] }
-  DamageEvent { source, target, amount, kind }
+  Snapshot { tick, delta_from_tick, entities, corruption, sanity_self, events }
+  DamageEvent { source, target, amount, kind, primitives_applied }
+  DestructionEvent { tile_id, damage_source, chunk_seed }
+  SanityEvent { target, delta, cause }
+  CorruptionEvent { new_value, threshold_crossed? }
+  HasturEvent { kind, target?, payload }   // notice / mark / possession
   UnlockGranted { unlock_id }
   RunEnd { summary }
   Chat { from, text }
@@ -624,126 +1292,207 @@ ServerToClient:
 
 ---
 
-## 8. Milestones (toward "full feature spec v1")
+## 19. Milestones
 
-Even though the target is the full spec, we need a real build order. Each
-milestone should end in something runnable.
+Each milestone ends in something runnable. Destruction is a pillar, so it
+comes earlier than v1 had it.
 
-**M0 — Hello, terminal (1 week).** Single binary, ratatui draws a moving
-`@` on a static map. WASD moves it. No networking. Proof of render +
-input pipeline.
+**M0 — Hello, terminal (1 week).** Single binary, ratatui renders a
+moving `@` on static map. WASD moves it.
 
-**M1 — Local shooter (2–3 weeks).** Mouse aim, bullets, one weapon, one
-enemy type with dumb chase AI, collision, death/respawn, half-block
-rendering. Solo mode only. Proof of combat feel.
+**M1 — Local shooter with destruction (3 weeks).** Mouse aim, bullets,
+one fire-mode, one enemy, chase AI, collision, half-block rendering.
+**Tile-chunked destruction online from day one** — walls break, glyph
+particles fly. Proof of combat feel and destruction pillar together.
 
-**M2 — Two-player LAN (2–3 weeks).** Add renet, authoritative host,
-interpolation, lag compensation. Two players can shoot the same enemies on
-one LAN. Proof of netcode.
+**M2 — Two-player LAN (2–3 weeks).** renet, authoritative host,
+interpolation, lag comp, destruction state sync. Two players shoot the
+same enemies, break the same walls.
 
-**M3 — Wave & content-pack scaffolding (2 weeks).** Move classes, weapons,
-enemies, waves into TOML. Load core pack. Wave scheduler with
-intermission/miniboss rhythm. No themes yet, just functional waves.
+**M3 — Primitive bus scaffold (2 weeks).** Universal effect bus with a
+starter set of ~8 primitives. Weapons are base fire-mode + slots.
+Everything composes. Test multiple primitive stacks on both player
+weapons and enemies.
 
-**M4 — First themed wave (1 week).** Author one homage-themed wave using
-the content system. Validates the abstraction.
+**M4 — Content-pack plumbing + first brand (2 weeks).** Move archetypes,
+fire-modes, primitives to TOML. Load core pack. Author and validate the
+FPS arena brand fully (5+ archetypes, music stem, vox, audio-tells).
 
-**M5 — Classes, perks, modifiers (3 weeks).** All v1 classes. Perk system.
-Run-modifier rolls. Full drop RNG with rarities.
+**M5 — Wave structure & intermission (2 weeks).** Wave scheduler,
+miniboss every 5, intermission loop with brand-vote kiosks. Three brands
+supported; voting resolves and bleed-through works.
 
-**M6 — Procedural arena (2 weeks).** Map generator with core / chokepoints /
-cover / outposts. Seed sharing, day/night, destructibility.
+**M6 — Procedural arena (2 weeks).** Arena generator (core,
+chokepoints, kiosk placement, destructible structure). Seed sharing.
+Day/night variants.
 
-**M7 — Death, revive, Director mode (4 weeks).** The centerpiece. Downed
-state, revive channel, Director UI, spawn/possess/hazard/command, Influence
-economy. Playtest extensively; this is the highest-risk system.
+**M7 — Carcosa (4 weeks).** The jewel. Corruption %, sanity, marks,
+Carcosa terrain, Hastur Daemon, Yellow Sign audio + visual integration,
+threshold beats (25/50/75/100). Playtest extensively; this is the
+highest-risk system.
 
-**M8 — Audio layer (2 weeks).** rodio integration, spatial audio, music
-intensity, content-pack audio loading, hot-reload dev mode.
+**M8 — Director mode (3 weeks).** Death-to-Director transition.
+Influence economy. Spawn / possess / hazard / breach / command. Director
+UI. Co-op Director dynamics. Playtest.
 
-**M9 — Unlocks & persistence (1–2 weeks).** Per-nickname unlock files, local
-leaderboard, achievement triggers.
+**M9 — Audio pillar (2 weeks).** Full rodio integration. Spatial audio.
+Dual-stem dynamic mix. Hot-reload dev mode. Carcosa audio layer.
+Audio-tells across all enemy abilities.
 
-**M10 — Join-in-progress + polish (2 weeks).** JIP flow, connection drop
-recovery, terminal capability probing, fallbacks, settings UI.
+**M10 — Unlocks & persistence (1–2 weeks).** Per-nickname unlock files,
+local leaderboard, achievement triggers (survivor + Director).
 
-**M11 — Content push (2+ weeks).** Author 4–6 themed waves to ship with v1
-(all non-branded names in-repo, flavor via flavorful-but-original labels).
+**M11 — Join-in-progress + polish (2 weeks).** JIP, connection drop
+recovery, terminal probing, fallbacks, settings UI, sanity audio/visual
+polish.
 
-**M12 — Closed playtest, balance, ship.** Pass.
+**M12 — Content push (3 weeks).** Author the remaining two Tier-1
+brands (tactical, chaos roguelike) + fill out primitive pool to 24 +
+author 5 arena variants.
 
-Rough total: **5–7 months of solo nights-and-weekends work** for a full v1.
-Shorter if any stage reveals a dead end early; longer if Director mode takes
-additional iteration (it probably will).
+**M13 — Closed playtest, balance, ship.**
 
----
-
-## 9. Open design questions
-
-- **Director Influence numbers:** How much influence per second? What does
-  a "small" spawn cost vs. a "huge" hazard? Needs playtesting; start with
-  a tuning spreadsheet.
-- **How do Directors coordinate?** Shared Influence pool vs. individual?
-  Voice chat only vs. a ping/order system? Probably individual + pings.
-- **PvP friendly fire during Director possession:** If a Director-possessed
-  unit is killed by a surviving player, does the Director pay a cooldown or
-  just lose the unit? Start with: lose the unit, short repossess cooldown.
-- **Pack asset sync:** In v1 we require identical packs on all clients. Is
-  this acceptable, or do we need a first-run sync? Probably v1.1.
-- **Terminal minimum size:** Hard-floor at 100x30? Warn + degrade or
-  refuse? Needs UX pass.
-- **Seed-of-the-day:** Daily shared seed + daily leaderboard? Nice stretch.
-- **Solo mode parity:** Should solo be balanced like 2P or distinct? Start
-  with: solo is 2P balance minus Director mode (AI Director fills in).
+Rough total: **6–8 months of solo nights-and-weekends**, nearly double
+the ambition of v1 because destruction + Carcosa are big. Milestones
+M1–M5 are each shippable-feeling standalone for a solo-practice mode
+before the spec fully lands.
 
 ---
 
-## 10. Risks
+## 20. Open design questions
 
-| Risk                                              | Likelihood | Mitigation                                  |
-|---------------------------------------------------|------------|---------------------------------------------|
-| Director mode is unbalanceable                    | High       | Playtest early (M7); have AI-Director fallback. |
-| Mouse input varies too much across terminals      | Medium     | Detect + fall back to keyboard aim cleanly. |
-| Netcode lag compensation feels bad                | Medium     | Start with generous interp buffer; tune down. |
-| Content-pack abstraction too rigid or too loose   | Medium     | Author one theme *before* finalizing schema. |
-| Scope kills the project                           | High       | Milestones M0–M4 are shippable standalone.  |
-| Audio production is a rabbit hole                 | Medium     | Ship with CC0 placeholders; real audio is a trailing track. |
-| Terminal sizes fragment rendering                 | Low        | Min-size gate + generous HUD reflow.        |
-
----
-
-## 11. Glossary
-
-- **Arena:** The procedural map for a run.
-- **Director:** A dead player playing the antagonist side.
-- **Horde:** All AI-faction entities currently alive.
-- **Influence:** Director currency for spawning and abilities.
-- **Miniboss:** Named, themed powerful enemy every 5 waves.
-- **Pack:** A content bundle of themes, archetypes, audio, and assets.
-- **Run:** A single session from spawn to team wipe.
-- **Theme:** A tonal/aesthetic wave group (e.g. "Covenant Strike").
-- **Turncoat:** Colloquial for a player who transitioned to Director.
-- **Wave:** A 90–180s pressure period with a theme.
-
----
-
-## 12. Legal & IP note
-
-This project is a **homage and parody** intended for private play among
-friends. Shipped core content uses original archetype names, silhouettes,
-and audio. Crossover "theme" content that leans on identifiable third-party
-properties lives in user-authored content packs distributed separately, not
-in the shipping repository. This mirrors how the Doom/Quake modding and OpenRA
-communities have long operated. If this project ever goes public beyond
-friends, a legal pass is required before distributing any brand-adjacent
-theme pack, and references in this document are for design vocabulary only.
+- **Corruption-kill loss tuning.** How *much* can skill-kills decrease
+  Corruption? Should it be genuine slowdown or just vibes? Playtest.
+- **Director Influence precise economy.** Baselines here are guesses;
+  hard numbers are spreadsheet-then-playtest.
+- **Mark cadence at 100%.** 2 simultaneous marks + doubled rotation
+  might be too punishing. Curve to taste.
+- **Hallucination tells UX.** The tells must be *learnable within 2
+  runs*. If first-time players can't ever disambiguate, the system
+  feels unfair. Needs UX iteration.
+- **Snap-out-of-it cost.** Is hurting a hallucinated friendly a hit
+  against friendly HP, a no-op, or partial-damage? (Design default:
+  partial — enough to hurt, not enough to kill, forces a real "pull
+  yourself together" moment.)
+- **Brand-vote kiosk placement tension.** Should kiosks be intentionally
+  *spread* so voting requires team movement (good), or clustered
+  (accessible)? Likely spread, but tune in playtesting.
+- **Director griefing via self-sabotage.** Directors can friendly-fire
+  each other. Fine by design; watch for degenerate cases.
+- **Pack asset sync.** v1 requires identical packs on all clients.
+  v1.1: partial auto-sync for audio assets from host.
+- **Seed-of-the-day coordination.** A shared daily hash requires agreement
+  on a date source. Simple approach: UTC date. Works.
+- **Minimum terminal size.** 100×30 is the design target. Enforce or
+  gracefully reflow for 80×24? Leaning enforce.
 
 ---
 
-## 13. What this document is *not*
+## 21. Risks
 
-- Not a balance spreadsheet. All numbers are placeholder until playtested.
-- Not an API contract. Data model sketch is directional.
-- Not a backlog. Milestones are targets, not tickets.
-- Not a promise. Scope will change after M1 when we learn what the game
-  *actually* feels like.
+| Risk                                                | Likelihood | Mitigation                                                 |
+|-----------------------------------------------------|------------|------------------------------------------------------------|
+| Destruction pillar eats netcode budget              | High       | Destruction events are reliable-unordered; particles are client-side visual only with deterministic seeds. Early stress test at M2. |
+| Universal effect bus becomes balance nightmare      | High       | Interaction matrix is *authored*, not procedural. Start with conservative matrix; expand as tested. |
+| Carcosa feels unfair despite "skill-based" intent   | Medium     | Tells must be learnable in 2 runs. UX pass during M7.      |
+| Director mode is unbalanceable                      | Medium     | Influence cap + long playtest. Hastur Daemon exists as design fallback if human Directors prove un-tunable. |
+| Sanity friendly-fire causes friend-group resentment | Medium     | Snap-out-of-it bell + visual tell + partial damage; tune downward if playtest shows it's toxic. |
+| Mouse input varies across terminals                 | Medium     | Detect + keyboard-aim fallback.                            |
+| Content-pack schema too rigid / too loose           | Medium     | Author one brand end-to-end before finalizing schema (M4). |
+| Audio production is a rabbit hole                   | Medium     | CC0 placeholders ship. Real samples are a trailing track.  |
+| Scope kills the project                             | High       | M1–M5 are each standalone-playable. Half-spec ships as a solo roguelike worth playing. |
+| Terminal rendering fragmentation                    | Low        | Min-size gate; generous reflow; probe at connect.          |
+| Yellow Sign fatigue                                 | Low        | Sign cadence is telegraphed and rare early; ramps late.    |
+| Legal: brand homage too close to brand fidelity     | Medium     | Core repo ships non-branded names + generic palettes. Third-party "brand-fidelity" packs live external to the repo per §25. |
+
+---
+
+## 22. Glossary
+
+- **Arena** — the procedural map for a single run.
+- **Brand** — a category of shooter homage (FPS arena, tactical, chaos
+  roguelike, etc.).
+- **Brand bleed** — the vote-based introduction of a new brand into the
+  current wave's enemy pool.
+- **Carcosa** — the fictional city from the Yellow Mythos; metaphysically
+  bleeding into the shell. Also the visual state of the arena at high
+  Corruption.
+- **Carcosa terrain** — Yellow-Sign-inlaid tiles that drain sanity and
+  empower enemies crossing them.
+- **Corruption %** — global arena metric (0–100+) tracking the advance of
+  Carcosa into the run.
+- **Director** — a dead player; plays the antagonist/chaos side.
+- **Gibs** — glyph-particle remains of destroyed entities.
+- **Hastur** — the King in Yellow. The game's antagonist presence.
+- **Hastur Daemon** — the AI system running Hastur's passive/active
+  pressure before (and alongside) human Directors.
+- **Influence** — Director currency for spawning, possessing, hazards.
+- **Mark** — Hastur's gaze on a specific survivor; bonus-damage and
+  AI-priority target.
+- **Miniboss** — named themed elite every 5 waves.
+- **Pack** — content bundle (brands + archetypes + primitives + audio +
+  arenas).
+- **Primitive** — a named effect-component in the universal composition
+  bus.
+- **Run** — single session from drop-in to last-survivor-down.
+- **Sanity** — per-player 0–100 metric; low sanity causes deterministic
+  visual/audio/AI effects.
+- **Traversal verb** — a movement primitive (dash, blink, grapple, etc.).
+- **Wave** — 60–180s pressure period with a brand theme.
+- **Yellow Sign** — Hastur's sigil; appears onscreen at Corruption
+  thresholds and during notice events.
+
+---
+
+## 23. What this document is not
+
+- Not a balance spreadsheet. Numbers are placeholders until playtested.
+- Not an API contract. Data model is directional.
+- Not a backlog. Milestones are targets.
+- Not a promise. Scope will change after M1 when we learn the feel.
+
+---
+
+## 24. What changed from v1 (for reviewers of the prior spec)
+
+- **Classes: cut entirely.** Replaced with loot-driven identity. Tarkov
+  shape.
+- **Universal effect bus** added as a core abstraction. Movement verbs
+  and weapon mods are the same vocabulary.
+- **Destruction elevated to a pillar.** Tile-chunked physics from M1.
+- **Carcosa / Yellow Sign** is the central fiction and the antagonistic
+  system — not just tone.
+- **Sanity + Corruption** replace generic "difficulty scaling" as the
+  antagonist curve. Skill-based, Amnesia-lineage.
+- **No revives, no vendor, no second chances.** Design simplification +
+  tone hardening.
+- **Director is pure chaos**, shared hive-mind, only the Influence
+  budget throttles. No role separation.
+- **Brand bleed is player-voted** at intermissions. Replay variance
+  cranked; narrative arc preserved.
+- **Hastur Daemon** replaces "ambient pressure" as a designed system
+  with telegraphed notice events.
+- **Audio is a gameplay pillar** with authored tells, dual-stem
+  dynamic mixing, Carcosa overlay.
+- **Meta-progression stays unlocks-only** — but unlocks = new primitives
+  = literal new combinatorial content for the effect bus. Meta is
+  content, not stats.
+
+---
+
+## 25. Legal & IP note
+
+This project is a homage and parody intended for private play. Core
+repository content uses original archetype names, silhouettes, and
+audio. Brand-adjacent "fidelity" theme packs (e.g., anything named
+explicitly after a trademarked property) live in user-authored content
+packs distributed **outside** the shipping repository, modeled on how
+the Doom/Quake modding and OpenRA communities operate.
+
+The King in Yellow, Hastur, Carcosa, and the Yellow Sign derive from
+Robert W. Chambers' 1895 *The King in Yellow* and are public domain.
+They are ours to use freely; no legal concern.
+
+If this project ever goes public beyond friends, a legal review is
+required before distributing any brand-adjacent pack. References in
+this document are design vocabulary only.
