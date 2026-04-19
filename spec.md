@@ -1162,22 +1162,52 @@ No Bevy for v1. Headless Bevy ECS is overkill and pulls deps.
 
 ### 17.5 Rendering
 
-- Custom framebuffer layer above ratatui. Virtual pixel buffer of
-  `(fg_rgb, bg_rgb, char)` at half-block resolution (each terminal cell
-  = 2 logical pixels stacked).
-- Draw pipeline:
-  1. Clear virtual pixel buffer.
-  2. Render terrain (static per seed + accumulated destruction deltas).
-  3. Render entities (interpolated positions; sanity-driven
-     hallucination-layer applied here).
-  4. Render projectiles, gibs, particle effects.
-  5. Render HUD via ratatui widgets (sanity-driven HUD corruption
-     applied here).
-  6. Resolve vertical pixel pairs into `▀`/`▄`/` `/`█` with FG/BG.
-  7. Diff against previous frame; emit only changed cells.
-- Truecolor assumed; 256-color fallback via `TERM`/`COLORTERM` probing.
-- Keyboard-aim fallback if no mouse support detected.
-- Minimum terminal size: 100×30. Below that: refuse with resize prompt.
+Hand-rolled framebuffer that bypasses ratatui's widget layer for the arena.
+ratatui remains available for menus and overlays. Two logical layers per
+frame compose into one emitted character per terminal cell:
+
+- **Sextant layer** (primary). Solid-fill pixels at **2×3 per terminal
+  cell** using the Unicode "Symbols for Legacy Computing" block
+  (U+1FB00..U+1FB3B, plus the reused `' '` / `▌` / `▐` / `█` cells).
+  6× the pixel density of the old half-block approach.
+- **Braille layer** (overlay). Dot pixels at **2×4 per terminal cell**
+  using U+2800 + 8-bit pattern. Only renders in cells where the sextant
+  pattern is empty, so it acts as fine detail behind solid sprites —
+  perfect for bullet trails, sparks, and eventually Yellow Sign dust.
+
+Per-cell resolve: count each of the 6 sextant pixels by color; pick the
+most common non-black color as FG, the next-most-common as BG, and emit
+the sextant glyph whose bit pattern marks the FG-colored positions. Cells
+with no sextant pixels fall through to the braille layer.
+
+**Sprite system**: each entity renders via a procedurally generated sprite
+— a small `Vec<Option<Pixel>>` grid stamped into the sextant buffer at
+the entity's position. Transparent cells preserve whatever the layer
+underneath drew. Archetypes define sprite builders from stats (size,
+palette, silhouette): the player is a cyan 8×11 humanoid with aim-tracking
+barrel; rushers, pinkies, and the miniboss each get hand-shaped
+silhouettes that read from across the arena.
+
+**Draw pipeline:**
+1. Clear both layers.
+2. Render terrain (walls + rubble; floor intentionally left black so the
+   braille layer shows through).
+3. Render entities via their sprite builders.
+4. Render projectile cores (2×2 sextant cluster) + sextant smoke trail.
+5. Layer braille dust trail behind projectiles.
+6. Render HUD overlay via direct ANSI (post-blit text, survives the
+   diff because its cells don't change between frames).
+7. Resolve sextant layer per cell; fall through to braille for empty
+   cells; diff against previous frame; emit only changed cells.
+
+- Truecolor assumed; 256-color fallback via `TERM`/`COLORTERM` probing
+  (not yet implemented in v0.2).
+- Keyboard-aim fallback if no mouse support detected (deferred).
+- Minimum terminal size: 80×30. Below that: refuse with resize prompt.
+- Required font glyph coverage: U+1FB00..U+1FB3B (sextants) and
+  U+2800..U+28FF (braille). Cascadia Code, JetBrains Mono Nerd, Fira
+  Code Nerd, Iosevka all work. Detection is deferred — users see tofu
+  if they pick a bad font; the README documents known-good options.
 
 ### 17.6 Content packs
 
@@ -1297,17 +1327,29 @@ ServerToClient:
 Each milestone ends in something runnable. Destruction is a pillar, so it
 comes earlier than v1 had it.
 
-**M0 — Hello, terminal (1 week).** Single binary, ratatui renders a
-moving `@` on static map. WASD moves it.
+**M0 — Hello, terminal (1 week). ✅ v0.2.** Single binary, custom
+framebuffer renders a moving player on a static map. WASD moves it.
+Panic-safe terminal restore.
 
-**M1 — Local shooter with destruction (3 weeks).** Mouse aim, bullets,
-one fire-mode, one enemy, chase AI, collision, half-block rendering.
-**Tile-chunked destruction online from day one** — walls break, glyph
-particles fly. Proof of combat feel and destruction pillar together.
+**M1 — Local shooter with destruction (3 weeks). ✅ v0.2.** Mouse aim,
+projectile bullets with trails, one fire-mode, one enemy archetype with
+chase AI, wall collision. Tile-chunked destruction online from day one —
+walls break, glyph particles fly, debris persists. **Rendering upgraded
+from half-blocks to the sextant+braille hybrid** described in §17.5, with
+procedural multi-pixel sprites per archetype. Proof of combat feel and
+destruction pillar together.
 
-**M2 — Two-player LAN (2–3 weeks).** renet, authoritative host,
-interpolation, lag comp, destruction state sync. Two players shoot the
-same enemies, break the same walls.
+**M2 — Two-player LAN (2–3 weeks). ✅ v0.2.** renet authoritative host,
+20Hz snapshots on an unreliable channel, tile-update + destruction events
+on a reliable channel, client-side particle synthesis from server-sent
+seeds. Host + one+ clients shoot the same enemies and break the same
+walls. Interpolation and lag compensation deferred — LAN feels fine at
+20Hz snap-to-server.
+
+**M2.5 — Content scaffolding (current shipped). ✅ v0.2.** Three enemy
+archetypes (Rusher, Pinkie, Miniboss), wave scheduler with banner
+announcements, miniboss every 5 waves, run-end summary, HP/wave/kills
+HUD. Damage + death + immediate run-end (no Director mode yet).
 
 **M3 — Primitive bus scaffold (2 weeks).** Universal effect bus with a
 starter set of ~8 primitives. Weapons are base fire-mode + slots.
@@ -1410,6 +1452,9 @@ before the spec fully lands.
 ## 22. Glossary
 
 - **Arena** — the procedural map for a single run.
+- **Braille layer** — the 2×4-dot overlay rendered beneath the sextant
+  layer; shows through where sextants are empty. For fine detail: bullet
+  dust, sparks.
 - **Brand** — a category of shooter homage (FPS arena, tactical, chaos
   roguelike, etc.).
 - **Brand bleed** — the vote-based introduction of a new brand into the
@@ -1437,6 +1482,11 @@ before the spec fully lands.
 - **Run** — single session from drop-in to last-survivor-down.
 - **Sanity** — per-player 0–100 metric; low sanity causes deterministic
   visual/audio/AI effects.
+- **Sextant layer** — the 2×3 solid-fill pixel grid that is the primary
+  rendering surface. Each terminal cell holds 6 sub-pixels resolved into
+  one Unicode sextant glyph.
+- **Sprite** — a procedurally-generated 2D `Option<Pixel>` grid stamped
+  into the sextant layer to render an entity.
 - **Traversal verb** — a movement primitive (dash, blink, grapple, etc.).
 - **Wave** — 60–180s pressure period with a brand theme.
 - **Yellow Sign** — Hastur's sigil; appears onscreen at Corruption
@@ -1477,6 +1527,38 @@ before the spec fully lands.
 - **Meta-progression stays unlocks-only** — but unlocks = new primitives
   = literal new combinatorial content for the effect bus. Meta is
   content, not stats.
+- **Rendering: sextants (2×3) + braille (2×4), not half-blocks.**
+  Upgraded during early implementation after the initial half-block build
+  looked like data-viz. Procedurally-generated multi-pixel sprites per
+  archetype. See §17.5.
+
+### 24.1 Shipped in v0.2 (as of this writing)
+
+What's in the repo and playable today:
+
+- Solo, `serve`, and `connect` modes over UDP. Host-authoritative sim.
+- Sextant+braille framebuffer, procedural sprites, aim-tracking barrel.
+- Tile-chunked destruction + persistent rubble + glyph-particle gibs.
+- Three enemy archetypes (Rusher, Pinkie, Miniboss), wave scheduler,
+  miniboss every 5 waves, run-end summary.
+- One hand-crafted arena that auto-scales to the terminal size.
+- HUD (wave / HP / kills), wave banner, game-over screen.
+
+What the spec describes but **is not yet shipped**:
+
+- Universal effect bus and primitives (M3).
+- Classes-via-loot / inventory / corpse looting.
+- Carcosa / Corruption / Sanity / Hastur Daemon (§8).
+- Director mode (§10).
+- Brands beyond "single hardcoded pool" (§9).
+- Intermission brand-vote kiosks (§7.3).
+- Audio pillar (§13).
+- Meta-progression + unlocks (§14).
+- Procedural arena generator (§12).
+- Content-pack loader (§17.6).
+
+Sections 6–16 of this document are the design target, not the current
+build. Use §19 Milestones to navigate what's done vs. ahead.
 
 ---
 
