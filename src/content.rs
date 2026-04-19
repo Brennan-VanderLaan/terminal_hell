@@ -39,24 +39,19 @@ pub struct BrandDef {
     pub description: String,
     pub spawn_pool: Vec<String>,
     pub miniboss: String,
-    pub scaling: BrandScaling,
     #[serde(default)]
     pub spawn_weights: HashMap<String, u32>,
+    /// Legacy fine-grained scaling — ignored by the current director (which
+    /// uses global budget + brand-count bonus), but still parsed so older
+    /// brand files remain loadable.
+    #[serde(default)]
+    pub scaling: Option<BrandScaling>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BrandScaling {
-    pub base_rushers: u32,
-    pub rushers_per_wave: u32,
-    pub pinkie_start_wave: u32,
-    pub pinkie_base: u32,
-    pub pinkie_scale_denom: u32,
-    pub charger_start_wave: u32,
-    pub charger_base: u32,
-    pub charger_scale_denom: u32,
-    pub revenant_start_wave: u32,
-    pub revenant_base: u32,
-    pub revenant_scale_denom: u32,
+    #[serde(default)]
+    pub _legacy_unused: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -104,11 +99,15 @@ impl ContentDb {
         if brands.is_empty() {
             return Err(anyhow!("core pack ships no brands"));
         }
-        let default_brand = brands
-            .keys()
-            .next()
-            .cloned()
-            .unwrap_or_else(|| "fps_arena".into());
+        // Prefer tactical as the opening brand so every run starts grounded
+        // per the design spec. Fall back to whatever's available.
+        let default_brand = if brands.contains_key("tactical") {
+            "tactical".to_string()
+        } else if brands.contains_key("fps_arena") {
+            "fps_arena".to_string()
+        } else {
+            brands.keys().next().cloned().unwrap_or_else(|| "fps_arena".into())
+        };
 
         Ok(Self { archetypes, brands, default_brand })
     }
@@ -134,6 +133,10 @@ fn archetype_from_name(name: &str) -> Result<Archetype> {
         "pinkie" => Ok(Archetype::Pinkie),
         "charger" => Ok(Archetype::Charger),
         "revenant" => Ok(Archetype::Revenant),
+        "marksman" => Ok(Archetype::Marksman),
+        "pmc" => Ok(Archetype::Pmc),
+        "swarmling" => Ok(Archetype::Swarmling),
+        "orb" => Ok(Archetype::Orb),
         "miniboss" => Ok(Archetype::Miniboss),
         other => Err(anyhow!("unknown archetype `{other}`")),
     }

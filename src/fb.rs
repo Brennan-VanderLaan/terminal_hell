@@ -61,6 +61,10 @@ pub struct Framebuffer {
     braille_dots: Vec<u8>,
     /// One color per terminal cell, applied when that cell renders as braille.
     braille_fg: Vec<Pixel>,
+    /// Optional ambient tint applied to every lit pixel at blit time.
+    /// `(color, amount)` where amount is 0..1 (0 = no tint, 1 = replace).
+    /// Used by the Corruption curve to amber-wash the arena.
+    tint: Option<(Pixel, f32)>,
     /// Previously-emitted cells for diffing.
     displayed: Vec<Cell>,
     resolved: Vec<Cell>,
@@ -79,7 +83,26 @@ impl Framebuffer {
             braille_fg: vec![Pixel::BLACK; cells],
             displayed: vec![Cell::empty(); cells],
             resolved: vec![Cell::empty(); cells],
+            tint: None,
             force_full: true,
+        }
+    }
+
+    /// Enable an ambient post-resolve tint. Passing `None` or `amount <= 0`
+    /// disables it. The amount is clamped to 0..1.
+    pub fn set_tint(&mut self, color: Pixel, amount: f32) {
+        let a = amount.clamp(0.0, 1.0);
+        if a <= 0.0 {
+            if self.tint.is_some() {
+                self.tint = None;
+                self.force_full = true;
+            }
+        } else {
+            let new = Some((color, a));
+            if self.tint != new {
+                self.tint = new;
+                self.force_full = true;
+            }
         }
     }
 
@@ -157,16 +180,25 @@ impl Framebuffer {
     fn resolve(&mut self) {
         let cols = self.cols as usize;
         let pw = self.pixel_width() as usize;
+        let tint = self.tint;
         for row in 0..(self.rows as usize) {
             for col in 0..cols {
                 let base_x = col * 2;
                 let base_y = row * 3;
-                let p00 = self.sex_pixels[base_y * pw + base_x];
-                let p10 = self.sex_pixels[base_y * pw + base_x + 1];
-                let p01 = self.sex_pixels[(base_y + 1) * pw + base_x];
-                let p11 = self.sex_pixels[(base_y + 1) * pw + base_x + 1];
-                let p02 = self.sex_pixels[(base_y + 2) * pw + base_x];
-                let p12 = self.sex_pixels[(base_y + 2) * pw + base_x + 1];
+                let mut p00 = self.sex_pixels[base_y * pw + base_x];
+                let mut p10 = self.sex_pixels[base_y * pw + base_x + 1];
+                let mut p01 = self.sex_pixels[(base_y + 1) * pw + base_x];
+                let mut p11 = self.sex_pixels[(base_y + 1) * pw + base_x + 1];
+                let mut p02 = self.sex_pixels[(base_y + 2) * pw + base_x];
+                let mut p12 = self.sex_pixels[(base_y + 2) * pw + base_x + 1];
+                if let Some((tc, a)) = tint {
+                    apply_tint(&mut p00, tc, a);
+                    apply_tint(&mut p10, tc, a);
+                    apply_tint(&mut p01, tc, a);
+                    apply_tint(&mut p11, tc, a);
+                    apply_tint(&mut p02, tc, a);
+                    apply_tint(&mut p12, tc, a);
+                }
                 let pixels = [p00, p10, p01, p11, p02, p12];
 
                 let cell_idx = row * cols + col;
@@ -178,8 +210,12 @@ impl Framebuffer {
                     let dots = self.braille_dots[cell_idx];
                     if dots != 0 {
                         let ch = char::from_u32(0x2800 + dots as u32).unwrap_or('⠀');
+                        let mut fg = self.braille_fg[cell_idx];
+                        if let Some((tc, a)) = tint {
+                            apply_tint(&mut fg, tc, a);
+                        }
                         self.resolved[cell_idx] =
-                            Cell { ch, fg: self.braille_fg[cell_idx], bg: Pixel::BLACK };
+                            Cell { ch, fg, bg: Pixel::BLACK };
                     } else {
                         self.resolved[cell_idx] = Cell::empty();
                     }
@@ -276,6 +312,17 @@ fn braille_bit(sx: u8, sy: u8) -> u8 {
 /// Choose a (char, fg, bg) for a 6-pixel sextant cell. Strategy: the most
 /// common non-black color becomes FG; the next-most-common color (often
 /// black) becomes BG. Pattern bits mark FG-colored pixels.
+fn apply_tint(p: &mut Pixel, tint: Pixel, amount: f32) {
+    if p.is_black() {
+        return; // don't light up empty space
+    }
+    let a = amount;
+    let inv = 1.0 - a;
+    p.r = ((p.r as f32) * inv + (tint.r as f32) * a).round() as u8;
+    p.g = ((p.g as f32) * inv + (tint.g as f32) * a).round() as u8;
+    p.b = ((p.b as f32) * inv + (tint.b as f32) * a).round() as u8;
+}
+
 fn resolve_sextant(pixels: &[Pixel; 6]) -> (char, Pixel, Pixel) {
     // Small-count bucketing — max 6 distinct colors so linear scan is fine.
     let mut counts: [(Pixel, u8); 6] = [(Pixel::BLACK, 0); 6];

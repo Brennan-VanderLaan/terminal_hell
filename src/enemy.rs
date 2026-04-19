@@ -6,15 +6,18 @@ use crate::sprite;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Archetype {
-    /// Small fast melee. Imp-ish.
+    // FPS arena brand
     Rusher,
-    /// Armored brute. Pinkie-ish.
     Pinkie,
-    /// Fast armored rush variant. Charger — low HP for a brute, high speed.
     Charger,
-    /// Ranged hitscan shooter. Slow on foot, telegraphs shots.
     Revenant,
-    /// Every-5 miniboss.
+    // Tactical mil-sim brand
+    Marksman,
+    Pmc,
+    // Chaos roguelikes brand
+    Swarmling,
+    Orb,
+    // Shared miniboss
     Miniboss,
 }
 
@@ -25,6 +28,10 @@ impl Archetype {
             2 => Archetype::Miniboss,
             3 => Archetype::Charger,
             4 => Archetype::Revenant,
+            5 => Archetype::Marksman,
+            6 => Archetype::Pmc,
+            7 => Archetype::Swarmling,
+            8 => Archetype::Orb,
             _ => Archetype::Rusher,
         }
     }
@@ -35,6 +42,10 @@ impl Archetype {
             Archetype::Miniboss => 2,
             Archetype::Charger => 3,
             Archetype::Revenant => 4,
+            Archetype::Marksman => 5,
+            Archetype::Pmc => 6,
+            Archetype::Swarmling => 7,
+            Archetype::Orb => 8,
         }
     }
 }
@@ -101,6 +112,10 @@ impl Enemy {
             Archetype::Pinkie => Pixel::rgb(255, 130, 170),
             Archetype::Charger => Pixel::rgb(255, 100, 80),
             Archetype::Revenant => Pixel::rgb(200, 230, 255),
+            Archetype::Marksman => Pixel::rgb(150, 170, 100),
+            Archetype::Pmc => Pixel::rgb(120, 140, 170),
+            Archetype::Swarmling => Pixel::rgb(255, 80, 40),
+            Archetype::Orb => Pixel::rgb(200, 120, 255),
             Archetype::Miniboss => Pixel::rgb(255, 190, 60),
         }
     }
@@ -111,6 +126,10 @@ impl Enemy {
             Archetype::Pinkie => Pixel::rgb(190, 70, 120),
             Archetype::Charger => Pixel::rgb(170, 60, 40),
             Archetype::Revenant => Pixel::rgb(130, 160, 200),
+            Archetype::Marksman => Pixel::rgb(90, 110, 60),
+            Archetype::Pmc => Pixel::rgb(70, 90, 120),
+            Archetype::Swarmling => Pixel::rgb(160, 40, 20),
+            Archetype::Orb => Pixel::rgb(140, 70, 200),
             Archetype::Miniboss => Pixel::rgb(200, 120, 40),
         }
     }
@@ -207,7 +226,7 @@ impl Enemy {
     }
 
     pub fn is_ranged(&self) -> bool {
-        matches!(self.archetype, Archetype::Revenant)
+        matches!(self.archetype, Archetype::Revenant | Archetype::Marksman)
     }
 
     pub fn is_telegraphing(&self) -> bool {
@@ -289,7 +308,7 @@ pub struct RangedShot {
 
 fn initial_attack_cooldown(archetype: Archetype) -> f32 {
     match archetype {
-        Archetype::Revenant => 1.2, // small delay before the first shot
+        Archetype::Revenant | Archetype::Marksman => 1.2,
         _ => 0.0,
     }
 }

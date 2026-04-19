@@ -39,6 +39,36 @@ reach = 2.4
 preferred_distance = 22.0
 ranged_damage = 14
 
+[marksman]
+hp = 45
+speed = 10.0
+touch_damage = 6
+hit_radius = 2.4
+reach = 2.0
+preferred_distance = 32.0
+ranged_damage = 22
+
+[pmc]
+hp = 210
+speed = 11.0
+touch_damage = 22
+hit_radius = 4.5
+reach = 3.4
+
+[swarmling]
+hp = 18
+speed = 30.0
+touch_damage = 6
+hit_radius = 1.6
+reach = 1.6
+
+[orb]
+hp = 90
+speed = 11.0
+touch_damage = 14
+hit_radius = 3.2
+reach = 3.0
+
 [miniboss]
 hp = 550
 speed = 9.0

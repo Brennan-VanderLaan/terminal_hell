@@ -4,6 +4,7 @@ use std::io::stdout;
 use std::time::{Duration, Instant};
 
 pub mod arena;
+pub mod carcosa;
 pub mod content;
 pub mod enemy;
 pub mod fb;
@@ -19,6 +20,7 @@ pub mod primitive;
 pub mod projectile;
 pub mod sprite;
 pub mod terminal;
+pub mod vote;
 pub mod waves;
 pub mod weapon;
 
@@ -38,7 +40,14 @@ pub fn run_solo() -> Result<()> {
     let (cols, rows) = crossterm::terminal::size()?;
     let mut fb = Framebuffer::new(cols, rows);
     let (aw, ah) = net::client::arena_size(cols, rows);
-    let arena = Arena::hand_crafted(aw, ah);
+    // Roll a fresh arena seed each solo run so layouts vary; deterministic
+    // within a single run for destruction/particle seeding.
+    let arena_seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0xDEAD_BEEF);
+    tracing::info!(seed = arena_seed, "arena seed");
+    let arena = Arena::generate(arena_seed, aw, ah);
 
     let origin = net::client::center_offset(cols, rows, aw, ah);
     let content = content::ContentDb::load_core()?;
@@ -126,13 +135,29 @@ pub fn run_solo() -> Result<()> {
         }
 
         fb.clear();
+        {
+            let (tint_color, tint_amount) = game.corruption_tint();
+            fb.set_tint(tint_color, tint_amount);
+        }
         game.render(&mut fb);
         fb.blit(&mut stdout)?;
         let hp = game.local_player().map(|p| p.hp).unwrap_or(0);
-        hud::draw_hud(&mut stdout, game.director.wave, hp, game.kills)?;
+        let local = game.local_player();
+        let sanity = local.map(|p| p.sanity).unwrap_or(100.0);
+        let marked = local.map(|p| Some(p.id) == game.marked_player_id).unwrap_or(false);
+        hud::draw_hud(
+            &mut stdout,
+            game.director.wave,
+            hp,
+            game.kills,
+            game.corruption,
+            sanity,
+            marked,
+        )?;
         if let Some(loadout) = game.local_loadout() {
             hud::draw_loadout(&mut stdout, &loadout)?;
         }
+        hud::draw_intermission(&mut stdout, &game)?;
         let (tc, tr) = crossterm::terminal::size()?;
         hud::draw_wave_banner(
             &mut stdout,

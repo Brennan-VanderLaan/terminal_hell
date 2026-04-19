@@ -123,12 +123,44 @@ fn lerp(a: u8, b: u8, t: f32) -> u8 {
     (a as f32 + (b as f32 - a as f32) * t).round().clamp(0.0, 255.0) as u8
 }
 
+/// Draw Hastur's gaze halo above a marked player: a yellow crown of 4 dots
+/// floating above the head and a thin Yellow Sign glyph overhead.
+pub fn render_hastur_mark(fb: &mut crate::fb::Framebuffer, cx: i32, cy: i32) {
+    let sign = crate::fb::Pixel::rgb(255, 220, 80);
+    let glow = crate::fb::Pixel::rgb(255, 180, 40);
+    // Ring above head at cy-7..-5, 5 wide centered on cx.
+    for dx in -2..=2_i32 {
+        let px = cx + dx;
+        if px < 0 {
+            continue;
+        }
+        let py = cy - 7;
+        if py >= 0 {
+            fb.set(px as u16, py as u16, glow);
+        }
+    }
+    // A "Y" crown at center.
+    let top = cy - 9;
+    if cx >= 0 && top >= 0 {
+        fb.set(cx as u16, top as u16, sign);
+        if cx >= 2 {
+            fb.set((cx - 2) as u16, (top + 1) as u16, sign);
+        }
+        fb.set((cx + 2) as u16, (top + 1) as u16, sign);
+        fb.set(cx as u16, (top + 2) as u16, sign);
+    }
+}
+
 pub fn enemy_sprite(archetype: Archetype) -> Sprite {
     match archetype {
         Archetype::Rusher => rusher(),
         Archetype::Pinkie => pinkie(),
         Archetype::Charger => charger(),
         Archetype::Revenant => revenant(),
+        Archetype::Marksman => marksman(),
+        Archetype::Pmc => pmc(),
+        Archetype::Swarmling => swarmling(),
+        Archetype::Orb => orb(),
         Archetype::Miniboss => miniboss(),
     }
 }
@@ -238,6 +270,106 @@ fn revenant() -> Sprite {
     s.fill_rect(4, 7, 2, 4, dark);
     s.set(1, 10, bone);
     s.set(5, 10, bone);
+    s
+}
+
+fn marksman() -> Sprite {
+    let body = Pixel::rgb(150, 170, 100);
+    let dark = Pixel::rgb(70, 90, 40);
+    let helmet = Pixel::rgb(180, 200, 130);
+    let muzzle = Pixel::rgb(255, 240, 80);
+    let eye = Pixel::rgb(30, 50, 20);
+
+    let mut s = Sprite::new(8, 11);
+    // Helmet
+    s.fill_rect(2, 0, 4, 2, helmet);
+    s.fill_rect(2, 2, 4, 1, dark);
+    s.set(3, 2, eye);
+    s.set(4, 2, eye);
+    // Shoulders + vest
+    s.fill_rect(1, 3, 6, 4, body);
+    s.fill_rect(2, 4, 4, 2, dark);
+    s.set(1, 3, dark);
+    s.set(6, 3, dark);
+    // Rifle poking sideways
+    s.fill_rect(6, 4, 2, 1, dark);
+    s.set(7, 4, muzzle);
+    // Legs — tactical stance
+    s.fill_rect(2, 7, 1, 4, dark);
+    s.fill_rect(5, 7, 1, 4, dark);
+    s.set(2, 10, body);
+    s.set(5, 10, body);
+    s
+}
+
+fn pmc() -> Sprite {
+    let plate = Pixel::rgb(120, 140, 170);
+    let dark = Pixel::rgb(50, 70, 100);
+    let accent = Pixel::rgb(160, 180, 210);
+    let visor = Pixel::rgb(70, 180, 255);
+
+    let mut s = Sprite::new(10, 11);
+    // Helmet with visor
+    s.fill_rect(2, 0, 6, 3, dark);
+    s.fill_rect(3, 1, 4, 1, visor);
+    // Shoulders
+    s.fill_rect(0, 3, 10, 1, dark);
+    // Torso plates
+    s.fill_rect(1, 4, 8, 5, plate);
+    s.fill_rect(3, 5, 4, 3, accent);
+    s.fill_rect(4, 6, 2, 2, dark);
+    // Side outline
+    for y in 4..9 {
+        s.set(0, y, dark);
+        s.set(9, y, dark);
+    }
+    // Boots
+    s.fill_rect(1, 9, 3, 2, dark);
+    s.fill_rect(6, 9, 3, 2, dark);
+    s
+}
+
+fn swarmling() -> Sprite {
+    let body = Pixel::rgb(255, 80, 40);
+    let dark = Pixel::rgb(140, 20, 10);
+    let eye = Pixel::rgb(255, 220, 80);
+    let mut s = Sprite::new(4, 4);
+    s.fill_rect(1, 0, 2, 1, dark);
+    s.fill_rect(0, 1, 4, 2, body);
+    s.set(1, 1, eye);
+    s.set(2, 1, eye);
+    s.set(0, 3, dark);
+    s.set(3, 3, dark);
+    s
+}
+
+fn orb() -> Sprite {
+    let body = Pixel::rgb(200, 120, 255);
+    let core = Pixel::rgb(255, 200, 255);
+    let dark = Pixel::rgb(90, 40, 150);
+    let glow = Pixel::rgb(230, 180, 255);
+    let mut s = Sprite::new(7, 7);
+    // Round halo ring
+    for x in 1..6 {
+        s.set(x, 0, dark);
+        s.set(x, 6, dark);
+    }
+    for y in 1..6 {
+        s.set(0, y, dark);
+        s.set(6, y, dark);
+    }
+    // Body filled
+    s.fill_rect(1, 1, 5, 5, body);
+    // Inner glow ring
+    for x in 2..5 {
+        s.set(x, 1, glow);
+        s.set(x, 5, glow);
+    }
+    s.set(1, 3, glow);
+    s.set(5, 3, glow);
+    // Core
+    s.fill_rect(2, 2, 3, 3, core);
+    s.set(3, 3, dark);
     s
 }
 

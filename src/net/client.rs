@@ -47,7 +47,7 @@ pub fn run_connect(addr: String) -> Result<()> {
     let (aw, ah) = arena_size(cols, rows);
     let content = crate::content::ContentDb::load_core()?;
     let mut game = Game::new(
-        Arena::hand_crafted(aw, ah),
+        Arena::generate(0, aw, ah),
         content,
         center_offset(cols, rows, aw, ah),
     );
@@ -160,13 +160,27 @@ pub fn run_connect(addr: String) -> Result<()> {
         // Render.
         fb.clear();
         if welcomed {
+            let (tint_color, tint_amount) = game.corruption_tint();
+            fb.set_tint(tint_color, tint_amount);
             game.render(&mut fb);
             fb.blit(&mut out)?;
             let hp = game.local_player().map(|p| p.hp).unwrap_or(0);
-            hud::draw_hud(&mut out, game.director.wave, hp, game.kills)?;
+            let local = game.local_player();
+            let sanity = local.map(|p| p.sanity).unwrap_or(100.0);
+            let marked = local.map(|p| Some(p.id) == game.marked_player_id).unwrap_or(false);
+            hud::draw_hud(
+                &mut out,
+                game.director.wave,
+                hp,
+                game.kills,
+                game.corruption,
+                sanity,
+                marked,
+            )?;
             if let Some(loadout) = game.local_loadout() {
                 hud::draw_loadout(&mut out, &loadout)?;
             }
+            hud::draw_intermission(&mut out, &game)?;
             let (tc, tr) = crossterm::terminal::size()?;
             hud::draw_wave_banner(
                 &mut out, tc, tr, game.director.wave, game.director.banner_ttl,
@@ -234,7 +248,23 @@ fn handle_unreliable(msg: ServerMsg, game: &mut Game) {
                 p.hp = ps.hp;
                 p.aim_x = ps.aim_x;
                 p.aim_y = ps.aim_y;
+                p.sanity = ps.sanity;
                 game.players.push(p);
+            }
+            game.marked_player_id = if s.marked_player_id == 0 {
+                None
+            } else {
+                Some(s.marked_player_id)
+            };
+            game.yellow_signs.clear();
+            for sn in s.yellow_signs {
+                game.yellow_signs.push(crate::carcosa::YellowSign {
+                    id: sn.id,
+                    x: sn.x,
+                    y: sn.y,
+                    ttl: sn.ttl,
+                    ttl_max: sn.ttl_max,
+                });
             }
 
             // Rebuild enemies + projectiles. Authoring stays on the host; the
@@ -274,6 +304,19 @@ fn handle_unreliable(msg: ServerMsg, game: &mut Game) {
                     ttl: hs.ttl,
                 });
             }
+            game.kiosks.clear();
+            for ks in s.kiosks {
+                let color = crate::fb::Pixel::rgb(ks.color[0], ks.color[1], ks.color[2]);
+                let mut k = crate::vote::VoteKiosk::new(
+                    ks.id, ks.x, ks.y, ks.brand_id, ks.brand_name, color,
+                );
+                k.votes = ks.votes;
+                game.kiosks.push(k);
+            }
+            game.active_brands = s.active_brands;
+            game.client_phase = decode_phase(s.intermission_phase);
+            game.client_phase_timer = s.phase_timer;
+            game.corruption = s.corruption;
             game.remote_weapons = s.weapons;
         }
         ServerMsg::Blast(b) => {
@@ -295,6 +338,17 @@ fn parse_server_addr(s: &str) -> Result<SocketAddr> {
         s.parse().context("parse server addr")
     } else {
         format!("{s}:{}", super::DEFAULT_PORT).parse().context("parse server addr")
+    }
+}
+
+fn decode_phase(p: u8) -> Option<crate::waves::IntermissionPhase> {
+    use crate::waves::IntermissionPhase::*;
+    match p {
+        0 => Some(Breathe),
+        1 => Some(Vote),
+        2 => Some(Stock),
+        3 => Some(Warning),
+        _ => None,
     }
 }
 

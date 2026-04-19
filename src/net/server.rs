@@ -13,8 +13,8 @@ use crate::game::{Game, PlayerInput};
 use crate::hud;
 use crate::input::Input;
 use crate::net::proto::{
-    self, Blast, ClientMsg, EnemySnap, HitscanSnap, PickupSnap, PlayerSnap, ProjSnap, ServerMsg,
-    Snapshot, WeaponLoadout, WeaponSnap, Welcome,
+    self, Blast, ClientMsg, EnemySnap, HitscanSnap, KioskSnap, PickupSnap, PlayerSnap, ProjSnap,
+    ServerMsg, SignSnap, Snapshot, WeaponLoadout, WeaponSnap, Welcome,
 };
 use crate::terminal;
 
@@ -47,7 +47,12 @@ pub fn run_serve(port: u16) -> Result<()> {
     let (cols, rows) = crossterm::terminal::size()?;
     let mut fb = Framebuffer::new(cols, rows);
     let (aw, ah) = super::client::arena_size(cols, rows);
-    let arena = Arena::hand_crafted(aw, ah);
+    let arena_seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0xDEAD_BEEF);
+    tracing::info!(seed = arena_seed, "arena seed");
+    let arena = Arena::generate(arena_seed, aw, ah);
     let content = crate::content::ContentDb::load_core()?;
     tracing::info!(brand = %content.active_brand().id, "content pack loaded");
     let mut game = Game::new(
@@ -90,6 +95,7 @@ pub fn run_serve(port: u16) -> Result<()> {
                         arena_w: game.arena.width,
                         arena_h: game.arena.height,
                         arena_tiles: game.arena.encode_tiles(),
+                        arena_seed,
                     });
                     server.send_message(
                         client_id,
@@ -250,16 +256,32 @@ pub fn run_serve(port: u16) -> Result<()> {
 
         // Render the host's own view.
         fb.clear();
+        {
+            let (tint_color, tint_amount) = game.corruption_tint();
+            fb.set_tint(tint_color, tint_amount);
+        }
         game.render(&mut fb);
         fb.blit(&mut out)?;
         let hp = game
             .local_player()
             .map(|p| p.hp)
             .unwrap_or(0);
-        hud::draw_hud(&mut out, game.director.wave, hp, game.kills)?;
+        let local = game.local_player();
+        let sanity = local.map(|p| p.sanity).unwrap_or(100.0);
+        let marked = local.map(|p| Some(p.id) == game.marked_player_id).unwrap_or(false);
+        hud::draw_hud(
+            &mut out,
+            game.director.wave,
+            hp,
+            game.kills,
+            game.corruption,
+            sanity,
+            marked,
+        )?;
         if let Some(loadout) = game.local_loadout() {
             hud::draw_loadout(&mut out, &loadout)?;
         }
+        hud::draw_intermission(&mut out, &game)?;
         let (tc, tr) = crossterm::terminal::size()?;
         hud::draw_wave_banner(
             &mut out, tc, tr, game.director.wave, game.director.banner_ttl,
@@ -306,6 +328,7 @@ fn build_snapshot(game: &Game) -> Snapshot {
                 hp: p.hp,
                 aim_x: p.aim_x,
                 aim_y: p.aim_y,
+                sanity: p.sanity,
             })
             .collect(),
         enemies: game
@@ -356,6 +379,35 @@ fn build_snapshot(game: &Game) -> Snapshot {
                 to_y: h.to.1,
                 ttl: h.ttl,
             })
+            .collect(),
+        kiosks: game
+            .kiosks
+            .iter()
+            .map(|k| KioskSnap {
+                id: k.id,
+                x: k.x,
+                y: k.y,
+                brand_id: k.brand_id.clone(),
+                brand_name: k.brand_name.clone(),
+                color: [k.brand_color.r, k.brand_color.g, k.brand_color.b],
+                votes: k.votes,
+            })
+            .collect(),
+        active_brands: game.active_brands.clone(),
+        intermission_phase: match game.director.current_phase() {
+            Some(crate::waves::IntermissionPhase::Breathe) => 0,
+            Some(crate::waves::IntermissionPhase::Vote) => 1,
+            Some(crate::waves::IntermissionPhase::Stock) => 2,
+            Some(crate::waves::IntermissionPhase::Warning) => 3,
+            None => u8::MAX,
+        },
+        phase_timer: game.director.phase_timer,
+        corruption: game.corruption,
+        marked_player_id: game.marked_player_id.unwrap_or(0),
+        yellow_signs: game
+            .yellow_signs
+            .iter()
+            .map(|s| SignSnap { id: s.id, x: s.x, y: s.y, ttl: s.ttl, ttl_max: s.ttl_max })
             .collect(),
     }
 }

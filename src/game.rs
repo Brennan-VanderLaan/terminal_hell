@@ -1,4 +1,5 @@
 use crate::arena::{Arena, Material, Tile};
+use crate::carcosa::{Phantom, YellowSign};
 use crate::content::ContentDb;
 use crate::enemy::{Archetype, Enemy};
 use crate::fb::{Framebuffer, Pixel};
@@ -8,10 +9,12 @@ use crate::pickup::Pickup;
 use crate::player::Player;
 use crate::primitive::{Primitive, Rarity};
 use crate::projectile::{Projectile, ProjectileOutcome};
-use crate::waves::WaveDirector;
+use crate::vote::VoteKiosk;
+use crate::waves::{WaveDirector, WaveEvent};
 use crate::weapon::Weapon;
+use rand::Rng;
+use rand::SeedableRng;
 use rand::rngs::SmallRng;
-use rand::{Rng, SeedableRng};
 
 /// Per-player state the host tracks to drive sim from incoming inputs.
 pub struct PlayerInput {
@@ -82,17 +85,38 @@ pub struct Game {
     pub particles: Vec<Particle>,
     pub enemies: Vec<Enemy>,
     pub pickups: Vec<Pickup>,
+    pub kiosks: Vec<VoteKiosk>,
+    /// Brand IDs currently bleeding into the wave pool, in vote order.
+    pub active_brands: Vec<String>,
     pub director: WaveDirector,
     pub mouse: Mouse,
     pub origin: (i32, i32),
     pub kills: u32,
     pub alive: bool,
     pub elapsed_secs: f32,
+    /// Arena-wide Carcosa encroachment. 0..100+, never regresses past peak.
+    pub corruption: f32,
+    pub peak_corruption: f32,
+    /// Hastur's gaze. Corruption ≥ 50 rotates the mark through living
+    /// players every 45s — marked players take +25% damage and draw AI
+    /// priority.
+    pub marked_player_id: Option<u32>,
+    pub mark_rotate_timer: f32,
+    /// Visible Yellow Sign manifestations; server-authoritative.
+    pub yellow_signs: Vec<YellowSign>,
+    /// Hastur Daemon: countdown until the next notice event is scheduled.
+    pub daemon_timer: f32,
+    /// Incrementing ID for newly-manifested signs.
+    next_sign_id: u32,
+    /// Client-side phantom enemies (pure hallucination; never synced).
+    pub phantoms: Vec<Phantom>,
     pub local_id: Option<u32>,
     seed_counter: u64,
     next_player_id: u32,
     next_pickup_id: u32,
+    next_kiosk_id: u32,
     loot_rng: SmallRng,
+    kiosk_rng: SmallRng,
     pub tick_tile_updates: Vec<(i32, i32, u8, u8)>,
     pub tick_blasts: Vec<DestructionBlast>,
     pub hitscans: Vec<HitscanTrace>,
@@ -100,10 +124,15 @@ pub struct Game {
     /// local player's loadout even though the client doesn't run the
     /// authoritative weapon sim.
     pub remote_weapons: Vec<crate::net::proto::WeaponSnap>,
+    /// Mirror of the server's intermission state on the client side; used
+    /// for HUD rendering without running the wave director locally.
+    pub client_phase: Option<crate::waves::IntermissionPhase>,
+    pub client_phase_timer: f32,
 }
 
 impl Game {
     pub fn new(arena: Arena, content: ContentDb, origin: (i32, i32)) -> Self {
+        let default_brand = content.default_brand.clone();
         Self {
             arena,
             content,
@@ -113,21 +142,47 @@ impl Game {
             particles: Vec::with_capacity(1024),
             enemies: Vec::with_capacity(64),
             pickups: Vec::with_capacity(16),
+            kiosks: Vec::new(),
+            active_brands: vec![default_brand],
             director: WaveDirector::new(0xC0FFEE),
             mouse: Mouse::default(),
             origin,
             kills: 0,
             alive: true,
             elapsed_secs: 0.0,
+            corruption: 0.0,
+            peak_corruption: 0.0,
+            marked_player_id: None,
+            mark_rotate_timer: 0.0,
+            yellow_signs: Vec::new(),
+            daemon_timer: 30.0,
+            next_sign_id: 1,
+            phantoms: Vec::new(),
             local_id: None,
             seed_counter: 0x9E3779B97F4A7C15,
             next_player_id: 1,
             next_pickup_id: 1,
+            next_kiosk_id: 1,
             loot_rng: SmallRng::seed_from_u64(0xBAD_F00D),
+            kiosk_rng: SmallRng::seed_from_u64(0xCAFE_BABE),
             tick_tile_updates: Vec::new(),
             tick_blasts: Vec::new(),
             hitscans: Vec::new(),
             remote_weapons: Vec::new(),
+            client_phase: None,
+            client_phase_timer: 0.0,
+        }
+    }
+
+    /// Intermission state for HUD display. Host pulls from director; client
+    /// pulls from its last snapshot.
+    pub fn display_phase(&self) -> (Option<crate::waves::IntermissionPhase>, f32) {
+        if let Some(p) = self.director.current_phase() {
+            (Some(p), self.director.phase_timer)
+        } else if self.client_phase.is_some() {
+            (self.client_phase, self.client_phase_timer)
+        } else {
+            (None, 0.0)
         }
     }
 
@@ -179,27 +234,71 @@ impl Game {
         id
     }
 
-    /// Attempt to grab the nearest pickup. Replaces the player's active
-    /// weapon. Called on interact keypress (E) events.
+    /// Attempt to grab the nearest pickup OR vote at the nearest kiosk.
+    /// Called on interact keypress (E) events. Picks the closer of the two
+    /// when both are in range.
     pub fn try_interact(&mut self, player_id: u32) {
         let Some(pi) = self.player_index(player_id) else {
             return;
         };
         let (px, py) = (self.players[pi].x, self.players[pi].y);
-        let r2 = Pickup::pickup_radius() * Pickup::pickup_radius();
-        let mut best: Option<(usize, f32)> = None;
+
+        let pickup_r2 = Pickup::pickup_radius() * Pickup::pickup_radius();
+        let mut best_pickup: Option<(usize, f32)> = None;
         for (i, pk) in self.pickups.iter().enumerate() {
             let dx = pk.x - px;
             let dy = pk.y - py;
             let d2 = dx * dx + dy * dy;
-            if d2 <= r2 && best.map_or(true, |(_, b)| d2 < b) {
-                best = Some((i, d2));
+            if d2 <= pickup_r2 && best_pickup.map_or(true, |(_, b)| d2 < b) {
+                best_pickup = Some((i, d2));
             }
         }
-        if let Some((idx, _)) = best {
-            let pickup = self.pickups.swap_remove(idx);
-            let weapon = pickup.into_weapon();
-            self.runtimes[pi].install_active(weapon);
+
+        let kiosk_r2 = VoteKiosk::interact_radius() * VoteKiosk::interact_radius();
+        let mut best_kiosk: Option<(usize, f32)> = None;
+        for (i, k) in self.kiosks.iter().enumerate() {
+            let dx = k.x - px;
+            let dy = k.y - py;
+            let d2 = dx * dx + dy * dy;
+            if d2 <= kiosk_r2 && best_kiosk.map_or(true, |(_, b)| d2 < b) {
+                best_kiosk = Some((i, d2));
+            }
+        }
+
+        match (best_pickup, best_kiosk) {
+            (Some((pi_idx, pd)), Some((_, kd))) if pd <= kd => {
+                self.consume_pickup(pi, pi_idx);
+            }
+            (Some((pi_idx, _)), None) => {
+                self.consume_pickup(pi, pi_idx);
+            }
+            (_, Some((ki_idx, _))) => {
+                self.register_vote(player_id, ki_idx);
+            }
+            _ => {}
+        }
+    }
+
+    fn consume_pickup(&mut self, pi: usize, pickup_idx: usize) {
+        let pickup = self.pickups.swap_remove(pickup_idx);
+        let weapon = pickup.into_weapon();
+        self.runtimes[pi].install_active(weapon);
+    }
+
+    fn register_vote(&mut self, player_id: u32, kiosk_idx: usize) {
+        // Remove the voter from any other kiosk first so a player's vote
+        // moves cleanly between kiosks instead of stacking.
+        for (i, k) in self.kiosks.iter_mut().enumerate() {
+            if i == kiosk_idx {
+                continue;
+            }
+            if k.voter_ids.remove(&player_id) {
+                k.votes = k.votes.saturating_sub(1);
+            }
+        }
+        let Some(k) = self.kiosks.get_mut(kiosk_idx) else { return };
+        if k.voter_ids.insert(player_id) {
+            k.votes += 1;
         }
     }
 
@@ -220,6 +319,287 @@ impl Game {
         let id = self.next_pickup_id;
         self.next_pickup_id += 1;
         self.pickups.push(Pickup::new(id, x, y, rarity, slots));
+    }
+
+    fn apply_wave_event(&mut self, event: WaveEvent) {
+        match event {
+            WaveEvent::EnterVote => self.spawn_vote_kiosks(),
+            WaveEvent::ExitVote => self.resolve_vote(),
+            WaveEvent::WaveStart(_) => {
+                self.add_corruption(2.0);
+            }
+        }
+    }
+
+    pub fn add_corruption(&mut self, amount: f32) {
+        self.corruption = (self.corruption + amount).max(self.peak_corruption);
+        self.peak_corruption = self.peak_corruption.max(self.corruption);
+    }
+
+    /// Every so often, plant a fresh Carcosa tile in a passable area past
+    /// the 25% threshold. More tiles spawn at higher corruption.
+    fn tick_carcosa(&mut self, dt: f32) {
+        if self.corruption < 25.0 {
+            return;
+        }
+        // Spawn rate scales with corruption: ~1 tile / 8s at 25%, 1/1.5s at 100%.
+        let rate = (self.corruption / 100.0).powf(1.2) * 0.65 + 0.12;
+        if self.kiosk_rng.r#gen::<f32>() > rate * dt {
+            return;
+        }
+        // Pick a random passable tile near a player so the corruption bites
+        // where the action is, not in some corner they'll never visit.
+        if self.players.is_empty() {
+            return;
+        }
+        let anchor = {
+            let pi = self.kiosk_rng.gen_range(0..self.players.len());
+            (self.players[pi].x, self.players[pi].y)
+        };
+        for _ in 0..12 {
+            let dx = self.kiosk_rng.gen_range(-18..=18);
+            let dy = self.kiosk_rng.gen_range(-12..=12);
+            let tx = (anchor.0 as i32 + dx).max(2);
+            let ty = (anchor.1 as i32 + dy).max(2);
+            if tx as u16 >= self.arena.width - 2 || ty as u16 >= self.arena.height - 2 {
+                continue;
+            }
+            if !self.arena.is_passable(tx, ty) {
+                continue;
+            }
+            if self.arena.is_carcosa(tx, ty) {
+                continue;
+            }
+            self.arena.set_carcosa(tx, ty);
+            self.tick_tile_updates.push((tx, ty, 3, 0));
+            return;
+        }
+    }
+
+    /// Sanity drain from Carcosa terrain + mark proximity + baseline regen.
+    fn tick_sanity(&mut self, dt: f32) {
+        let marked_id = self.marked_player_id;
+        for player in &mut self.players {
+            if player.hp <= 0 {
+                continue;
+            }
+            // Drain per tick.
+            let tx = player.x.floor() as i32;
+            let ty = player.y.floor() as i32;
+            let on_carcosa = self.arena.is_carcosa(tx, ty)
+                || self.arena.is_carcosa(tx, ty + 1);
+            if on_carcosa {
+                player.sanity -= 18.0 * dt;
+            }
+            if Some(player.id) == marked_id {
+                player.sanity -= 4.0 * dt;
+            }
+            // Very slow passive recovery so survivors who escape Carcosa
+            // feel the trickle coming back.
+            if !on_carcosa && Some(player.id) != marked_id {
+                player.sanity += 1.5 * dt;
+            }
+            player.sanity = player.sanity.clamp(0.0, 100.0);
+        }
+    }
+
+    fn tick_marks(&mut self, dt: f32) {
+        // No marks until Corruption 50%. At 100%+ marks rotate twice as fast.
+        if self.corruption < 50.0 || self.players.iter().all(|p| p.hp <= 0) {
+            self.marked_player_id = None;
+            self.mark_rotate_timer = 0.0;
+            return;
+        }
+        self.mark_rotate_timer -= dt;
+        if self.marked_player_id.is_none()
+            || !self.players.iter().any(|p| Some(p.id) == self.marked_player_id && p.hp > 0)
+            || self.mark_rotate_timer <= 0.0
+        {
+            // Pick a living player at random to mark.
+            let living: Vec<u32> =
+                self.players.iter().filter(|p| p.hp > 0).map(|p| p.id).collect();
+            if !living.is_empty() {
+                let idx = self.kiosk_rng.gen_range(0..living.len());
+                self.marked_player_id = Some(living[idx]);
+                let interval = if self.corruption >= 100.0 { 22.0 } else { 45.0 };
+                self.mark_rotate_timer = interval;
+            }
+        }
+    }
+
+    /// Return the damage scalar applied when an enemy hits this player.
+    /// Marked players take +25% damage.
+    pub fn damage_scalar_for(&self, player_id: u32) -> f32 {
+        if Some(player_id) == self.marked_player_id {
+            1.25
+        } else {
+            1.0
+        }
+    }
+
+    /// The Hastur Daemon. Schedules periodic Yellow Sign appearances once
+    /// Corruption reaches 25%. At higher corruption the Daemon fires more
+    /// often.
+    fn tick_daemon(&mut self, dt: f32) {
+        if self.corruption < 25.0 {
+            self.daemon_timer = 25.0;
+            return;
+        }
+        self.daemon_timer -= dt;
+        if self.daemon_timer > 0.0 {
+            return;
+        }
+        // Schedule next event — faster at higher corruption.
+        let base = 30.0 - (self.corruption / 100.0) * 18.0; // 30s → 12s
+        self.daemon_timer = base.max(10.0);
+
+        // Spawn a Yellow Sign near a random living player so the player has
+        // to react, not just notice from afar.
+        let anchor = self
+            .players
+            .iter()
+            .filter(|p| p.hp > 0)
+            .nth(self.kiosk_rng.gen_range(0..self.players.iter().filter(|p| p.hp > 0).count().max(1)))
+            .map(|p| (p.x, p.y))
+            .unwrap_or_else(|| (self.arena.width as f32 / 2.0, self.arena.height as f32 / 2.0));
+
+        // Offset into a visible-but-not-overlapping position.
+        let dx: f32 = (self.kiosk_rng.gen_range(-24..=24)) as f32;
+        let dy: f32 = (self.kiosk_rng.gen_range(-16..=16)) as f32;
+        let x = (anchor.0 + dx).clamp(6.0, self.arena.width as f32 - 6.0);
+        let y = (anchor.1 + dy).clamp(6.0, self.arena.height as f32 - 6.0);
+
+        let id = self.next_sign_id;
+        self.next_sign_id += 1;
+        self.yellow_signs.push(YellowSign::new(id, x, y));
+        // Notice events also give corruption a small nudge.
+        self.add_corruption(1.2);
+    }
+
+    fn tick_signs(&mut self, dt: f32) {
+        // Compute total sanity drain from all visible signs — drains every
+        // living player while any sign is up.
+        let mut drain_per_sec = 0.0f32;
+        for s in &self.yellow_signs {
+            drain_per_sec += s.sanity_drain_per_sec();
+        }
+        if drain_per_sec > 0.0 {
+            for player in &mut self.players {
+                if player.hp > 0 {
+                    player.sanity = (player.sanity - drain_per_sec * dt).clamp(0.0, 100.0);
+                }
+            }
+        }
+        self.yellow_signs.retain_mut(|s| s.tick(dt));
+    }
+
+    /// Client-only: roll phantom spawns near the local player when sanity
+    /// drops below the hallucination threshold. No-op on the host.
+    pub fn tick_phantoms(&mut self, dt: f32) {
+        self.phantoms.retain_mut(|p| p.tick(dt));
+
+        // Snapshot the local player's sanity/position so we can release the
+        // immutable borrow before rolling RNG.
+        let (px, py, sanity) = match self.local_player() {
+            Some(p) => (p.x, p.y, p.sanity),
+            None => return,
+        };
+        if sanity > 50.0 {
+            return;
+        }
+        let severity = 1.0 - (sanity / 50.0).clamp(0.0, 1.0);
+        let rate = severity * 0.6;
+        if self.kiosk_rng.r#gen::<f32>() > rate * dt {
+            return;
+        }
+
+        let dx = self.kiosk_rng.gen_range(-12..=12) as f32;
+        let dy = self.kiosk_rng.gen_range(-10..=10) as f32;
+        if dx.abs() < 4.0 && dy.abs() < 4.0 {
+            return;
+        }
+        let x = (px + dx).clamp(4.0, self.arena.width as f32 - 4.0);
+        let y = (py + dy).clamp(4.0, self.arena.height as f32 - 4.0);
+        let kind = self
+            .enemies
+            .first()
+            .map(|e| e.archetype.to_kind())
+            .unwrap_or(0);
+        self.phantoms.push(Phantom::new(x, y, kind));
+    }
+
+    /// Corruption tint for the framebuffer: colour + amount based on the
+    /// current level. Returns (color, amount) where amount is 0..0.5.
+    pub fn corruption_tint(&self) -> (Pixel, f32) {
+        // Amber-ochre drift; stronger with more corruption. Cap at 0.5 so
+        // pixels remain legible even at very high corruption.
+        let t = (self.corruption / 100.0).clamp(0.0, 1.2);
+        let amount = (t * 0.45).min(0.5);
+        (Pixel::rgb(255, 180, 60), amount)
+    }
+
+    fn spawn_vote_kiosks(&mut self) {
+        self.kiosks.clear();
+        // Eligible brands: anything in content that isn't already active.
+        let mut eligible: Vec<String> = self
+            .content
+            .brands
+            .keys()
+            .filter(|id| !self.active_brands.contains(id))
+            .cloned()
+            .collect();
+        if eligible.is_empty() {
+            return;
+        }
+        // Shuffle and take up to 3.
+        for i in (1..eligible.len()).rev() {
+            let j = self.kiosk_rng.gen_range(0..=i);
+            eligible.swap(i, j);
+        }
+        eligible.truncate(3);
+
+        // Spread kiosk positions around the arena center.
+        let cx = self.arena.width as f32 / 2.0;
+        let cy = self.arena.height as f32 / 2.0;
+        let radius = (self.arena.width.min(self.arena.height) as f32) * 0.28;
+        let count = eligible.len();
+        for (i, brand_id) in eligible.iter().enumerate() {
+            let angle = (i as f32 / count as f32) * std::f32::consts::TAU;
+            let mut x = cx + angle.cos() * radius;
+            let mut y = cy + angle.sin() * radius;
+            // Nudge out of walls toward center.
+            for _ in 0..8 {
+                if !self.arena.is_wall(x.floor() as i32, y.floor() as i32) {
+                    break;
+                }
+                x = cx + (x - cx) * 0.8;
+                y = cy + (y - cy) * 0.8;
+            }
+            let (name, color) = match self.content.brand(brand_id) {
+                Some(b) => (b.name.clone(), brand_color(&b.id)),
+                None => (brand_id.clone(), Pixel::rgb(255, 255, 255)),
+            };
+            let id = self.next_kiosk_id;
+            self.next_kiosk_id += 1;
+            self.kiosks
+                .push(VoteKiosk::new(id, x, y, brand_id.clone(), name, color));
+        }
+    }
+
+    fn resolve_vote(&mut self) {
+        let winner = self
+            .kiosks
+            .iter()
+            .max_by_key(|k| k.votes)
+            .map(|k| (k.brand_id.clone(), k.votes));
+        if let Some((brand_id, votes)) = winner {
+            // Only add the brand if someone actually voted — otherwise the
+            // stack stays as-is (the team abstained).
+            if votes > 0 && !self.active_brands.contains(&brand_id) {
+                self.active_brands.push(brand_id);
+            }
+        }
+        self.kiosks.clear();
     }
 
     fn roll_primitive(&mut self) -> Primitive {
@@ -258,6 +638,13 @@ impl Game {
         self.tick_tile_updates.clear();
         self.tick_blasts.clear();
         self.elapsed_secs += dt;
+        // Passive corruption tick; drivers below add more per event.
+        self.add_corruption(dt * 0.15);
+        self.tick_carcosa(dt);
+        self.tick_sanity(dt);
+        self.tick_marks(dt);
+        self.tick_daemon(dt);
+        self.tick_signs(dt);
 
         for (player, runtime) in self.players.iter_mut().zip(self.runtimes.iter_mut()) {
             player.apply_remote_input(
@@ -298,24 +685,58 @@ impl Game {
         // Tick pickups (TTL expiry).
         self.pickups.retain_mut(|p| p.tick(dt));
 
-        self.director.tick(&self.arena, &mut self.enemies, &self.content, dt);
+        let mut events: Vec<WaveEvent> = Vec::new();
+        self.director.tick(
+            &self.arena,
+            &mut self.enemies,
+            &self.content,
+            &self.active_brands,
+            &mut events,
+            dt,
+        );
+        for kiosk in &mut self.kiosks {
+            kiosk.tick(dt);
+        }
+        for event in events {
+            self.apply_wave_event(event);
+        }
 
         // Step enemies + touch damage + ranged fire + status ticks.
+        // Marked players (Hastur gaze) override target selection so AI
+        // flocks toward them; all enemies prioritize the marked survivor if
+        // they have one.
+        let marked_pos = self.marked_player_id.and_then(|id| {
+            self.players.iter().find(|p| p.id == id).map(|p| (p.id, p.x, p.y))
+        });
         let positions: Vec<(u32, f32, f32)> =
             self.players.iter().map(|p| (p.id, p.x, p.y)).collect();
         let mut enemy_status_kills: Vec<usize> = Vec::new();
         let mut ranged_shots: Vec<(u32, crate::enemy::RangedShot)> = Vec::new();
         for (i, e) in self.enemies.iter_mut().enumerate() {
-            let nearest = positions.iter().min_by(|a, b| {
-                let da = (a.1 - e.x).powi(2) + (a.2 - e.y).powi(2);
-                let db = (b.1 - e.x).powi(2) + (b.2 - e.y).powi(2);
-                da.partial_cmp(&db).unwrap()
+            // Target: marked player if it exists, else nearest living player.
+            let target = marked_pos.or_else(|| {
+                positions
+                    .iter()
+                    .min_by(|a, b| {
+                        let da = (a.1 - e.x).powi(2) + (a.2 - e.y).powi(2);
+                        let db = (b.1 - e.x).powi(2) + (b.2 - e.y).powi(2);
+                        da.partial_cmp(&db).unwrap()
+                    })
+                    .copied()
             });
-            if let Some(&(pid, tx, ty)) = nearest {
+            if let Some((pid, tx, ty)) = target {
                 e.update((tx, ty), &self.arena, dt);
+                // Apply touch damage to the nearest player (not the marked
+                // one specifically — attacks trigger on contact).
                 for player in &mut self.players {
-                    let dmg = e.touch_player(player.x, player.y);
-                    if dmg > 0 {
+                    let base = e.touch_player(player.x, player.y);
+                    if base > 0 {
+                        let scale = if Some(player.id) == marked_pos.map(|(id, _, _)| id) {
+                            1.25
+                        } else {
+                            1.0
+                        };
+                        let dmg = ((base as f32) * scale).round() as i32;
                         player.hp -= dmg;
                         if player.hp < 0 {
                             player.hp = 0;
@@ -338,8 +759,10 @@ impl Game {
         // haven't stepped out of the line, and record a visible tracer.
         for (pid, shot) in ranged_shots {
             if let Some(idx) = self.player_index(pid) {
+                let scale = self.damage_scalar_for(pid);
+                let dmg = ((shot.damage as f32) * scale).round() as i32;
                 let p = &mut self.players[idx];
-                p.hp -= shot.damage;
+                p.hp -= dmg;
                 if p.hp < 0 {
                     p.hp = 0;
                 }
@@ -460,6 +883,7 @@ impl Game {
                 kills_this_tick.push((*idx, *owner_id));
                 if is_miniboss {
                     self.drop_miniboss_loot(pos.0, pos.1);
+                    self.add_corruption(5.0);
                 }
             }
         }
@@ -485,6 +909,9 @@ impl Game {
                     }
                 }
             }
+            // Small Corruption bump per kill; miniboss handled below via
+            // the earlier is_miniboss path.
+            self.add_corruption(0.2);
             self.enemies.swap_remove(idx);
             self.kills += 1;
         }
@@ -497,6 +924,9 @@ impl Game {
 
         if !self.players.is_empty() && self.players.iter().all(|p| p.hp <= 0) {
             self.alive = false;
+            // Death corruption spike; each downed player contributes.
+            let down_count = self.players.iter().filter(|p| p.hp <= 0).count() as f32;
+            self.add_corruption(7.0 * down_count);
         }
     }
 
@@ -587,6 +1017,7 @@ impl Game {
             h.ttl -= dt;
             h.ttl > 0.0
         });
+        self.tick_phantoms(dt);
     }
 
     fn next_seed(&mut self, tile: (i32, i32)) -> u64 {
@@ -637,6 +1068,7 @@ impl Game {
             Tile::Floor => (0u8, 0u8),
             Tile::Wall { hp, .. } => (1u8, hp),
             Tile::Rubble { .. } => (2u8, 0u8),
+            Tile::Carcosa => (3u8, 0u8),
         };
         self.tick_tile_updates.push((tile.0, tile.1, kind, hp));
     }
@@ -645,7 +1077,8 @@ impl Game {
         match kind {
             0 => self.arena.set_floor(x, y),
             1 => self.arena.set_wall(x, y, Material::Concrete, hp.max(1)),
-            _ => self.arena.set_rubble(x, y, Material::Concrete),
+            2 => self.arena.set_rubble(x, y, Material::Concrete),
+            _ => self.arena.set_carcosa(x, y),
         }
     }
 
@@ -658,8 +1091,17 @@ impl Game {
         for pk in &self.pickups {
             pk.render(fb, ox, oy);
         }
+        for kiosk in &self.kiosks {
+            kiosk.render(fb, ox, oy);
+        }
         for h in &self.hitscans {
             render_tracer(fb, ox, oy, h);
+        }
+        for sign in &self.yellow_signs {
+            sign.render(fb, ox, oy);
+        }
+        for phantom in &self.phantoms {
+            phantom.render(fb, ox, oy);
         }
         for e in &self.enemies {
             e.render(fb, ox, oy);
@@ -669,7 +1111,8 @@ impl Game {
         }
         for pl in &self.players {
             let is_self = Some(pl.id) == self.local_id;
-            pl.render(fb, ox, oy, is_self);
+            let marked = Some(pl.id) == self.marked_player_id;
+            pl.render(fb, ox, oy, is_self, marked);
         }
         self.render_crosshair(fb);
     }
@@ -714,6 +1157,17 @@ impl Game {
             fb.set(px - 1, py, color);
         }
         fb.set(px + 1, py, color);
+    }
+}
+
+/// Brand-ID → signature halo color for kiosks and UI. Kept in sync with the
+/// archetype palette so each brand reads distinctly on the arena floor.
+fn brand_color(id: &str) -> Pixel {
+    match id {
+        "fps_arena" => Pixel::rgb(255, 130, 60),
+        "tactical" => Pixel::rgb(150, 170, 100),
+        "chaos_roguelike" => Pixel::rgb(220, 140, 255),
+        _ => Pixel::rgb(255, 255, 255),
     }
 }
 

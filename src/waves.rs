@@ -1,29 +1,84 @@
+//! Wave scheduler + intermission state machine.
+//!
+//! The director drives four states per wave:
+//! - `Spawning`: budget-driven spawns; archetype picks come from the
+//!   currently-active brand stack weighted pool.
+//! - `Clearing`: wait for the team to finish the wave.
+//! - `Intermission(phase)`: 4-phase window (Breathe / Vote / Stock /
+//!   Warning). During Vote, the game layer spawns brand-bleed kiosks;
+//!   during Stock, the team reads their HUD and repositions.
+//!
+//! Brand bleed-through is additive: voting a new brand in appends it to
+//! the active stack. Each stacked brand contributes its spawn weights to
+//! the pool the director samples from.
+
 use crate::arena::Arena;
-use crate::content::ContentDb;
+use crate::content::{BrandDef, ContentDb};
 use crate::enemy::{Archetype, Enemy};
 use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
+const WAVE_BUDGET_BASE: u32 = 6;
+const WAVE_BUDGET_RAMP: u32 = 2;
+const PER_EXTRA_BRAND_BONUS: u32 = 2;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IntermissionPhase {
+    Breathe,
+    Vote,
+    Stock,
+    Warning,
+}
+
+impl IntermissionPhase {
+    pub fn duration(self) -> f32 {
+        match self {
+            Self::Breathe => 5.0,
+            Self::Vote => 12.0,
+            Self::Stock => 8.0,
+            Self::Warning => 5.0,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Breathe => "BREATHE",
+            Self::Vote => "VOTE",
+            Self::Stock => "STOCK",
+            Self::Warning => "WARNING",
+        }
+    }
+    pub fn next(self) -> Option<IntermissionPhase> {
+        match self {
+            Self::Breathe => Some(Self::Vote),
+            Self::Vote => Some(Self::Stock),
+            Self::Stock => Some(Self::Warning),
+            Self::Warning => None,
+        }
+    }
+}
+
 pub enum WaveState {
-    /// Still spawning enemies into the arena.
     Spawning,
-    /// All enemies for the wave are spawned; waiting for the team to clean up.
     Clearing,
-    /// Brief pause between waves.
-    Intermission,
+    Intermission(IntermissionPhase),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum WaveEvent {
+    EnterVote,
+    ExitVote,
+    WaveStart(u32),
 }
 
 pub struct WaveDirector {
     pub wave: u32,
     pub state: WaveState,
-    pub rusher_budget: u32,
-    pub pinkie_budget: u32,
-    pub charger_budget: u32,
-    pub revenant_budget: u32,
+    pub wave_budget: u32,
     pub spawn_timer: f32,
-    pub intermission_timer: f32,
+    pub phase_timer: f32,
     pub banner_ttl: f32,
+    weighted_pool: Vec<(Archetype, u32)>,
     rng: SmallRng,
 }
 
@@ -31,20 +86,27 @@ impl WaveDirector {
     pub fn new(seed: u64) -> Self {
         Self {
             wave: 0,
-            state: WaveState::Intermission,
-            rusher_budget: 0,
-            pinkie_budget: 0,
-            charger_budget: 0,
-            revenant_budget: 0,
+            // Start in Breathe (skip straight into a vote on the very first
+            // intermission so brand choice happens up-front too).
+            state: WaveState::Intermission(IntermissionPhase::Breathe),
+            wave_budget: 0,
             spawn_timer: 0.0,
-            intermission_timer: 2.5,
+            phase_timer: IntermissionPhase::Breathe.duration(),
             banner_ttl: 0.0,
+            weighted_pool: Vec::new(),
             rng: SmallRng::seed_from_u64(seed),
         }
     }
 
-    pub fn total_budget(&self) -> u32 {
-        self.rusher_budget + self.pinkie_budget + self.charger_budget + self.revenant_budget
+    pub fn current_phase(&self) -> Option<IntermissionPhase> {
+        match self.state {
+            WaveState::Intermission(p) => Some(p),
+            _ => None,
+        }
+    }
+
+    pub fn is_active(&self) -> bool {
+        matches!(self.state, WaveState::Spawning | WaveState::Clearing)
     }
 
     pub fn tick(
@@ -52,107 +114,153 @@ impl WaveDirector {
         arena: &Arena,
         enemies: &mut Vec<Enemy>,
         content: &ContentDb,
+        active_brands: &[String],
+        events: &mut Vec<WaveEvent>,
         dt: f32,
     ) {
         self.banner_ttl = (self.banner_ttl - dt).max(0.0);
+
         match self.state {
             WaveState::Spawning => {
                 self.spawn_timer -= dt;
-                while self.total_budget() > 0 && self.spawn_timer <= 0.0 {
+                while self.wave_budget > 0 && self.spawn_timer <= 0.0 {
                     let archetype = self.next_archetype();
                     if let Some((sx, sy)) = pick_spawn(&mut self.rng, arena) {
                         let stats = content.stats(archetype);
                         enemies.push(Enemy::spawn(archetype, stats, sx, sy));
                     }
+                    self.wave_budget -= 1;
                     self.spawn_timer += 0.55;
                 }
-                if self.total_budget() == 0 {
+                if self.wave_budget == 0 {
                     self.state = WaveState::Clearing;
                 }
             }
             WaveState::Clearing => {
                 if enemies.is_empty() {
-                    self.intermission_timer = 3.0;
-                    self.state = WaveState::Intermission;
+                    self.state = WaveState::Intermission(IntermissionPhase::Breathe);
+                    self.phase_timer = IntermissionPhase::Breathe.duration();
                 }
             }
-            WaveState::Intermission => {
-                self.intermission_timer -= dt;
-                if self.intermission_timer <= 0.0 {
-                    self.wave += 1;
-                    self.plan_wave(arena, enemies, content);
-                    self.spawn_timer = 0.0;
-                    self.banner_ttl = 2.5;
-                    self.state = WaveState::Spawning;
+            WaveState::Intermission(phase) => {
+                self.phase_timer -= dt;
+                if self.phase_timer <= 0.0 {
+                    // Emit transition event BEFORE the phase actually swaps.
+                    if phase == IntermissionPhase::Vote {
+                        events.push(WaveEvent::ExitVote);
+                    }
+                    match phase.next() {
+                        Some(next_phase) => {
+                            self.state = WaveState::Intermission(next_phase);
+                            self.phase_timer = next_phase.duration();
+                            if next_phase == IntermissionPhase::Vote {
+                                events.push(WaveEvent::EnterVote);
+                            }
+                        }
+                        None => {
+                            // End of intermission → start the next wave.
+                            self.wave += 1;
+                            self.banner_ttl = 2.5;
+                            self.plan_wave(arena, enemies, content, active_brands);
+                            events.push(WaveEvent::WaveStart(self.wave));
+                            self.state = WaveState::Spawning;
+                        }
+                    }
                 }
             }
         }
     }
 
-    fn plan_wave(&mut self, arena: &Arena, enemies: &mut Vec<Enemy>, content: &ContentDb) {
-        let w = self.wave;
-        let brand = content.active_brand();
-        let s = &brand.scaling;
-
-        if w % 5 == 0 && w > 0 {
-            if let Some((sx, sy)) = pick_spawn(&mut self.rng, arena) {
-                let stats = content.stats(Archetype::Miniboss);
-                enemies.push(Enemy::spawn(Archetype::Miniboss, stats, sx, sy));
+    fn plan_wave(
+        &mut self,
+        arena: &Arena,
+        enemies: &mut Vec<Enemy>,
+        content: &ContentDb,
+        active_brands: &[String],
+    ) {
+        // Miniboss every 5 waves — pick from the FIRST active brand's
+        // miniboss entry so the brand that opened the run sets the boss
+        // flavor at each checkpoint.
+        if self.wave % 5 == 0 && self.wave > 0 {
+            if let Some(boss) = first_miniboss(content, active_brands) {
+                if let Some((sx, sy)) = pick_spawn(&mut self.rng, arena) {
+                    let stats = content.stats(boss);
+                    enemies.push(Enemy::spawn(boss, stats, sx, sy));
+                }
             }
         }
 
-        self.rusher_budget = s.base_rushers + w * s.rushers_per_wave;
-        self.pinkie_budget = if w >= s.pinkie_start_wave {
-            s.pinkie_base + (w - s.pinkie_start_wave) / s.pinkie_scale_denom.max(1)
-        } else {
-            0
-        };
-        self.charger_budget = if w >= s.charger_start_wave {
-            s.charger_base + (w - s.charger_start_wave) / s.charger_scale_denom.max(1)
-        } else {
-            0
-        };
-        self.revenant_budget = if w >= s.revenant_start_wave {
-            s.revenant_base + (w - s.revenant_start_wave) / s.revenant_scale_denom.max(1)
-        } else {
-            0
-        };
+        // Combined weighted pool from every active brand.
+        self.weighted_pool = merge_weights(content, active_brands);
+
+        let brand_bonus =
+            (active_brands.len().saturating_sub(1) as u32) * PER_EXTRA_BRAND_BONUS;
+        self.wave_budget = WAVE_BUDGET_BASE + self.wave * WAVE_BUDGET_RAMP + brand_bonus;
+        self.spawn_timer = 0.0;
     }
 
     fn next_archetype(&mut self) -> Archetype {
-        // Build a weighted pool of currently-available archetypes so
-        // rushers don't always spawn first and ranged units don't cluster.
-        let mut pool: Vec<Archetype> = Vec::new();
-        if self.revenant_budget > 0 {
-            pool.push(Archetype::Revenant);
+        if self.weighted_pool.is_empty() {
+            return Archetype::Rusher;
         }
-        if self.charger_budget > 0 {
-            pool.extend(std::iter::repeat(Archetype::Charger).take(2));
+        let total: u32 = self.weighted_pool.iter().map(|(_, w)| *w).sum();
+        if total == 0 {
+            return self.weighted_pool[0].0;
         }
-        if self.pinkie_budget > 0 {
-            pool.extend(std::iter::repeat(Archetype::Pinkie).take(2));
+        let pick = self.rng.gen_range(0..total);
+        let mut acc = 0u32;
+        for (arch, w) in &self.weighted_pool {
+            acc += *w;
+            if pick < acc {
+                return *arch;
+            }
         }
-        if self.rusher_budget > 0 {
-            pool.extend(std::iter::repeat(Archetype::Rusher).take(4));
+        self.weighted_pool[0].0
+    }
+}
+
+fn merge_weights(content: &ContentDb, active_brands: &[String]) -> Vec<(Archetype, u32)> {
+    use std::collections::HashMap;
+    let mut combined: HashMap<Archetype, u32> = HashMap::new();
+    for id in active_brands {
+        let Some(brand) = content.brand(id) else {
+            continue;
+        };
+        for arch_name in &brand.spawn_pool {
+            let Ok(arch) = archetype_from_name(arch_name) else {
+                continue;
+            };
+            let weight = brand.spawn_weights.get(arch_name).copied().unwrap_or(1);
+            *combined.entry(arch).or_insert(0) += weight;
         }
-        let pick = pool.get(self.rng.gen_range(0..pool.len().max(1))).copied()
-            .unwrap_or(Archetype::Rusher);
-        match pick {
-            Archetype::Rusher => self.rusher_budget = self.rusher_budget.saturating_sub(1),
-            Archetype::Pinkie => self.pinkie_budget = self.pinkie_budget.saturating_sub(1),
-            Archetype::Charger => self.charger_budget = self.charger_budget.saturating_sub(1),
-            Archetype::Revenant => self.revenant_budget = self.revenant_budget.saturating_sub(1),
-            Archetype::Miniboss => {}
-        }
-        pick
+    }
+    combined.into_iter().collect()
+}
+
+fn first_miniboss(content: &ContentDb, active_brands: &[String]) -> Option<Archetype> {
+    let brand_id = active_brands.first()?;
+    let brand: &BrandDef = content.brand(brand_id)?;
+    archetype_from_name(&brand.miniboss).ok()
+}
+
+fn archetype_from_name(name: &str) -> Result<Archetype, ()> {
+    match name {
+        "rusher" => Ok(Archetype::Rusher),
+        "pinkie" => Ok(Archetype::Pinkie),
+        "charger" => Ok(Archetype::Charger),
+        "revenant" => Ok(Archetype::Revenant),
+        "marksman" => Ok(Archetype::Marksman),
+        "pmc" => Ok(Archetype::Pmc),
+        "swarmling" => Ok(Archetype::Swarmling),
+        "orb" => Ok(Archetype::Orb),
+        "miniboss" => Ok(Archetype::Miniboss),
+        _ => Err(()),
     }
 }
 
 fn pick_spawn(rng: &mut SmallRng, arena: &Arena) -> Option<(f32, f32)> {
     let w = arena.width as i32;
     let h = arena.height as i32;
-    // Past the 3-pixel perimeter plus a couple pixels of breathing room so
-    // enemies don't spawn with their sprites clipping through the wall.
     let margin = 6;
     if w < margin * 3 || h < margin * 3 {
         return None;

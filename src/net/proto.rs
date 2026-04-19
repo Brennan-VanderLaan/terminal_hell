@@ -42,6 +42,10 @@ pub struct Welcome {
     pub arena_w: u16,
     pub arena_h: u16,
     pub arena_tiles: Vec<u8>,
+    /// Seed used to generate this arena. Clients can regenerate locally if
+    /// they prefer, though sending the encoded tile state keeps things
+    /// robust to generator-version drift across builds.
+    pub arena_seed: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
@@ -68,6 +72,34 @@ pub struct Snapshot {
     pub weapons: Vec<WeaponSnap>,
     /// Active enemy hitscan tracers; clients render these until ttl expires.
     pub hitscans: Vec<HitscanSnap>,
+    pub kiosks: Vec<KioskSnap>,
+    pub active_brands: Vec<String>,
+    /// 0=Breathe, 1=Vote, 2=Stock, 3=Warning, u8::MAX=no intermission.
+    pub intermission_phase: u8,
+    pub phase_timer: f32,
+    pub corruption: f32,
+    pub marked_player_id: u32, // 0 == no mark
+    pub yellow_signs: Vec<SignSnap>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SignSnap {
+    pub id: u32,
+    pub x: f32,
+    pub y: f32,
+    pub ttl: f32,
+    pub ttl_max: f32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct KioskSnap {
+    pub id: u32,
+    pub x: f32,
+    pub y: f32,
+    pub brand_id: String,
+    pub brand_name: String,
+    pub color: [u8; 3],
+    pub votes: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -110,6 +142,7 @@ pub struct PlayerSnap {
     pub hp: i32,
     pub aim_x: f32,
     pub aim_y: f32,
+    pub sanity: f32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

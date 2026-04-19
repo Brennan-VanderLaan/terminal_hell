@@ -3,6 +3,9 @@
 //! which color to paint the glyph-confetti with.
 
 use crate::fb::{Framebuffer, Pixel};
+use rand::Rng;
+use rand::SeedableRng;
+use rand::rngs::SmallRng;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Material {
@@ -28,6 +31,9 @@ pub enum Tile {
     Floor,
     Wall { hp: u8, material: Material },
     Rubble { material: Material },
+    /// Carcosa-terrain tile. Drains sanity from players standing on it;
+    /// renders yellow-ochre. Non-destructible in v0.3.
+    Carcosa,
 }
 
 pub struct HitOutcome {
@@ -49,6 +55,83 @@ impl Arena {
         Self { width, height, tiles: vec![Tile::Floor; n] }
     }
 
+    /// Seed-driven procedural arena. Deterministic given `(seed, width,
+    /// height)`. Layout: thick perimeter, an open central disc for player
+    /// spawn + kiosk placement, and 14–22 cover blobs scattered in the
+    /// surrounding annulus. Each blob rolls a random aspect ratio so the
+    /// arena doesn't feel tiled.
+    pub fn generate(seed: u64, width: u16, height: u16) -> Self {
+        let mut a = Self::new_empty(width, height);
+        let w = width as i32;
+        let h = height as i32;
+        let mut rng = SmallRng::seed_from_u64(seed);
+
+        // Thick perimeter.
+        for t in 0..3 {
+            for x in 0..w {
+                a.set_wall(x, t, Material::Concrete, WALL_HP * 3);
+                a.set_wall(x, h - 1 - t, Material::Concrete, WALL_HP * 3);
+            }
+            for y in 0..h {
+                a.set_wall(t, y, Material::Concrete, WALL_HP * 3);
+                a.set_wall(w - 1 - t, y, Material::Concrete, WALL_HP * 3);
+            }
+        }
+
+        let cx = w / 2;
+        let cy = h / 2;
+        // Keep a central disc open for spawns, kiosks, and initial movement.
+        let core_radius = (w.min(h * 2) / 6).max(10);
+        let core_r2 = core_radius * core_radius;
+
+        // Scatter cover blobs.
+        let blob_count = rng.gen_range(14..=22);
+        let margin = 5;
+        for _ in 0..blob_count {
+            let bw = rng.gen_range(3..=10) as i32;
+            let bh = rng.gen_range(2..=6) as i32;
+            let x = rng.gen_range(margin..w - margin - bw);
+            let y = rng.gen_range(margin..h - margin - bh);
+            // Skip blobs overlapping the central disc.
+            let dx = x + bw / 2 - cx;
+            let dy = y + bh / 2 - cy;
+            if dx * dx + dy * dy < core_r2 {
+                continue;
+            }
+            place_block(&mut a, x, y, bw, bh);
+        }
+
+        // A handful of long sightline-breakers.
+        for _ in 0..rng.gen_range(3..=6) {
+            let horizontal = rng.gen_bool(0.5);
+            if horizontal {
+                let len = rng.gen_range(8..=(w / 3).max(10)) as i32;
+                let x = rng.gen_range(margin..w - margin - len);
+                let y = rng.gen_range(margin..h - margin - 2);
+                let dx = x + len / 2 - cx;
+                let dy = y - cy;
+                if dx * dx + dy * dy < core_r2 {
+                    continue;
+                }
+                place_block(&mut a, x, y, len, 2);
+            } else {
+                let len = rng.gen_range(6..=(h / 3).max(8)) as i32;
+                let x = rng.gen_range(margin..w - margin - 2);
+                let y = rng.gen_range(margin..h - margin - len);
+                let dx = x - cx;
+                let dy = y + len / 2 - cy;
+                if dx * dx + dy * dy < core_r2 {
+                    continue;
+                }
+                place_block(&mut a, x, y, 2, len);
+            }
+        }
+
+        a
+    }
+
+    /// Backwards-compat hand-crafted layout used before the generator. Kept
+    /// for tests; live code should prefer `generate`.
     pub fn hand_crafted(width: u16, height: u16) -> Self {
         let mut a = Self::new_empty(width, height);
         let w = width as i32;
@@ -104,7 +187,17 @@ impl Arena {
     }
 
     pub fn is_passable(&self, x: i32, y: i32) -> bool {
-        matches!(self.tile(x, y), Tile::Floor | Tile::Rubble { .. })
+        matches!(self.tile(x, y), Tile::Floor | Tile::Rubble { .. } | Tile::Carcosa)
+    }
+
+    pub fn is_carcosa(&self, x: i32, y: i32) -> bool {
+        matches!(self.tile(x, y), Tile::Carcosa)
+    }
+
+    pub fn set_carcosa(&mut self, x: i32, y: i32) {
+        if let Some(i) = self.idx(x, y) {
+            self.tiles[i] = Tile::Carcosa;
+        }
     }
 
     pub fn set_wall(&mut self, x: i32, y: i32, material: Material, hp: u8) {
@@ -127,7 +220,7 @@ impl Arena {
 
     /// Raw tile iteration for initial-snapshot serialization.
     pub fn encode_tiles(&self) -> Vec<u8> {
-        // 2 bytes per tile: (kind, hp).  kind: 0=Floor, 1=Wall, 2=Rubble.
+        // 2 bytes per tile: (kind, hp). kind: 0=Floor, 1=Wall, 2=Rubble, 3=Carcosa.
         let mut out = Vec::with_capacity(self.tiles.len() * 2);
         for t in &self.tiles {
             match *t {
@@ -141,6 +234,10 @@ impl Arena {
                 }
                 Tile::Rubble { .. } => {
                     out.push(2);
+                    out.push(0);
+                }
+                Tile::Carcosa => {
+                    out.push(3);
                     out.push(0);
                 }
             }
@@ -160,7 +257,8 @@ impl Arena {
             tiles.push(match kind {
                 0 => Tile::Floor,
                 1 => Tile::Wall { hp, material: Material::Concrete },
-                _ => Tile::Rubble { material: Material::Concrete },
+                2 => Tile::Rubble { material: Material::Concrete },
+                _ => Tile::Carcosa,
             });
         }
         Some(Self { width, height, tiles })
@@ -211,6 +309,17 @@ impl Arena {
                     }
                     Tile::Rubble { material } => {
                         fb.set(px as u16, py as u16, material.debris_color());
+                    }
+                    Tile::Carcosa => {
+                        // Yellow-ochre Carcosa tile; subtle two-color pattern
+                        // so cells read as "wrong" without being blinding.
+                        let pattern = ((x ^ y) & 1) == 0;
+                        let color = if pattern {
+                            Pixel::rgb(180, 140, 20)
+                        } else {
+                            Pixel::rgb(110, 80, 10)
+                        };
+                        fb.set(px as u16, py as u16, color);
                     }
                 }
             }

@@ -12,11 +12,24 @@ pub struct Player {
     pub aim_x: f32,
     pub aim_y: f32,
     pub firing: bool,
+    /// 0..100. Drains from Carcosa exposure, Hastur marks, and Sign flashes.
+    /// Regens from kills in good form (for now, any kill nudges).
+    pub sanity: f32,
 }
 
 impl Player {
     pub fn new(id: u32, x: f32, y: f32) -> Self {
-        Self { id, x, y, hp: 100, speed: 38.0, aim_x: 1.0, aim_y: 0.0, firing: false }
+        Self {
+            id,
+            x,
+            y,
+            hp: 100,
+            speed: 38.0,
+            aim_x: 1.0,
+            aim_y: 0.0,
+            firing: false,
+            sanity: 100.0,
+        }
     }
 
     pub fn apply_input_local(&mut self, input: &Input, arena: &Arena, dt: f32) {
@@ -53,11 +66,14 @@ impl Player {
         }
     }
 
-    pub fn render(&self, fb: &mut Framebuffer, ox: i32, oy: i32, _is_self: bool) {
+    pub fn render(&self, fb: &mut Framebuffer, ox: i32, oy: i32, _is_self: bool, marked: bool) {
         let cx = ox + self.x.round() as i32;
         let cy = oy + self.y.round() as i32;
         sprite::player_body().blit(fb, cx, cy);
         sprite::render_player_barrel(fb, cx as f32, cy as f32, self.aim_x, self.aim_y);
+        if marked {
+            sprite::render_hastur_mark(fb, cx, cy);
+        }
     }
 }
 
