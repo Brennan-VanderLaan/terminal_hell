@@ -5,7 +5,9 @@ use std::time::{Duration, Instant};
 
 pub mod arena;
 pub mod art;
+pub mod audio;
 pub mod behavior;
+pub mod bench;
 pub mod body_effect;
 pub mod camera;
 pub mod carcosa;
@@ -34,6 +36,7 @@ pub mod player;
 pub mod primitive;
 pub mod projectile;
 pub mod share;
+pub mod spatial;
 pub mod sprite;
 pub mod stun;
 pub mod substance;
@@ -85,6 +88,7 @@ pub fn run_solo() -> Result<()> {
     let local_id = game.add_player();
     game.local_id = Some(local_id);
     let mut input = Input::default();
+    let mut audio_overlay = audio::AudioOverlay::default();
 
     let mut tick_accum = Duration::ZERO;
     let mut last_instant = Instant::now();
@@ -122,6 +126,18 @@ pub fn run_solo() -> Result<()> {
                     if let KeyCode::F(3) = k.code {
                         if press && !matches!(k.kind, KeyEventKind::Repeat) {
                             game.perf_overlay.toggle();
+                        }
+                        continue;
+                    }
+                    if let KeyCode::F(4) = k.code {
+                        if press && !matches!(k.kind, KeyEventKind::Repeat) {
+                            game.debug_spatial_grid = !game.debug_spatial_grid;
+                        }
+                        continue;
+                    }
+                    if let KeyCode::F(5) = k.code {
+                        if press && !matches!(k.kind, KeyEventKind::Repeat) {
+                            audio_overlay.toggle();
                         }
                         continue;
                     }
@@ -295,6 +311,7 @@ pub fn run_solo() -> Result<()> {
         }
         // Console renders below the menu so the menu stays modal on top.
         game.perf_overlay.render(&mut stdout, tc_z, tr_z, &game.perf)?;
+        audio_overlay.render(&mut stdout, tc_z, tr_z)?;
         if game.inventory_open {
             if let Some(p) = game.local_player() {
                 let loadout = game.local_loadout();
@@ -314,19 +331,47 @@ pub fn run_solo() -> Result<()> {
         hud::draw_clear_countdown(&mut stdout, tc, game.director.clear_timer)?;
         hud::draw_pickup_labels(&mut stdout, &game)?;
         hud::draw_pickup_toasts(&mut stdout, tc, &game.toasts)?;
+        // Single flush after every HUD overlay has queued its bytes
+        // — one flush per frame keeps the terminal from repainting
+        // mid-pass, which is the source of the flicker we saw when
+        // every draw_* function flushed independently.
+        use std::io::Write as _;
+        stdout.flush()?;
 
-        if !game.alive {
-            let (cols, rows) = crossterm::terminal::size()?;
-            hud::draw_gameover(
-                &mut stdout,
-                cols,
-                rows,
-                game.director.wave,
-                game.kills,
-                game.elapsed_secs as u64,
-            )?;
-            net::client::wait_for_any_key()?;
-            return Ok(());
+        // Death cinematic — render the report overlay during any
+        // DeathPhase. The inner state machine runs through Dying →
+        // Praise → Goldening → Report; we only render the report
+        // panel during Goldening + Report so the first two phases
+        // still show the in-world action (bodies + gore + frozen
+        // horde) uncovered.
+        if let Some(phase) = &game.death_phase {
+            let show_panel = matches!(
+                phase,
+                game::DeathPhase::Goldening { .. } | game::DeathPhase::Report { .. }
+            );
+            if show_panel {
+                let (cols, rows) = crossterm::terminal::size()?;
+                hud::draw_death_report(&mut stdout, cols, rows, &game)?;
+            }
+            // Accept a dismiss keypress once the Report phase has
+            // had a moment to settle — this is the gate that stops
+            // buffered WASD from skipping the cinematic.
+            if game.death_report_accepts_input() {
+                while event::poll(Duration::ZERO)? {
+                    if let Event::Key(k) = event::read()? {
+                        if matches!(k.kind, KeyEventKind::Press) {
+                            return Ok(());
+                        }
+                    }
+                }
+            } else {
+                // Drain + discard pending input during the cinematic
+                // so buffered keys don't pile up and then all fire
+                // on the first accepted frame.
+                while event::poll(Duration::ZERO)? {
+                    let _ = event::read()?;
+                }
+            }
         }
 
         let elapsed = frame_start.elapsed();

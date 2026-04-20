@@ -176,7 +176,9 @@ impl PerfOverlay {
         }
 
         queue!(out, ResetColor)?;
-        out.flush()?;
+        // Flushed by the outer render loop alongside every other
+        // HUD overlay — keeping a single flush per frame avoids the
+        // mid-frame terminal updates that show up as flicker.
         Ok(())
     }
 }

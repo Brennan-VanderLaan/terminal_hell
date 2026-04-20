@@ -26,3 +26,60 @@ splitter = 2
 sapper = 1
 # Las Plagas / parasite head.
 floodling = 1
+
+# ── Brand sprite overrides ─────────────────────────────────────────
+# Resident Evil — biohazard body horror. Dark decay-purple + lab-
+# green ooze + blood-red + sepia-beige. Each silhouette leans into
+# iconic RE monster shapes.
+
+[sprite_overrides]
+rusher = "ganado.art"
+leaper = "licker.art"
+splitter = "regenerator.art"
+pinkie = "tyrant.art"
+floodling = "las_plagas.art"
+
+# Ganado / Majini — infected rural human in dirty clothes, red eyes.
+[sprite_palettes.rusher]
+B = "#8a6a48"
+D = "#2e1c18"
+E = "#ff3820"
+H = "#5a4028"
+M = "#2a1410"
+P = "#4a2c40"
+R = "#702418"
+
+# Licker — skinless muscle, whipping tongue, exposed brain, no eyes.
+[sprite_palettes.leaper]
+B = "#a82820"
+D = "#4a1008"
+R = "#e83828"
+G = "#d8d0b8"
+M = "#6a1808"
+C = "#6a4020"
+
+# Regenerator — stretched emaciated figure, dripping purple veins.
+[sprite_palettes.splitter]
+B = "#b0a088"
+D = "#3a2a28"
+E = "#ffe830"
+M = "#4a1a40"
+P = "#6a2a60"
+
+# Tyrant — towering humanoid in long grey trench coat, scarred face.
+[sprite_palettes.pinkie]
+B = "#c8b498"
+D = "#2e2018"
+E = "#ff2020"
+H = "#a89078"
+C = "#3a3842"
+
+# Las Plagas head — parasite burst from the neck stump, tentacles.
+[sprite_palettes.floodling]
+B = "#8a6a48"
+D = "#2e1c18"
+R = "#a82018"
+G = "#58a830"
+M = "#2a1410"
+T = "#c02830"
+

@@ -203,5 +203,7 @@ pub fn gib_color(archetype: Archetype) -> Pixel {
         Archetype::Flood => Pixel::rgb(80, 180, 100),
         Archetype::FloodCarrier => Pixel::rgb(140, 200, 110),
         Archetype::PlayerTurret => Pixel::rgb(30, 120, 160),
+        // Phaser: cyan-violet shimmer, echoes the teleport flicker.
+        Archetype::Phaser => Pixel::rgb(140, 100, 220),
     }
 }

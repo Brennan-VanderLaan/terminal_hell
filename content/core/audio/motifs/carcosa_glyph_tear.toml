@@ -1,0 +1,10 @@
+description = """
+Something stepping through a glyph-tear in reality. Short, wet, thin.
+Not a monster — a hungry silhouette. The sound emerges, never strikes.
+"""
+emotion     = "gut-drop, involuntary swivel, low-stakes dread"
+antipattern = "no screams, roars, snarls, vibrato. no vocal-cord content."
+shared_layers = [
+  "pitched-down exhale (same source, pitched per unit)",
+  "sub-flutter 40-70Hz — the tear opening",
+]

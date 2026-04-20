@@ -1,0 +1,107 @@
+# Warhammer 40K — Tyranid Swarm. Hive-fleet biomass fantasy at its
+# purest. Termagants by the hundreds, Hormagaunts leaping from the
+# shadows, Warriors anchoring waves, Zoanthropes floating overhead,
+# Lictors ambushing from cover. The "consume everything" brand — the
+# shadow in the warp grows closer with every kill.
+
+id = "tyranid_swarm"
+name = "Warhammer 40K — Tyranid Hive Fleet"
+description = "Termagants. Hormagaunts. Warriors. Zoanthropes. The swarm consumes."
+
+spawn_pool = [
+    "swarmling",
+    "leaper",
+    "charger",
+    "orb",
+    "splitter",
+    "pinkie",
+    "howler",
+    "phaser",
+    "marksman",
+]
+miniboss = "pinkie"
+
+# Jump-infantry bio-surge feel → Dash. Perks lean into attritional
+# survival: Survivor for plate, Rampage because the killing just
+# keeps feeding you, GloomShroud resisting the shadow-in-the-warp
+# sanity drain.
+signature_traversal = "dash"
+signature_perks = ["survivor", "rampage", "gloom_shroud"]
+
+[spawn_weights]
+# Termagants — the endless fleshtide.
+swarmling = 8
+# Hormagaunt leap — scythes-first, from the shadows, EVERY wave.
+leaper = 6
+# Tyranid Warrior — anchor-class mid-tier charge.
+charger = 3
+# Zoanthrope — floating psychic artillery.
+orb = 2
+# Ripper swarm — burst into more rippers.
+splitter = 3
+# Lictor shadowstep — hive ambush, flickers through cover.
+phaser = 3
+# Termagant with fleshborer — long-range spitter.
+marksman = 2
+# Carnifex — the "oh no" Fex moment.
+pinkie = 1
+# Lictor shriek luring the swarm to a player's position.
+howler = 1
+
+# ── Brand sprite overrides ─────────────────────────────────────────
+# Tyranid silhouettes: slender Termagants, leaping scythe-armed
+# Hormagaunts, four-armed Warriors, and the towering Carnifex.
+# Purple/red chitin + bone-white carapace + acid-green ichor glow.
+# Art lives in content/core/art/tyranid_swarm/.
+
+[sprite_overrides]
+swarmling = "termagant.art"
+leaper = "hormagaunt.art"
+charger = "tyranid_warrior.art"
+pinkie = "carnifex.art"
+
+# Termagant — slender chitinous gaunt clutching a fleshborer
+# spinefist (W = weapon, G = acid-green muzzle glow).
+[sprite_palettes.swarmling]
+H = "#f0e8c8"
+C = "#f0e0b8"
+B = "#782838"
+E = "#ffd040"
+W = "#3a1a2a"
+G = "#a8ff40"
+D = "#1a0814"
+
+# Hormagaunt — mid-pounce, four scythe-blades trailing purple chitin.
+# S = bone scythe, C = pale carapace, B = purple chitin body.
+[sprite_palettes.leaper]
+H = "#f4ecd0"
+S = "#e8dcb0"
+C = "#f0e0b8"
+B = "#4a2078"
+E = "#a8ff40"
+D = "#1a0a1a"
+A = "#0a0410"
+
+# Tyranid Warrior — four-armed mid-tier bioform with talons reaching
+# wide (T = talon tip), bone-plated skull, acid-green compound eyes.
+[sprite_palettes.charger]
+H = "#f0e0b8"
+C = "#e4d8a8"
+B = "#5a1830"
+E = "#a8ff40"
+M = "#1a0810"
+T = "#f8ecc8"
+A = "#1a0614"
+
+# Carnifex — massive bone-plated head crown (P = bone plate), huge
+# purple chitin bulk, and a side-mounted bio-cannon (W = cannon).
+[sprite_palettes.pinkie]
+H = "#f4ecd0"
+P = "#e8dcb0"
+C = "#d8c898"
+B = "#5a1028"
+E = "#a8ff40"
+M = "#1a0610"
+T = "#f8ecc8"
+W = "#3a1824"
+A = "#0a0410"

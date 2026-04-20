@@ -21,3 +21,50 @@ zergling = 8
 swarmling = 4
 splitter = 3
 leaper = 2
+
+# ── Brand sprite overrides ─────────────────────────────────────────
+# Zerg biomass — dark purple carapace, acid-green underside, bone-cream
+# claws, red-wet flesh glimpses. Everything LOW-SLUNG and HUNGRY.
+
+[sprite_overrides]
+zergling = "zergling.art"
+swarmling = "larva.art"
+leaper = "hydralisk.art"
+splitter = "baneling.art"
+charger = "ultralisk.art"
+
+# Zergling — low-slung alien, scythe claws, carapace.
+[sprite_palettes.zergling]
+B = "#401860"
+C = "#f4e4b0"
+E = "#ff3020"
+G = "#80c830"
+
+# Larva — small writhing biomass baby.
+[sprite_palettes.swarmling]
+B = "#a04068"
+G = "#a8d040"
+E = "#ffd820"
+
+# Hydralisk — reared cobra body, spine-launcher arms.
+[sprite_palettes.leaper]
+B = "#502070"
+C = "#f0dca0"
+E = "#ff4020"
+R = "#a01818"
+G = "#80c830"
+
+# Baneling — green rolling ball of acid, wet-sac.
+[sprite_palettes.splitter]
+B = "#c0f050"
+G = "#608020"
+E = "#ff3020"
+
+# Ultralisk — massive quadruped, scimitar tusks.
+[sprite_palettes.charger]
+B = "#381050"
+C = "#f8ecb8"
+E = "#ff3020"
+R = "#9a1818"
+G = "#78b830"
+

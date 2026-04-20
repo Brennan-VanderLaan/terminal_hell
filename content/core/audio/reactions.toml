@@ -1,0 +1,5 @@
+# Live FX modulation — see audio-spec.md §9.
+#
+# Empty for now — reactions land with the engine implementation.
+# Keeping the file present + parseable so the loader can exercise its
+# "maybe-empty" path before anything is wired.

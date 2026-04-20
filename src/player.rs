@@ -64,6 +64,26 @@ pub struct Player {
     /// Per-puff particle-count tier — 1 for light scratch, 2 for
     /// solid hits, 3 for "you're in trouble" wounds.
     pub bleed_intensity: u8,
+    /// Lifetime damage this player has landed on enemies. Credit
+    /// comes from the enemy_hits loop via `note_damage_dealt`.
+    /// Surfaced in the death report.
+    pub damage_dealt: u32,
+    /// Lifetime damage this player has taken (post-armor, post-perk
+    /// modifiers). Separate from `blood_lost` so a chonky plate
+    /// absorbing a shotgun still records the incoming hit.
+    pub damage_taken: u32,
+    /// Cumulative blood shed during bleed emissions — tracks the
+    /// visual bleed budget, not HP directly. Scales with every hit.
+    pub blood_lost: u32,
+    /// Archetype of the enemy that landed the killing hit, if any.
+    /// Used by the death report ("killed by Zergling"). Persistent
+    /// across death — even when the player is reviving or
+    /// spectating, the killer remains so we can name them.
+    pub killer_archetype: Option<crate::enemy::Archetype>,
+    /// Display name + run total for what killed the player. Updated
+    /// whenever a new hit-source archetype lands any damage, so the
+    /// report can show "killed by Zergling (137)" with context.
+    pub damage_by_source: std::collections::HashMap<crate::enemy::Archetype, u32>,
 }
 
 pub const PLAYER_MAX_HP: i32 = 100;
@@ -98,7 +118,19 @@ impl Player {
             bleed_ttl: 0.0,
             bleed_cadence: 0.0,
             bleed_intensity: 0,
+            damage_dealt: 0,
+            damage_taken: 0,
+            blood_lost: 0,
+            killer_archetype: None,
+            damage_by_source: std::collections::HashMap::new(),
         }
+    }
+
+    /// Credit this player for damage dealt to an enemy. Called from
+    /// the enemy_hits loop in game.rs where the projectile owner_id
+    /// is known. Capped at u32::MAX implicitly via saturating_add.
+    pub fn note_damage_dealt(&mut self, amount: u32) {
+        self.damage_dealt = self.damage_dealt.saturating_add(amount);
     }
 
     pub fn has_perk(&self, p: crate::perk::Perk) -> bool {
@@ -147,7 +179,22 @@ impl Player {
     /// Apply raw damage with armor-first soak + LastStand resist. Armor
     /// absorbs up to 60% of the incoming hit (the rest still chips
     /// HP) so armor delays but doesn't trivialize pressure.
+    ///
+    /// Back-compat wrapper — existing call sites that don't know the
+    /// damage source stay green. Prefer `take_damage_from` for new
+    /// call sites so the death report can name the killer.
     pub fn take_damage(&mut self, raw: i32) {
+        self.take_damage_from(raw, None);
+    }
+
+    /// Apply damage with an optional source archetype (the enemy that
+    /// hit us). Tracks stats into `damage_taken` / `damage_by_source`
+    /// and, on the killing hit, records `killer_archetype`.
+    pub fn take_damage_from(
+        &mut self,
+        raw: i32,
+        source: Option<crate::enemy::Archetype>,
+    ) {
         if raw <= 0 || self.is_iframed() {
             return;
         }
@@ -192,6 +239,31 @@ impl Player {
         // Kick an immediate puff so the first frame post-hit shows
         // something even if the cadence hadn't rolled over yet.
         self.bleed_cadence = 0.0;
+
+        // Stats accumulators for the death report.
+        let effective = raw.max(0) as u32;
+        self.damage_taken = self.damage_taken.saturating_add(effective);
+        // Blood-lost scales with raw severity — even a chonky plate
+        // absorbing the hit still means you bled. Not 1:1 with
+        // damage_taken because we scale by intensity tier so the
+        // report reads as "you really bled out" at high severity.
+        let bleed_bump = match new_intensity {
+            3 => effective.saturating_mul(2),
+            2 => effective.saturating_mul(3) / 2,
+            _ => effective,
+        };
+        self.blood_lost = self.blood_lost.saturating_add(bleed_bump);
+        if let Some(arch) = source {
+            let entry = self.damage_by_source.entry(arch).or_insert(0);
+            *entry = entry.saturating_add(effective);
+            // On the killing hit, lock in who did it. We record the
+            // source on every hit so the FINAL hit before HP <= 0
+            // wins — exactly the "Killed by the Zergling that lunged
+            // through the gap" behavior we want.
+            if self.hp <= 0 {
+                self.killer_archetype = Some(arch);
+            }
+        }
     }
 
     /// Drive the bleed cadence. Returns Some(intensity) on the frames

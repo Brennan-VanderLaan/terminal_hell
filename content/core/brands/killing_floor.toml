@@ -1,0 +1,84 @@
+# Killing Floor — Zed Outbreak. Literal genre-sibling brand: timed
+# waves of Clots, Gorefasts, Stalkers, Husks, Sirens, Fleshpounds
+# escalating toward a boss. The "stay on the trader timer, mind the
+# husks" brand.
+
+id = "killing_floor"
+name = "Killing Floor — Zed Outbreak"
+description = "Clots grab, Gorefasts rush, Sirens scream, Husks burn. The Patriarch is coming."
+
+spawn_pool = ["rusher", "charger", "leaper", "howler", "sapper", "pinkie"]
+miniboss = "miniboss"
+
+# Medic-syringe dash fantasy → Dash. Perks lean into the KF loop:
+# QuickHands because every weapon benefits from rate-of-fire perk in
+# KF, CorpsePulse for the "heal off the kills" feel, LastStand for
+# the "down to red, headshot the Husk, survive" moments.
+signature_traversal = "dash"
+signature_perks = ["quick_hands", "corpse_pulse", "last_stand"]
+
+[spawn_weights]
+# Clots — the grabby horde staple.
+rusher = 5
+# Gorefast / Bloat charge.
+charger = 4
+# Stalker / Crawler pounce — cloaking ambushers. Bumped.
+leaper = 4
+# Siren scream — noise-caller pulling the rest of the wave in.
+howler = 2
+# Husk flamer + Sirens' scream suicide-detonate-style feel.
+sapper = 2
+# Fleshpound — the bullet-sponge big hit.
+pinkie = 1
+
+# ── Brand sprite overrides ─────────────────────────────────────────
+# KF zeds — sickly green flesh, exposed bone, charred husks, iron
+# gauntlet fleshpounds. Art files live in content/core/art/killing_floor/.
+
+[sprite_overrides]
+rusher = "clot.art"
+charger = "gorefast.art"
+pinkie = "fleshpound.art"
+sapper = "husk.art"
+
+# Clot — gray-green grabby shambler, pleading arms outstretched.
+[sprite_palettes.rusher]
+B = "#8ca878"
+D = "#3e5438"
+E = "#e84040"
+F = "#1a1008"
+A = "#9cb888"
+S = "#2a2018"
+
+# Gorefast — one-armed cleaver zed. Pale flesh + meat blade.
+[sprite_palettes.charger]
+B = "#a8b894"
+D = "#4a5840"
+E = "#e03030"
+M = "#2a1008"
+W = "#d0d4c8"
+N = "#78281c"
+S = "#1e1812"
+
+# Fleshpound — hulking iron-gauntleted bullet sponge with chest rage core.
+[sprite_palettes.pinkie]
+B = "#c8bc9c"
+D = "#5a4a38"
+E = "#f02020"
+M = "#1e0a06"
+I = "#48484e"
+G = "#c82818"
+R = "#ffc040"
+S = "#241a10"
+
+# Husk — charred fire-cannon zed, cracked skin glows.
+[sprite_palettes.sapper]
+C = "#3e2a20"
+B = "#ff7020"
+E = "#ffe040"
+M = "#0a0404"
+D = "#1a0a06"
+N = "#48281c"
+F = "#ffc040"
+S = "#1a0804"
+

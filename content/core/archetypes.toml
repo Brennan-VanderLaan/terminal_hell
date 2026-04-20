@@ -52,9 +52,9 @@ signature_primitives = ["breach", "shield_break"]
 signature_fire_mode = "pump"
 
 [charger]
-hp = 75
+hp = 85
 speed = 28.0
-touch_damage = 14
+touch_damage = 18
 hit_radius = 3.0
 reach = 2.8
 tags = ["biological", "fast", "heavy"]
@@ -69,9 +69,11 @@ speed = 12.0
 touch_damage = 8
 hit_radius = 2.6
 reach = 2.4
-preferred_distance = 22.0
-ranged_damage = 14
+preferred_distance = 42.0
+ranged_damage = 18
 tags = ["undead", "ranged"]
+# Undead — shatters into bone dust, not blood.
+body_on_death = "spawn_bone_dust"
 # Skeletal long-range caster — drops pierce-rails.
 signature_primitives = ["pierce", "chain"]
 signature_fire_mode = "rail"
@@ -82,10 +84,13 @@ speed = 10.0
 touch_damage = 6
 hit_radius = 2.4
 reach = 2.0
-# Bumped: tarkov lineage scavs shoot FAR. Max engagement range scales
-# off this via 1.9× in Enemy::try_ranged_attack.
-preferred_distance = 45.0
-ranged_damage = 22
+# True-sniper range. Marksmen + Sentinels get a 2.4× engagement-
+# range multiplier in Enemy::try_ranged_attack, so a 90 preferred
+# distance = ~216-tile engagement range. That lets a sniper set up
+# on the arena's far edge and credibly threaten from there, instead
+# of creeping into mid-range to fire.
+preferred_distance = 90.0
+ranged_damage = 26
 tags = ["biological", "ranged"]
 # The definitional rail-drop archetype (per spec).
 signature_primitives = ["pierce", "shield_break"]
@@ -110,6 +115,8 @@ touch_damage = 6
 hit_radius = 1.6
 reach = 1.6
 tags = ["biological", "small", "flammable"]
+# Fire-bug: burn ring stays (gameplay — AoE damage on death) and
+# the ignite_aura reaction plants a scorch pool automatically.
 body_on_death = "ignite_aura"
 gore_profile = "standard"
 # Fire-bug — drops ignite + contagion autos that cascade through the swarm.
@@ -123,7 +130,12 @@ touch_damage = 14
 hit_radius = 3.2
 reach = 3.0
 tags = ["arcane", "floating", "volatile"]
-body_on_death = "explode_small"
+# Orbs pop with a violet psychic shockwave instead of a physical
+# blast — ties the arcane feel to both the gameplay (chain-damage
+# to nearby enemies, previously explode_small with just damage + scorch)
+# and the visual (violet residue puddle). Damage ring stays loud
+# via shock_chain: 3.5-tile radius, 18 damage, chains to 3 targets.
+body_on_death = "shock_chain"
 # Orbs pop with a violet meat storm that doesn't match their silhouette.
 gore_profile = "heavy"
 # Arcane floater → chain + gravity well pulse weapons.
@@ -226,6 +238,8 @@ touch_damage = 4
 hit_radius = 1.8
 reach = 1.8
 tags = ["parasite", "infectious"]
+# Parasite splat — small green ichor dab, not red human blood.
+body_on_death = "spawn_ichor"
 gore_profile = "standard"
 # Parasite → contagion + acid pulse drops (DoT spreaders).
 signature_primitives = ["contagion", "acid"]
@@ -241,7 +255,10 @@ touch_damage = 22
 hit_radius = 2.8
 reach = 2.4
 tags = ["flood", "infected", "feral"]
-body_on_death = "spawn_blood"
+# Infected combat form — big green ichor puddle. The visual that
+# says "this room has Flood in it" without reading an enemy
+# nameplate.
+body_on_death = "spawn_big_ichor"
 gore_profile = "heavy"
 signature_primitives = ["contagion", "acid"]
 signature_fire_mode = "auto"
@@ -288,6 +305,9 @@ touch_damage = 34
 hit_radius = 5.8
 reach = 4.2
 tags = ["mechanical", "heavy", "armored", "breacher"]
+# Armored mech — bleeds dark oil, not blood. Heavy gore profile
+# for the wreckage spread when it finally drops.
+body_on_death = "spawn_oil"
 gore_profile = "heavy"
 # Armored hulk → pierce + overdrive auto drops (anti-armor).
 signature_primitives = ["pierce", "overdrive"]
@@ -317,10 +337,14 @@ speed = 0.0
 touch_damage = 0
 hit_radius = 3.0
 reach = 0.0
-# Fixed turret — shoots the farthest of any unit.
-preferred_distance = 55.0
-ranged_damage = 18
+# Fixed turret — shoots the farthest of any unit. 120 × 2.4 multiplier
+# = ~288-tile engagement range, so a Sentinel dug into a corner of
+# the 1200×800 arena is a credible threat across the middle of it.
+preferred_distance = 120.0
+ranged_damage = 22
 tags = ["mechanical", "turret"]
+# Mechanical wreck — leaks oil, not blood.
+body_on_death = "spawn_oil"
 gore_profile = "standard"
 # Long-range turret → pierce + shield-break rail drops.
 signature_primitives = ["pierce", "shield_break"]
@@ -342,13 +366,32 @@ gore_profile = "heavy"
 signature_primitives = ["contagion", "chain"]
 signature_fire_mode = "burst"
 
+# Phaser: short-range teleport stalker. Briefly shimmers in place
+# (telegraph), then snaps 6-9 tiles through the air toward the
+# player. Fragile but very hard to pin down; lands next to you and
+# swings once before the next cooldown starts. Fills the "something
+# phases past you" slot — arcane/ambusher flavor.
+[phaser]
+hp = 42
+speed = 9.0
+touch_damage = 20
+hit_radius = 2.2
+reach = 2.0
+tags = ["arcane", "agile", "phaser"]
+# Arcane — no blood. Leaves a violet psychic-residue puddle,
+# bloom-capable, tying Phaser deaths into the Carcosa palette.
+body_on_death = "spawn_psychic_residue"
+gore_profile = "standard"
+signature_primitives = ["gravity_well", "chain"]
+signature_fire_mode = "pulse"
+
 # Leaper: prowls slowly, telegraphs a wind-up, then sprints in a
 # straight line at 4× speed before crashing into recovery. Ambush
 # predator — Bloodsuckers, Smokers, Slashers, Pouncers all fit.
 [leaper]
 hp = 58
 speed = 14.0
-touch_damage = 16
+touch_damage = 22
 hit_radius = 2.4
 reach = 2.2
 tags = ["biological", "agile", "ambusher"]
@@ -371,6 +414,8 @@ reach = 0.0
 preferred_distance = 28.0
 ranged_damage = 18
 tags = ["mechanical", "ally", "turret"]
+# Mechanical wreck — leaks oil when destroyed.
+body_on_death = "spawn_oil"
 gore_profile = "standard"
 # Player turrets don't normally drop loot — but if future content
 # wants them to, auto pierce rails fit the aesthetic.

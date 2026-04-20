@@ -6,7 +6,7 @@ id = "doom_inferno"
 name = "Doom — Hell Inferno"
 description = "Imps, pinkies, revenants. Fast aggressive demons."
 
-spawn_pool = ["rusher", "pinkie", "charger", "revenant", "leaper", "sapper", "rocketeer"]
+spawn_pool = ["rusher", "pinkie", "charger", "revenant", "leaper", "sapper", "rocketeer", "phaser"]
 miniboss = "miniboss"
 
 # Rip-and-tear → dash verb. Perks lean aggressive: Rampage stacks,
@@ -15,12 +15,69 @@ signature_traversal = "dash"
 signature_perks = ["rampage", "adrenaline", "quick_hands"]
 
 [spawn_weights]
+# Imps charging in.
 rusher = 4
+# Pinkies for the "bullet sponge that eats SSG" moment.
 pinkie = 2
-charger = 2
-revenant = 2
-leaper = 1
+# Chargers — hell-knight roar-and-charge.
+charger = 3
+# Revenant homing rockets + cacodemon-shriek long-range.
+revenant = 3
+# Lost Soul / imp pounce — gotta see jumps every wave.
+leaper = 3
+# Gore Nest spore / Pain Elemental pop.
 sapper = 1
-# Rocketeers let revenant drops + breach primitive actually show up
-# from the archetype that signs them.
-rocketeer = 1
+# Archvile shadow-step — teleports toward player then swings.
+phaser = 2
+# Revenant rocket-artillery.
+rocketeer = 2
+
+# ── Brand sprite overrides ─────────────────────────────────────────
+# Doom-branded enemies render with hellish silhouettes instead of
+# the generic defaults. Art files live in content/core/art/doom_inferno/.
+
+[sprite_overrides]
+rusher = "imp.art"
+pinkie = "pinkie_demon.art"
+revenant = "revenant.art"
+charger = "hell_knight.art"
+
+# Imp — fiery red demon, curling bone horns, glowing eyes, claws.
+[sprite_palettes.rusher]
+H = "#f0d8a8"
+D = "#782418"
+B = "#e03820"
+E = "#ffe070"
+F = "#3a0a08"
+C = "#a8947a"
+
+# Pinkie — pink-fleshed bull demon with gaping tusked maw.
+[sprite_palettes.pinkie]
+B = "#ff7ca0"
+D = "#9a3860"
+E = "#ffd848"
+M = "#2a0612"
+T = "#f4ecd0"
+W = "#ffb0c8"
+A = "#ffc4d8"
+H = "#4a1020"
+
+# Revenant — boney skeletal caster with shoulder rocket tubes.
+[sprite_palettes.revenant]
+B = "#e6ead8"
+D = "#5a5040"
+E = "#ff9030"
+S = "#2a2418"
+R = "#3c3a44"
+G = "#78c4ff"
+C = "#d6d8c4"
+
+# Hell Knight — bigger imp, armored shoulders, dual horn crown.
+[sprite_palettes.charger]
+H = "#f4e0b0"
+D = "#5a1610"
+B = "#d04020"
+E = "#ffd848"
+A = "#2a0a06"
+C = "#ac9880"
+

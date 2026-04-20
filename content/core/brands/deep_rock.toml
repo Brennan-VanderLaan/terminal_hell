@@ -6,7 +6,7 @@ id = "deep_rock"
 name = "Deep Rock — Glyphid Tunnels"
 description = "Bugs from every tunnel mouth. Close quarters, teeth-first."
 
-spawn_pool = ["zergling", "swarmling", "charger", "leaper", "breacher", "sapper"]
+spawn_pool = ["swarmling", "charger", "leaper", "breacher", "sapper", "splitter"]
 miniboss = "miniboss"
 
 # Scout grapple is in the DNA → grapple verb. Perks lean into long
@@ -17,12 +17,82 @@ signature_traversal = "grapple"
 signature_perks = ["survivor", "iron_will", "corpse_pulse"]
 
 [spawn_weights]
-zergling = 5
-swarmling = 4
+# Grunts — the tunnel-mouth swarm.
+swarmling = 6
 # Praetorian slam.
 charger = 2
+# Menace leapers.
 leaper = 2
 # Breacher — glyphids chewing through walls.
 breacher = 2
+# Exploder / suicide bug pops into swarmlings.
+splitter = 2
 # Exploder (Menace) suicide bug.
 sapper = 1
+
+# ── Brand sprite overrides ─────────────────────────────────────────
+# Glyphid silhouettes: all chitin-black + acid-green glands + bone-
+# yellow carapace ridges. Art lives in content/core/art/deep_rock/.
+# Palette keys: C = chitin shell, H = carapace ridge (head plate),
+# E = eye cluster, M = mandible tip, A = acid maw, G = acid gland,
+# P = armor plate, W = wing, D = dark underside.
+
+[sprite_overrides]
+swarmling = "glyphid_grunt.art"
+charger = "glyphid_praetorian.art"
+leaper = "glyphid_menace.art"
+breacher = "glyphid_exploder.art"
+splitter = "glyphid_slasher.art"
+
+# Grunt — chunky chitinous bug, bone-yellow head plate, mandibles
+# flared, acid-green eye cluster.
+[sprite_palettes.swarmling]
+C = "#1a1008"
+H = "#c8b060"
+E = "#80ff40"
+M = "#e8d080"
+D = "#0a0604"
+
+# Praetorian — huge armored glyphid, yellow-ridged plates across the
+# back, gaping green acid maw at the head.
+[sprite_palettes.charger]
+C = "#1a1008"
+P = "#8a4820"
+H = "#d8b860"
+A = "#40ff60"
+G = "#60ff80"
+E = "#ffff80"
+M = "#f0d890"
+D = "#080402"
+
+# Menace — leaping acid spitter with bat-like wing flaps, acid gland
+# distended under the jaw.
+[sprite_palettes.leaper]
+C = "#1a1008"
+H = "#b0a058"
+E = "#80ff40"
+A = "#40ff60"
+G = "#60ff80"
+M = "#d8c070"
+W = "#3a2810"
+D = "#080402"
+
+# Exploder — bulbous sac dominates the body, tiny head, green acid
+# skin stretched tight over the gas bladder.
+[sprite_palettes.breacher]
+G = "#60d040"
+A = "#a8ff60"
+H = "#c8b060"
+E = "#ffff60"
+D = "#0a0604"
+
+# Grunt Slasher — variant with long sickle-mandibles. Splits into
+# more on death.
+[sprite_palettes.splitter]
+C = "#2a1810"
+H = "#c8b060"
+E = "#ff6040"
+M = "#f8e090"
+A = "#402010"
+W = "#8a7038"
+D = "#0a0604"

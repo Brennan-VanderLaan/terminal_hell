@@ -78,6 +78,59 @@ pub struct DestructionBlast {
     pub dir_y: f32,
 }
 
+/// Four-phase cinematic run-end sequence. Begins the frame the last
+/// living player drops and plays out over ~9 seconds before the
+/// death-report overlay accepts input. Keeps buffered keys from
+/// accidentally dismissing the "you lost" moment.
+///
+/// Every phase tickers down through `tick_death_phase` which rolls
+/// it forward on timer expiry. `Report` has no auto-advance; the
+/// outer loop watches for a fresh key press (with a minimum elapsed
+/// time since entry) before exiting the run.
+#[derive(Clone, Debug)]
+pub enum DeathPhase {
+    /// Enemies keep doing what they were doing — including attacking
+    /// the player's body. Corpse-hit system fires normally; a big
+    /// gore burst lands on entry; small pops continue on a cadence.
+    Dying { ttl: f32 },
+    /// All enemies freeze in place and "praise Hastur" — aim
+    /// upward, occasional gold particle pops. The moment the horde
+    /// realizes it won.
+    PraiseHastur { ttl: f32 },
+    /// World tint ramps from the current corruption value to full
+    /// saturated gold. Enemies stay frozen. The yellow becomes the
+    /// whole screen, solidifying.
+    Goldening { ttl: f32 },
+    /// Waiting on a keypress to exit. `input_armed_at` is the
+    /// scenario-elapsed time at which keys will start being
+    /// accepted — gives the screen time to settle before the
+    /// earliest "any key" press counts.
+    Report { input_armed: bool },
+}
+
+impl DeathPhase {
+    pub fn label(&self) -> &'static str {
+        match self {
+            DeathPhase::Dying { .. } => "dying",
+            DeathPhase::PraiseHastur { .. } => "praise",
+            DeathPhase::Goldening { .. } => "gold",
+            DeathPhase::Report { .. } => "report",
+        }
+    }
+
+    /// True if gameplay should be frozen (enemies + projectiles +
+    /// AI all paused). The cinematic phases after Dying are static
+    /// tableau; Report is fully paused.
+    pub fn freezes_sim(&self) -> bool {
+        matches!(
+            self,
+            DeathPhase::PraiseHastur { .. }
+                | DeathPhase::Goldening { .. }
+                | DeathPhase::Report { .. }
+        )
+    }
+}
+
 /// Short-lived pickup notification. Newest entries slide in from
 /// the top and decay over `ttl_max` seconds. Drawn as a HUD stack
 /// above the perk/loadout strips. Purely client-visual — never
@@ -166,6 +219,25 @@ pub struct Game {
     pub perf_overlay: crate::perf_overlay::PerfOverlay,
     /// Tab toggles the inventory overlay (perks + loadout + counts).
     pub inventory_open: bool,
+    /// F4 toggles a spatial-grid overlay on top of the arena. Cells
+    /// with >0 enemies get a faint border; color scales with cell
+    /// population so clusters pop visually. Pure diagnostic — helps
+    /// verify cell_size sanity + spot hot spots in the separation
+    /// pass.
+    pub debug_spatial_grid: bool,
+    /// Death-cinematic state machine. `None` during normal play;
+    /// ratchets through Dying → PraiseHastur → Goldening → Report
+    /// once every living player has dropped. See `DeathPhase` for
+    /// per-phase semantics.
+    pub death_phase: Option<DeathPhase>,
+    /// Wall-clock seconds at which the current `DeathPhase` started.
+    /// Drives the Report phase's input-gate — we only accept the
+    /// "dismiss" keypress once the cinematic has had time to play.
+    pub death_started_at: f32,
+    /// Seconds accumulated inside the Report phase. Ticks even when
+    /// `elapsed_secs` is frozen (which it is, once the cinematic
+    /// begins) so the input gate still arms after a real 1.2s.
+    pub death_report_elapsed: f32,
     /// Transient "you just grabbed X" toasts. Pushed by the pickup
     /// consume path; ticked every frame, drawn as a HUD strip.
     pub toasts: Vec<PickupToast>,
@@ -278,6 +350,10 @@ impl Game {
             console: crate::console::Console::default(),
             perf_overlay: crate::perf_overlay::PerfOverlay::default(),
             inventory_open: false,
+            debug_spatial_grid: false,
+            death_phase: None,
+            death_started_at: 0.0,
+            death_report_elapsed: 0.0,
             toasts: Vec::new(),
             is_authoritative: true,
             paused: false,
@@ -772,6 +848,181 @@ impl Game {
         }
     }
 
+    /// Phase durations (seconds). Tuned to land the whole cinematic
+    /// at ~9 seconds before the dismiss prompt — long enough to sell
+    /// the "you died horribly" beat, short enough that nobody feels
+    /// held hostage.
+    const DEATH_DYING_SECS: f32 = 3.0;
+    const DEATH_PRAISE_SECS: f32 = 3.5;
+    const DEATH_GOLDEN_SECS: f32 = 2.2;
+    /// Minimum seconds the Report phase must be visible before
+    /// accepting the dismiss keypress. Longer than the worst typical
+    /// input-buffer drain (a few hundred ms of queued WASD from the
+    /// frame the player actually died).
+    const DEATH_REPORT_INPUT_ARM_SECS: f32 = 1.2;
+
+    /// Enter the death cinematic. Spawns a heavy gore burst at every
+    /// dead player's position + drops a persistent "body" corpse so
+    /// enemies continue to shoot/walk over something visible. Also
+    /// applies the Carcosa corruption spike.
+    fn enter_death_phase(&mut self) {
+        let down_count = self.players.iter().filter(|p| p.hp <= 0).count() as f32;
+        self.add_corruption(7.0 * down_count);
+        // Collect positions up front so we don't borrow-conflict
+        // with spawn_corpse / emit_gore_burst inside the loop.
+        let bodies: Vec<(f32, f32)> = self
+            .players
+            .iter()
+            .filter(|p| p.hp <= 0)
+            .map(|p| (p.x, p.y))
+            .collect();
+        for (bx, by) in bodies {
+            let seed = self.next_seed((bx as i32, by as i32));
+            // Heavy gib burst — the whole "you died horribly" moment
+            // in one frame. Uses a human-tone palette that reads as
+            // a player death rather than enemy gibs.
+            self.emit_gore_burst(
+                (bx, by),
+                Pixel::rgb(255, 40, 40),
+                Archetype::Pmc,
+                seed,
+            );
+            // A persistent corpse so enemy attacks + corpse-hit gore
+            // continue to paint the scene during `Dying`. Archetype
+            // is the closest stand-in we have for a humanoid player
+            // silhouette (§17 notes a proper PlayerBody archetype
+            // as a future polish pass).
+            self.spawn_corpse(Archetype::Pmc, bx, by);
+        }
+        self.death_phase = Some(DeathPhase::Dying {
+            ttl: Self::DEATH_DYING_SECS,
+        });
+        self.death_started_at = self.elapsed_secs;
+        tracing::info!("death cinematic begins");
+    }
+
+    /// Advance the current death phase. Handles transitions and
+    /// re-enters `death_started_at` on every phase boundary.
+    fn tick_death_phase(&mut self, dt: f32) {
+        let Some(phase) = self.death_phase.as_mut() else {
+            return;
+        };
+        match phase {
+            DeathPhase::Dying { ttl } => {
+                *ttl -= dt;
+                if *ttl <= 0.0 {
+                    self.death_phase = Some(DeathPhase::PraiseHastur {
+                        ttl: Self::DEATH_PRAISE_SECS,
+                    });
+                    self.death_started_at = self.elapsed_secs;
+                }
+            }
+            DeathPhase::PraiseHastur { ttl } => {
+                *ttl -= dt;
+                if *ttl <= 0.0 {
+                    self.death_phase = Some(DeathPhase::Goldening {
+                        ttl: Self::DEATH_GOLDEN_SECS,
+                    });
+                    self.death_started_at = self.elapsed_secs;
+                }
+            }
+            DeathPhase::Goldening { ttl } => {
+                *ttl -= dt;
+                if *ttl <= 0.0 {
+                    self.death_phase = Some(DeathPhase::Report { input_armed: false });
+                    self.death_started_at = self.elapsed_secs;
+                    self.death_report_elapsed = 0.0;
+                }
+            }
+            DeathPhase::Report { input_armed } => {
+                // Uses the dedicated cinematic clock, not
+                // `elapsed_secs` — the latter is frozen at time-of-
+                // death so the "time survived" stat stays honest.
+                self.death_report_elapsed += dt;
+                if !*input_armed
+                    && self.death_report_elapsed >= Self::DEATH_REPORT_INPUT_ARM_SECS
+                {
+                    *input_armed = true;
+                }
+            }
+        }
+    }
+
+    /// `true` when the outer run loop should accept a dismiss key
+    /// and exit the run. Until this flips, buffered keys are
+    /// swallowed — they don't count as a dismiss.
+    pub fn death_report_accepts_input(&self) -> bool {
+        matches!(
+            self.death_phase,
+            Some(DeathPhase::Report { input_armed: true })
+        )
+    }
+
+    /// During frozen death phases, emit small gold particle pops
+    /// from a random subset of enemies so the horde reads as "dancing
+    /// in praise" rather than a still image. Cadence is slow enough
+    /// to be legible even with 10k enemies on screen.
+    fn tick_praise_hastur_pops(&mut self, _dt: f32) {
+        // Only emit during Praise / Goldening — Report is a static
+        // screen waiting on input, any motion there is noise.
+        let emit = matches!(
+            self.death_phase,
+            Some(DeathPhase::PraiseHastur { .. }) | Some(DeathPhase::Goldening { .. })
+        );
+        if !emit || self.enemies.is_empty() {
+            return;
+        }
+        use rand::Rng;
+        // Pick ~1% of the horde this tick. Scales sublinearly with
+        // N so a 10k horde doesn't drown the screen in particles.
+        let pick_count = ((self.enemies.len() as f32 * 0.01) as usize)
+            .max(1)
+            .min(60);
+        let gold = Pixel::rgb(255, 220, 80);
+        let pale = Pixel::rgb(255, 240, 180);
+        for _ in 0..pick_count {
+            let idx = self.kiosk_rng.gen_range(0..self.enemies.len());
+            let (ex, ey) = {
+                let e = &self.enemies[idx];
+                if e.hp <= 0 {
+                    continue;
+                }
+                (e.x, e.y)
+            };
+            // Two-color sparkle above the enemy — looks like incense
+            // / devotion smoke curling upward. Short TTL so it
+            // doesn't pile up into a fog.
+            let angle = self.kiosk_rng.r#gen::<f32>() * std::f32::consts::TAU;
+            let speed = self.kiosk_rng.gen_range(4.0..14.0);
+            let ttl = self.kiosk_rng.gen_range(0.35..0.7);
+            let color = if self.kiosk_rng.r#gen::<bool>() { gold } else { pale };
+            self.particles.push(crate::particle::Particle {
+                x: ex,
+                y: ey - 1.0,
+                vx: angle.cos() * speed * 0.4,
+                vy: -speed,
+                ttl,
+                ttl_max: ttl,
+                color,
+                size: 1,
+            });
+        }
+    }
+
+    /// Gold blend factor 0..1 across the Goldening + Report phases.
+    /// Dying + PraiseHastur return 0. Used by the render tint
+    /// override so the world gilds over the Goldening window and
+    /// stays fully gold during the Report.
+    pub fn death_gold_blend(&self) -> f32 {
+        match self.death_phase {
+            Some(DeathPhase::Goldening { ttl }) => {
+                1.0 - (ttl / Self::DEATH_GOLDEN_SECS).clamp(0.0, 1.0)
+            }
+            Some(DeathPhase::Report { .. }) => 1.0,
+            _ => 0.0,
+        }
+    }
+
     fn apply_wave_event(&mut self, event: WaveEvent) {
         match event {
             WaveEvent::EnterVote => self.spawn_vote_kiosks(),
@@ -1009,6 +1260,29 @@ impl Game {
     /// Corruption tint for the framebuffer: colour + amount based on the
     /// current level. Returns (color, amount) where amount is 0..0.5.
     pub fn corruption_tint(&self) -> (Pixel, f32) {
+        // Death cinematic overrides the normal corruption drift —
+        // during Goldening + Report phases the world gilds into
+        // saturated gold (Hastur's color), blending from the
+        // corruption tint at entry to full gold over the phase.
+        let gold_blend = self.death_gold_blend();
+        if gold_blend > 0.0 {
+            // Gold target: bright yellow-gold, heavy tint amount so
+            // the scene visibly solidifies. Blend from base amber.
+            let base = Pixel::rgb(255, 180, 60);
+            let gold = Pixel::rgb(255, 215, 0);
+            let t = gold_blend;
+            let r = (base.r as f32 * (1.0 - t) + gold.r as f32 * t) as u8;
+            let g = (base.g as f32 * (1.0 - t) + gold.g as f32 * t) as u8;
+            let b = (base.b as f32 * (1.0 - t) + gold.b as f32 * t) as u8;
+            let base_amount = {
+                let ct = (self.corruption / 100.0).clamp(0.0, 1.2);
+                (ct * 0.45).min(0.5)
+            };
+            // End state: 0.85 tint amount — legible but unmistakably
+            // golden. Eases from the current corruption tint.
+            let amount = base_amount * (1.0 - t) + 0.85 * t;
+            return (Pixel::rgb(r, g, b), amount);
+        }
         // Amber-ochre drift; stronger with more corruption. Cap at 0.5 so
         // pixels remain legible even at very high corruption.
         let t = (self.corruption / 100.0).clamp(0.0, 1.2);
@@ -1153,7 +1427,30 @@ impl Game {
         self.tick_ground_paints.clear();
         self.tick_corpse_hits.clear();
         self.tick_toast_events.clear();
-        self.elapsed_secs += dt;
+        // Run-clock: freezes the instant the death cinematic begins
+        // so the "time survived" stat on the report reflects the
+        // moment of death, not the moment the player dismissed the
+        // overlay. Sub-frame death (same frame as the last kill) is
+        // handled because enter_death_phase fires at the bottom of
+        // this same tick — from the next frame onward the check
+        // below short-circuits.
+        if self.death_phase.is_none() {
+            self.elapsed_secs += dt;
+        }
+        // Advance the death-cinematic state machine early so the
+        // freeze gate below reflects this frame's phase. Trigger
+        // (enter_death_phase) still fires at the bottom once every
+        // hp-change this frame has settled.
+        self.tick_death_phase(dt);
+        if self.death_phase.as_ref().map_or(false, |p| p.freezes_sim()) {
+            // Praise / Goldening / Report: sim is paused. Keep
+            // corruption drift + death-cinematic cadence running
+            // (particle pops land in tick_client); skip everything
+            // else. Corpse + projectile + enemy state all freeze.
+            self.tick_praise_hastur_pops(dt);
+            self.perf.end("tick_total");
+            return;
+        }
         // Passive corruption tick; drivers below add more per event.
         self.add_corruption(dt * 0.15);
         self.perf.begin("tick_carcosa");
@@ -1303,10 +1600,18 @@ impl Game {
                 .find(|p| p.id == id && p.hp > 0)
                 .map(|p| (p.id, p.x, p.y))
         });
+        // During the Dying phase of the death cinematic, include
+        // dead player bodies as valid targets so enemies keep
+        // swarming the corpse — melee hits, ranged fire, movement
+        // toward the body all resume. Normal play still filters
+        // dead players out so a downed teammate isn't a pathing
+        // magnet mid-run.
+        let targeting_dying_bodies =
+            matches!(self.death_phase, Some(DeathPhase::Dying { .. }));
         let positions: Vec<(u32, f32, f32)> = self
             .players
             .iter()
-            .filter(|p| p.hp > 0)
+            .filter(|p| targeting_dying_bodies || p.hp > 0)
             .map(|p| (p.id, p.x, p.y))
             .collect();
         // Snapshot of corpse positions so Eaters can path toward them
@@ -1319,13 +1624,26 @@ impl Game {
         // All living enemies tagged with their team, so hostile-tag
         // scans can target them by team match. Generic: any new team
         // a content pack introduces flows through here unchanged.
-        let horde_positions: Vec<(usize, crate::tag::Tag, f32, f32)> = self
-            .enemies
-            .iter()
-            .enumerate()
-            .filter(|(_, e)| e.hp > 0)
-            .map(|(i, e)| (i, e.team, e.x, e.y))
-            .collect();
+        //
+        // Bucketed by team tag up front: the old "flat Vec scanned
+        // per enemy" path was O(N²) and dominated the frame at 10k
+        // (each zergling re-checked every other zergling's team
+        // before skipping it). With the bucket, an enemy only scans
+        // the buckets matching its own hostile set — typically 1–2
+        // small teams. Zerg-on-zerg becomes free because the horde
+        // team isn't in any horde enemy's hostile list.
+        use std::collections::HashMap;
+        let mut enemies_by_team: HashMap<crate::tag::Tag, Vec<(usize, f32, f32)>> =
+            HashMap::new();
+        for (i, e) in self.enemies.iter().enumerate() {
+            if e.hp <= 0 {
+                continue;
+            }
+            enemies_by_team
+                .entry(e.team)
+                .or_default()
+                .push((i, e.x, e.y));
+        }
         let mut enemy_status_kills: Vec<usize> = Vec::new();
         let mut ranged_shots: Vec<(u32, crate::enemy::RangedShot)> = Vec::new();
         // Breacher wall smashes queued this tick — tile coords.
@@ -1421,25 +1739,33 @@ impl Game {
                 }
             }
 
-            // Cross-faction target scan: always run, so Horde can
-            // hunt survivor-team PlayerTurrets + Flood can hunt the
-            // Horde. Pure tag intersection — any candidate whose
-            // team is in this enemy's hostile set.
+            // Cross-faction target scan: Horde can hunt survivor-team
+            // PlayerTurrets + Flood can hunt the Horde. Bucketed by
+            // team up front — this enemy only scans buckets matching
+            // its own hostile tags, skipping entirely when no hostile
+            // team exists on the map (the common zerg-on-zerg case).
             let survivor_tag = crate::tag::Tag::new(crate::enemy::TEAM_SURVIVOR);
             let cross_faction_target = {
                 let mut best: Option<(f32, f32, f32)> = None;
-                for (idx, team, hx, hy) in &horde_positions {
-                    if *idx == i {
+                for hostile_tag in e.hostiles.iter() {
+                    // Survivor is handled separately via the `positions`
+                    // list (real players, not entity-side entries).
+                    if hostile_tag == survivor_tag {
                         continue;
                     }
-                    if !e.hostiles.has(*team) {
+                    let Some(bucket) = enemies_by_team.get(&hostile_tag) else {
                         continue;
-                    }
-                    let dx = hx - e.x;
-                    let dy = hy - e.y;
-                    let d2 = dx * dx + dy * dy;
-                    if best.map_or(true, |(_, _, bd)| d2 < bd) {
-                        best = Some((*hx, *hy, d2));
+                    };
+                    for (idx, hx, hy) in bucket {
+                        if *idx == i {
+                            continue;
+                        }
+                        let dx = hx - e.x;
+                        let dy = hy - e.y;
+                        let d2 = dx * dx + dy * dy;
+                        if best.map_or(true, |(_, _, bd)| d2 < bd) {
+                            best = Some((*hx, *hy, d2));
+                        }
                     }
                 }
                 best.map(|(x, y, _)| (0u32, x, y))
@@ -1577,23 +1903,26 @@ impl Game {
             }
 
             // Charger behavior: cruise → wind up → sprint. When a
-            // target is in LoS and at mid-range, spend 0.5s telegraphing
-            // (visible eye glow + slower pace) then sprint 1.2s at 2.5×
-            // speed toward the locked-in heading.
+            // target is in LoS and at mid-range, spend 0.35s
+            // telegraphing (visible eye glow + slower pace) then
+            // sprint 1.6s at 2.5× toward the locked-in heading.
+            // Window opened to 7–36 tiles so they commit earlier +
+            // from further; cooldown dropped so a missed charge
+            // isn't a free 4 seconds — they rewind fast + come again.
             if e.archetype == Archetype::Charger && e.sprint_timer <= 0.0 && e.sprint_cooldown <= 0.0 {
                 if let Some((_pid, tx, ty)) = target {
                     let dx = tx - e.x;
                     let dy = ty - e.y;
                     let d2 = dx * dx + dy * dy;
-                    let in_window = (10.0 * 10.0..=28.0 * 28.0).contains(&d2);
+                    let in_window = (7.0 * 7.0..=36.0 * 36.0).contains(&d2);
                     if in_window && self.arena.has_line_of_sight((e.x, e.y), (tx, ty)) {
                         if e.tell_timer <= 0.0 {
-                            e.tell_timer = 0.5;
+                            e.tell_timer = 0.35;
                             e.tell_target = (tx, ty);
                         } else if e.tell_timer < 0.05 {
                             // Tell just finished — lock in direction + sprint.
-                            e.sprint_timer = 1.2;
-                            e.sprint_cooldown = 4.0;
+                            e.sprint_timer = 1.6;
+                            e.sprint_cooldown = 2.2;
                             e.tell_timer = 0.0;
                         }
                     }
@@ -1601,7 +1930,14 @@ impl Game {
             }
 
             // Leaper behavior: prowl → wind up → leap → recover.
-            // State machine tracked on `leap_state`.
+            // Tuned for aggression — the whole point of a Leaper is
+            // the "something just jumped at me" moment. Trigger range
+            // widened to 5–26 tiles (was 6–20) so they leap from
+            // further out, cadence tightened (windup 0.35s instead
+            // of 0.45, recovery 0.9s instead of 1.2, cooldown 1.8s
+            // instead of 3.0). Net cycle time ~0.35+0.55+0.9 ≈ 1.8s
+            // + 1.8s cooldown = 3.6s between leaps — roughly twice
+            // as often.
             if e.archetype == Archetype::Leaper {
                 match e.leap_state {
                     0 => {
@@ -1610,13 +1946,13 @@ impl Game {
                             let dx = tx - e.x;
                             let dy = ty - e.y;
                             let d2 = dx * dx + dy * dy;
-                            if (6.0f32 * 6.0..=20.0 * 20.0).contains(&d2)
+                            if (5.0f32 * 5.0..=26.0 * 26.0).contains(&d2)
                                 && self.arena.has_line_of_sight((e.x, e.y), (tx, ty))
                                 && e.sprint_cooldown <= 0.0
                             {
                                 e.leap_state = 1;
-                                e.leap_timer = 0.45;
-                                e.tell_timer = 0.45;
+                                e.leap_timer = 0.35;
+                                e.tell_timer = 0.35;
                                 let len = d2.sqrt().max(0.001);
                                 e.leap_vec = (dx / len, dy / len);
                                 e.tell_target = (tx, ty);
@@ -1635,8 +1971,8 @@ impl Game {
                         // the projected landing spot for direction.
                         if e.leap_timer <= 0.0 {
                             e.leap_state = 3;
-                            e.leap_timer = 1.2; // recovery cooldown
-                            e.sprint_cooldown = 3.0;
+                            e.leap_timer = 0.9; // recovery window
+                            e.sprint_cooldown = 1.8;
                         }
                     }
                     _ => {
@@ -1648,14 +1984,62 @@ impl Game {
                 }
             }
 
+            // Phaser behavior: shimmer in place, then teleport 6–9
+            // tiles toward the target. Reuses `sprint_cooldown` as
+            // the phase-hop cooldown and `tell_timer` as the
+            // shimmer. Direction locked at tell-end; the teleport
+            // is instantaneous + clamped to passable tiles so the
+            // Phaser doesn't land inside a wall.
+            if e.archetype == Archetype::Phaser && e.sprint_cooldown <= 0.0 {
+                if let Some((_pid, tx, ty)) = target {
+                    let dx = tx - e.x;
+                    let dy = ty - e.y;
+                    let d2 = dx * dx + dy * dy;
+                    // Only phase when more than a few tiles away,
+                    // so once the Phaser is on top of the player it
+                    // holds position and swings instead of flickering
+                    // through them.
+                    if (3.5f32 * 3.5..=36.0 * 36.0).contains(&d2)
+                        && self.arena.has_line_of_sight((e.x, e.y), (tx, ty))
+                    {
+                        if e.tell_timer <= 0.0 {
+                            // Start shimmer.
+                            e.tell_timer = 0.35;
+                            e.tell_target = (tx, ty);
+                        } else if e.tell_timer < 0.05 {
+                            // Tell finished — snap forward. Jump
+                            // distance scales with range so a
+                            // long-range Phaser closes more gap, but
+                            // never overshoots the player.
+                            let len = d2.sqrt().max(0.001);
+                            let hop = 7.5_f32.min(len - 2.0).max(2.0);
+                            let nx = e.x + (dx / len) * hop;
+                            let ny = e.y + (dy / len) * hop;
+                            // Clamp to passable tile; fall back to
+                            // staying put if the destination is a
+                            // wall (rare given LoS, but defensive).
+                            if self.arena.is_passable(nx as i32, ny as i32) {
+                                e.x = nx;
+                                e.y = ny;
+                            }
+                            e.sprint_cooldown = 1.4;
+                            e.tell_timer = 0.0;
+                        }
+                    }
+                }
+            }
+
             // Rocketeer firing override. If cooldown is ready + LoS
             // to target, queue a rocket toward the target position.
+            // Widened firing window (14–110 tiles vs 16–60) so
+            // rocketeers lob from genuine standoff distance instead
+            // of creeping into close range first.
             if e.archetype == Archetype::Rocketeer {
                 if let Some((_pid, tx, ty)) = target {
                     let dx = tx - e.x;
                     let dy = ty - e.y;
                     let d2 = dx * dx + dy * dy;
-                    let in_range = (16.0 * 16.0..=60.0 * 60.0).contains(&d2);
+                    let in_range = (14.0 * 14.0..=110.0 * 110.0).contains(&d2);
                     if in_range
                         && e.attack_cooldown <= 0.0
                         && self.arena.has_line_of_sight((e.x, e.y), (tx, ty))
@@ -1744,7 +2128,7 @@ impl Game {
                             1.0
                         };
                         let dmg = ((base as f32) * scale).round() as i32;
-                        player.take_damage(dmg);
+                        player.take_damage_from(dmg, Some(e.archetype));
                     }
                 }
                 if e.is_ranged() {
@@ -1761,6 +2145,18 @@ impl Game {
             }
         }
         self.perf.end("enemy_loop");
+
+        // Projectile-dodge pass. Agile archetypes scan nearby
+        // in-flight projectiles (player-owned AND ally rockets) and
+        // sidestep when one is about to pass through them. Runs
+        // before separation so the dodge displacement is absorbed
+        // into the same collision resolution. Ignoring owner_id is
+        // the point — a Leaper stepping out of a friendly
+        // Rocketeer's firing line is exactly the "clearing a path
+        // for the kill" behavior we want.
+        self.perf.begin("enemy_dodge");
+        self.tick_enemy_dodges(dt);
+        self.perf.end("enemy_dodge");
 
         // Soft pairwise separation so mobs visibly spread out when
         // they stack on the same tile. Not a hard collision — just
@@ -2244,7 +2640,7 @@ impl Game {
             // Compute modified damage up-front so primitives like
             // ShieldBreak can boost against armored targets.
             let raw_dmg = *dmg;
-            let (died, color, tile, arch, is_miniboss, pos, was_burning) = match self
+            let (died, color, tile, arch, is_miniboss, pos, was_burning, effective_dmg) = match self
                 .enemies
                 .get_mut(*idx)
             {
@@ -2278,10 +2674,20 @@ impl Game {
                         arch == Archetype::Miniboss,
                         (e.x, e.y),
                         was_burning,
+                        effective,
                     )
                 }
                 None => continue,
             };
+            // Credit the shooting player with the damage they landed.
+            // owner_id == 0 is a house-fired projectile (chain arc,
+            // gravity pull, or other indirect effect) — no player to
+            // credit.
+            if *owner_id != 0 && effective_dmg > 0 {
+                if let Some(pi) = self.players.iter_mut().find(|p| p.id == *owner_id) {
+                    pi.note_damage_dealt(effective_dmg.max(0) as u32);
+                }
+            }
             let seed = self.next_seed(tile);
             if died {
                 self.emit_gore_burst(*at, color, arch, seed);
@@ -2424,6 +2830,9 @@ impl Game {
                 (e.x, e.y, e.archetype)
             };
             self.spawn_corpse(arch, cx, cy);
+            // Fire the death sample for this archetype; no-op if no
+            // audio pool exists for it yet.
+            crate::audio::emit(arch.audio_id(), "death", Some((cx, cy)));
             self.enemies.swap_remove(idx);
             self.kills += 1;
             // Random small consumable drop so the floor stays loot-
@@ -2502,12 +2911,19 @@ impl Game {
             h.ttl > 0.0
         });
 
-        if !self.players.is_empty() && self.players.iter().all(|p| p.hp <= 0) {
-            self.alive = false;
-            // Death corruption spike; each downed player contributes.
-            let down_count = self.players.iter().filter(|p| p.hp <= 0).count() as f32;
-            self.add_corruption(7.0 * down_count);
+        // Death cinematic trigger. Every living player is down →
+        // kick off the DeathPhase state machine (if not already
+        // running). `alive` stays TRUE until the cinematic finishes
+        // and the player dismisses the report — that way the outer
+        // loop doesn't short-circuit into the old "any-key-exits"
+        // path on frame one.
+        if self.death_phase.is_none()
+            && !self.players.is_empty()
+            && self.players.iter().all(|p| p.hp <= 0)
+        {
+            self.enter_death_phase();
         }
+        self.tick_death_phase(dt);
 
         // Population counters for the telemetry dump — helps pinpoint
         // "N particles alive" type slowdowns.
@@ -2676,6 +3092,137 @@ impl Game {
         }
     }
 
+    /// Per-tick projectile-dodge scan. For every agile archetype,
+    /// check the projectile list for anything on a near-collision
+    /// course; if the projectile will pass within `dodge_radius` of
+    /// this enemy inside the next `LOOKAHEAD_SECS`, sidestep
+    /// perpendicular to the projectile's velocity (biased away from
+    /// the projectile's line).
+    ///
+    /// Ignores `from_ai` — dodging applies to player bullets AND
+    /// ally rockets alike. That naturally produces the "horde
+    /// clears a path for the Rocketeer's shot" emergent behavior
+    /// the design calls for; an agile Leaper watching a friendly
+    /// rocket trace toward the player will step sideways rather
+    /// than stand in the blast path.
+    fn tick_enemy_dodges(&mut self, dt: f32) {
+        /// How far ahead in time we extrapolate projectiles. At
+        /// ~0.45s, a 140 world-px/s pulse round covers 63 tiles —
+        /// enough runway that dodging enemies react visibly before
+        /// the round arrives, not after it's already inside them.
+        const LOOKAHEAD_SECS: f32 = 0.45;
+        /// Lateral miss margin that still counts as "about to hit."
+        /// Tuned to `hit_radius + this` so only genuine threats
+        /// trigger dodges; bullets whistling past don't.
+        const LATERAL_MARGIN: f32 = 1.4;
+        /// Seconds of forward commitment once a dodge starts. Short
+        /// enough to leave the firing line without decoupling from
+        /// the target; long enough to be visually legible as "that
+        /// Leaper just jinked."
+        const DODGE_DURATION: f32 = 0.22;
+        /// Cooldown after a dodge before the same enemy can dodge
+        /// again. Without this, a Leaper under sustained fire would
+        /// dodge every frame and never close.
+        const DODGE_COOLDOWN: f32 = 0.9;
+
+        // Decay in-flight dodge + cooldown timers before checking
+        // for new threats — an enemy already committed to a dodge
+        // doesn't re-trigger.
+        for e in self.enemies.iter_mut() {
+            if e.dodge_timer > 0.0 {
+                e.dodge_timer = (e.dodge_timer - dt).max(0.0);
+            }
+            if e.dodge_cooldown > 0.0 {
+                e.dodge_cooldown = (e.dodge_cooldown - dt).max(0.0);
+            }
+        }
+
+        if self.projectiles.is_empty() {
+            return;
+        }
+
+        // Snapshot projectile kinematics so the inner loop doesn't
+        // borrow Game twice. Only projectiles with non-trivial
+        // velocity and meaningful ttl contribute — expiring
+        // projectiles aren't worth dodging.
+        struct Threat {
+            x: f32,
+            y: f32,
+            vx: f32,
+            vy: f32,
+            speed: f32,
+        }
+        let threats: Vec<Threat> = self
+            .projectiles
+            .iter()
+            .filter_map(|p| {
+                let v2 = p.vx * p.vx + p.vy * p.vy;
+                if v2 < 1.0 || p.ttl <= 0.05 {
+                    return None;
+                }
+                Some(Threat {
+                    x: p.x,
+                    y: p.y,
+                    vx: p.vx,
+                    vy: p.vy,
+                    speed: v2.sqrt(),
+                })
+            })
+            .collect();
+        if threats.is_empty() {
+            return;
+        }
+
+        for e in self.enemies.iter_mut() {
+            if e.hp <= 0 || e.dodge_cooldown > 0.0 || e.dodge_timer > 0.0 {
+                continue;
+            }
+            if !e.archetype.dodges_projectiles() {
+                continue;
+            }
+            let er = e.hit_radius() + LATERAL_MARGIN;
+            let ex = e.x;
+            let ey = e.y;
+            for t in &threats {
+                // Displacement from projectile → enemy.
+                let dx = ex - t.x;
+                let dy = ey - t.y;
+                // Unit velocity of the projectile.
+                let inv_speed = 1.0 / t.speed;
+                let ux = t.vx * inv_speed;
+                let uy = t.vy * inv_speed;
+                // Along-track + cross-track components in proj frame.
+                let along = dx * ux + dy * uy;
+                if along < 0.0 {
+                    // Projectile already past the enemy.
+                    continue;
+                }
+                let cross = dx * uy - dy * ux; // signed lateral offset
+                if cross.abs() > er {
+                    // Projectile will miss laterally.
+                    continue;
+                }
+                // Time until the projectile's closest approach to the
+                // enemy. Speed is non-zero per earlier check.
+                let t_close = along / t.speed;
+                if t_close > LOOKAHEAD_SECS {
+                    continue;
+                }
+                // Commit a dodge perpendicular to projectile heading,
+                // biased AWAY from the enemy's current cross offset.
+                // If cross > 0 the enemy is on the +perpendicular
+                // side of the line — push further +perpendicular.
+                // Flip sign if cross < 0. `cross == 0` (dead-on hit)
+                // picks +perpendicular deterministically.
+                let sign = if cross >= 0.0 { 1.0 } else { -1.0 };
+                e.dodge_vec = (uy * sign, -ux * sign);
+                e.dodge_timer = DODGE_DURATION;
+                e.dodge_cooldown = DODGE_COOLDOWN;
+                break;
+            }
+        }
+    }
+
     /// Chain splash: find `n` nearest other enemies within `radius` of
     /// `from_idx` and apply `damage` to each. Kills are pushed into
     /// `kills_out` for caller-side cleanup.
@@ -2694,6 +3241,14 @@ impl Game {
         /// Overlap-depth × this × dt = world-units pushed per frame.
         /// Higher = snappier expansion; too high makes swarms jitter.
         const PUSH_STIFFNESS: f32 = 12.0;
+        /// Extra "personal-space" radius added to each pair's
+        /// min-distance threshold. Pushes apart even before true
+        /// hit-box overlap — small value, big feel: the horde
+        /// reads as a spreading wave with visible gaps between mobs
+        /// instead of a dense monolithic pack. ~0.75 tiles is
+        /// enough for zerglings (hit_radius 1.5) to feel "loose"
+        /// without breaking the bunch-at-the-door moments.
+        const SEPARATION_PADDING: f32 = 0.75;
 
         let n = self.enemies.len();
         if n < 2 {
@@ -2703,6 +3258,28 @@ impl Game {
         // Using Vec + index loop dodges the borrow-checker dance that
         // split_at_mut would incur.
         let mut deltas: Vec<(f32, f32)> = vec![(0.0, 0.0); n];
+
+        // Build the spatial grid fresh every call. Cell size is tied
+        // to the largest `hit_radius` we expect (miniboss ≈ 6.5), so
+        // any potential pair's overlap fits inside the 3×3 cell
+        // neighborhood the grid queries. Rebuilding per-call avoids
+        // the bookkeeping cost of incremental maintenance — the old
+        // positions are stale anyway after the AI movement pass that
+        // precedes separation.
+        const CELL_SIZE: f32 = 14.0;
+        let mut grid = crate::spatial::SpatialGrid::new(
+            self.arena.width as f32,
+            self.arena.height as f32,
+            CELL_SIZE,
+        );
+        for (i, e) in self.enemies.iter().enumerate() {
+            if e.hp > 0 {
+                grid.insert(i as u32, e.x, e.y);
+            }
+        }
+
+        // For each enemy, ask the grid for candidates in the 3×3
+        // block around its cell. Only test each pair once (j > i).
         for i in 0..n {
             let (ax, ay, ar, a_alive) = {
                 let a = &self.enemies[i];
@@ -2711,26 +3288,32 @@ impl Game {
             if !a_alive {
                 continue;
             }
-            for j in (i + 1)..n {
+            grid.for_each_near(ax, ay, |j_raw| {
+                let j = j_raw as usize;
+                // `j > i` keeps the unordered-pair contract — each
+                // pair contributes once, not twice.
+                if j <= i {
+                    return;
+                }
                 let (bx, by, br, b_alive) = {
                     let b = &self.enemies[j];
                     (b.x, b.y, b.hit_radius(), b.hp > 0)
                 };
                 if !b_alive {
-                    continue;
+                    return;
                 }
-                let min_dist = ar + br;
+                let min_dist = ar + br + SEPARATION_PADDING;
                 let dx = bx - ax;
                 let dy = by - ay;
                 let d2 = dx * dx + dy * dy;
                 if d2 >= min_dist * min_dist {
-                    continue;
+                    return;
                 }
                 // Fully-stacked pair (d ≈ 0): emit a deterministic
                 // nudge based on indices so the tie-break is stable
                 // across frames, not a jittering coin-flip.
                 let (nx, ny, overlap) = if d2 < 1e-4 {
-                    let angle = ((i * 31 + j) as f32) * 0.61803; // golden-ratio stir
+                    let angle = ((i * 31 + j) as f32) * 0.61803;
                     (angle.cos(), angle.sin(), min_dist)
                 } else {
                     let d = d2.sqrt();
@@ -2741,7 +3324,7 @@ impl Game {
                 deltas[i].1 -= ny * push;
                 deltas[j].0 += nx * push;
                 deltas[j].1 += ny * push;
-            }
+            });
         }
         for (i, (dx, dy)) in deltas.into_iter().enumerate() {
             if dx == 0.0 && dy == 0.0 {
@@ -3539,6 +4122,10 @@ impl Game {
         }
         self.render_crosshair(fb);
 
+        if self.debug_spatial_grid {
+            self.render_spatial_grid_overlay(fb, &camera);
+        }
+
         self.perf.end("render_total");
         self.perf.end_frame();
         // Refresh the overlay cache if a report is due; no tracing
@@ -3583,6 +4170,103 @@ impl Game {
 
     #[allow(dead_code)]
     fn _render_crosshair_below(&self, _fb: &mut Framebuffer) {}
+
+    /// Draw the spatial-grid overlay. Rebuilds a grid from current
+    /// enemy positions (cheap — same cell_size as the separation
+    /// pass uses) and paints each populated cell's boundary into
+    /// the framebuffer. Color intensity scales with population so
+    /// clusters visually pop. Only runs while `debug_spatial_grid`
+    /// is on — no cost otherwise.
+    fn render_spatial_grid_overlay(
+        &self,
+        fb: &mut Framebuffer,
+        camera: &crate::camera::Camera,
+    ) {
+        const CELL_SIZE: f32 = 14.0;
+        let arena_w = self.arena.width as f32;
+        let arena_h = self.arena.height as f32;
+        let cols = (arena_w / CELL_SIZE).ceil() as i32;
+        let rows = (arena_h / CELL_SIZE).ceil() as i32;
+        if cols <= 0 || rows <= 0 {
+            return;
+        }
+        // Bucket enemies by cell — O(N). Only live enemies count.
+        let mut counts: Vec<u32> = vec![0; (cols * rows) as usize];
+        for e in &self.enemies {
+            if e.hp <= 0 {
+                continue;
+            }
+            let cx = (e.x / CELL_SIZE) as i32;
+            let cy = (e.y / CELL_SIZE) as i32;
+            if cx < 0 || cy < 0 || cx >= cols || cy >= rows {
+                continue;
+            }
+            counts[(cy * cols + cx) as usize] += 1;
+        }
+
+        let vw = camera.viewport_w;
+        let vh = camera.viewport_h;
+        for cy in 0..rows {
+            for cx in 0..cols {
+                let n = counts[(cy * cols + cx) as usize];
+                if n == 0 {
+                    continue;
+                }
+                // Cell corners in world space → screen space. Clip
+                // cells entirely offscreen.
+                let wx0 = cx as f32 * CELL_SIZE;
+                let wy0 = cy as f32 * CELL_SIZE;
+                let wx1 = ((cx + 1) as f32 * CELL_SIZE).min(arena_w);
+                let wy1 = ((cy + 1) as f32 * CELL_SIZE).min(arena_h);
+                let (sx0, sy0) = camera.world_to_screen((wx0, wy0));
+                let (sx1, sy1) = camera.world_to_screen((wx1, wy1));
+                let x0 = sx0.round() as i32;
+                let y0 = sy0.round() as i32;
+                let x1 = sx1.round() as i32;
+                let y1 = sy1.round() as i32;
+                if x1 < 0 || y1 < 0 {
+                    continue;
+                }
+                if x0 >= vw as i32 || y0 >= vh as i32 {
+                    continue;
+                }
+                // Color ramps green (quiet) → yellow → red (swarm).
+                // The mapping is log-ish so a 100-enemy cell doesn't
+                // saturate the scale when most cells hold 1–3.
+                let intensity = ((n as f32).ln() / 6.0).min(1.0);
+                let r = (60.0 + intensity * 195.0) as u8;
+                let g = (255.0 - intensity * 200.0) as u8;
+                let b = (80.0 - intensity * 60.0).max(20.0) as u8;
+                let color = Pixel::rgb(r, g, b);
+                // Draw horizontal + vertical edges only — filled
+                // cells would obscure what's inside. Every 3rd pixel
+                // so the grid reads as a hatch pattern rather than
+                // a solid outline — keeps it legible over sprites.
+                let cx0 = x0.max(0) as u16;
+                let cy0 = y0.max(0) as u16;
+                let cx1 = x1.min(vw as i32 - 1).max(0) as u16;
+                let cy1 = y1.min(vh as i32 - 1).max(0) as u16;
+                // Top edge.
+                if y0 >= 0 && (y0 as u16) < vh {
+                    let y = y0 as u16;
+                    let mut x = cx0;
+                    while x <= cx1 {
+                        fb.set(x, y, color);
+                        x = x.saturating_add(3);
+                    }
+                }
+                // Left edge.
+                if x0 >= 0 && (x0 as u16) < vw {
+                    let x = x0 as u16;
+                    let mut y = cy0;
+                    while y <= cy1 {
+                        fb.set(x, y, color);
+                        y = y.saturating_add(3);
+                    }
+                }
+            }
+        }
+    }
 
     fn render_crosshair(&self, fb: &mut Framebuffer) {
         let color = Pixel::rgb(255, 255, 255);

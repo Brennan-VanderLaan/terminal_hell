@@ -124,6 +124,12 @@ pub fn run_connect(addr: String) -> Result<()> {
                         }
                         continue;
                     }
+                    if let KeyCode::F(4) = k.code {
+                        if press && !matches!(k.kind, KeyEventKind::Repeat) {
+                            game.debug_spatial_grid = !game.debug_spatial_grid;
+                        }
+                        continue;
+                    }
                     if let KeyCode::Tab = k.code {
                         if press && !matches!(k.kind, KeyEventKind::Repeat) {
                             game.inventory_open = !game.inventory_open;
@@ -323,6 +329,11 @@ pub fn run_connect(addr: String) -> Result<()> {
             fb.blit(&mut out)?;
             hud::draw_connecting(&mut out)?;
         }
+        // Single flush at end of render pass — HUD overlays used to
+        // flush individually which caused mid-frame repaints /
+        // flicker. One flush = one atomic terminal update.
+        use std::io::Write as _;
+        out.flush()?;
 
         if let Some((wave, kills, elapsed)) = run_ended_summary {
             let (c2, r2) = crossterm::terminal::size()?;

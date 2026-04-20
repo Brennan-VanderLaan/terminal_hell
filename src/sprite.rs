@@ -416,6 +416,14 @@ pub fn enemy_sprite(archetype: Archetype) -> Sprite {
             s.tint_toward(Pixel::rgb(80, 220, 255), 0.55);
             s
         }
+        // Phaser: borrows the Leaper silhouette tinted violet to
+        // signal the teleport flavor. Real dedicated sprite lands
+        // when the Phaser archetype gets its full polish pass.
+        Archetype::Phaser => {
+            let mut s = leaper();
+            s.tint_toward(Pixel::rgb(160, 100, 240), 0.55);
+            s
+        }
     }
 }
 
@@ -426,6 +434,31 @@ pub fn enemy_sprite_from_content(
     archetype: Archetype,
     content: &crate::content::ContentDb,
 ) -> Sprite {
+    enemy_sprite_branded(archetype, None, content)
+}
+
+/// Resolve a sprite with a brand preference. Lookup order:
+///   1. `(brand_id, archetype)` brand-specific override.
+///   2. `archetype_sprites[archetype]` archetype-wide art.
+///   3. Hardcoded Rust builder.
+///
+/// Called from the render path with the enemy's `brand_id`. The
+/// first tier gives Doom-branded rushers a distinct imp silhouette
+/// while Tarkov-branded rushers keep the scav look, even though
+/// both resolve to `Archetype::Rusher` at the sim layer.
+pub fn enemy_sprite_branded(
+    archetype: Archetype,
+    brand_id: Option<&str>,
+    content: &crate::content::ContentDb,
+) -> Sprite {
+    if let Some(bid) = brand_id {
+        if let Some(art) = content
+            .brand_sprites
+            .get(&(bid.to_string(), archetype))
+        {
+            return art.clone();
+        }
+    }
     if let Some(art) = content.archetype_sprites.get(&archetype) {
         return art.clone();
     }

@@ -1,0 +1,98 @@
+# Halo — Covenant Strike. The main Halo combat experience: Grunt
+# squads with plasma pistols, Jackal sniper lines behind energy
+# shields, Elites closing with plasma rifles + shields, Brutes
+# steamrolling the front. Distinct from the Flood brand — this is
+# the "disciplined alien military" flavor, not the conversion-horror
+# one.
+
+id = "halo_covenant"
+name = "Halo — Covenant Strike"
+description = "Grunt squads, Jackal snipers, Elites closing behind shields, Brute chargers."
+
+spawn_pool = [
+    "swarmling",
+    "marksman",
+    "pmc",
+    "charger",
+    "rocketeer",
+    "sentinel",
+]
+miniboss = "pmc"
+
+# Energy-sword lunge + Active Camo flavor → Blink. Perks lean into
+# the "push the line" Covenant aggression: Rampage for the combined
+# fire pressure, QuickHands for the plasma cadence, Survivor because
+# MJOLNIR plates the hits.
+signature_traversal = "blink"
+signature_perks = ["rampage", "quick_hands", "survivor"]
+
+[spawn_weights]
+# Grunts — the methane-breathing fodder.
+swarmling = 5
+# Jackal snipers behind shield gauntlets.
+marksman = 3
+# Elite Minor — plasma rifle + personal shields.
+pmc = 3
+# Brute Chieftain — gravity-hammer charge.
+charger = 2
+# Wraith mortars / fuel rod gunners.
+rocketeer = 1
+# Covenant turret emplacement.
+sentinel = 1
+
+# ── Brand sprite overrides ─────────────────────────────────────────
+# Covenant silhouettes: squat Grunts, shielded Jackals, tall Elites,
+# hulking Brute Chieftains. Art lives in content/core/art/halo_covenant/.
+
+[sprite_overrides]
+swarmling = "grunt.art"
+marksman = "jackal_sniper.art"
+pmc = "elite_minor.art"
+charger = "brute_chieftain.art"
+
+# Grunt — squat orange alien, methane tank riding on the back, dark
+# triangular breather mask slung over the face.
+[sprite_palettes.swarmling]
+H = "#ffa040"
+B = "#c05010"
+E = "#ffe678"
+T = "#3a5a74"
+A = "#2a2218"
+D = "#1a0a04"
+
+# Jackal sniper — purple-shelled scavenger crouched behind a scoped
+# beam rifle. S is the long barrel/scope, W is the rifle grip.
+[sprite_palettes.marksman]
+H = "#6a2890"
+B = "#8a38b0"
+E = "#ff3040"
+W = "#3c2040"
+S = "#202028"
+D = "#2a1034"
+A = "#1a0820"
+
+# Elite Minor — tall cobalt-armored warrior, split mandible face, and
+# armored gauntlets flaring from the shoulders.
+[sprite_palettes.pmc]
+H = "#283c78"
+B = "#3a5ab8"
+A = "#1c2850"
+F = "#d0c0a0"
+M = "#181020"
+E = "#ffe080"
+D = "#0c1428"
+C = "#3a4868"
+
+# Brute Chieftain — iron-gray mountain with a gravity hammer (S =
+# shaft, W = flanged head, G = blue energy glow between the flanges).
+[sprite_palettes.charger]
+H = "#504a3a"
+A = "#38342a"
+B = "#706858"
+E = "#ffb040"
+M = "#1a1810"
+D = "#2a2418"
+C = "#58503e"
+S = "#2a1a0a"
+W = "#8a7040"
+G = "#60c8ff"

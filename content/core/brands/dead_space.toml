@@ -7,7 +7,7 @@ id = "dead_space"
 name = "Dead Space — Ishimura Necromorph"
 description = "Body-horror mutation. Every kill makes it worse."
 
-spawn_pool = ["leaper", "splitter", "pinkie", "orb", "howler", "floodling"]
+spawn_pool = ["leaper", "splitter", "pinkie", "orb", "howler", "floodling", "phaser"]
 miniboss = "miniboss"
 
 # Claustrophobic corridors + mutation dread → Phase so survivors can
@@ -18,8 +18,8 @@ signature_traversal = "phase"
 signature_perks = ["last_stand", "butcher", "gloom_shroud"]
 
 [spawn_weights]
-# Slashers + Leapers dominate.
-leaper = 3
+# Slashers + Leapers dominate — jumps from every vent.
+leaper = 5
 # Pregnants + Guardians.
 splitter = 3
 # Brutes.
@@ -30,3 +30,55 @@ orb = 2
 howler = 1
 # Infector parasites.
 floodling = 2
+# Twitcher / Stalker teleport-shimmer — archaic-horror vibe.
+phaser = 2
+
+# Brand-specific sprite overrides. Blade-armed jittery Slashers,
+# Pregnants with swollen drop-tentacle sacs, plate-fronted red-
+# backed Brutes, baby-bodied Lurkers with whipping tentacles,
+# needle-nosed Infector spiders. Palette: bio-yellow flesh,
+# torn-red meat, gray bone-armor, black decay shadow.
+[sprite_overrides]
+leaper = "slasher.art"
+splitter = "pregnant.art"
+pinkie = "brute.art"
+orb = "lurker.art"
+floodling = "infector.art"
+
+[sprite_palettes.leaper]
+B = "#8a7040"
+D = "#141008"
+E = "#ff2020"
+F = "#b8803a"
+R = "#5a1a10"
+K = "#d8d0a8"
+
+[sprite_palettes.splitter]
+B = "#8a7040"
+D = "#141008"
+E = "#ff2020"
+F = "#b8803a"
+R = "#a82010"
+S = "#ffe040"
+T = "#681810"
+
+[sprite_palettes.pinkie]
+A = "#a89868"
+B = "#8a7040"
+D = "#141008"
+E = "#ff2020"
+R = "#a82010"
+
+[sprite_palettes.orb]
+B = "#b8a060"
+D = "#141008"
+E = "#ff2020"
+T = "#681810"
+
+[sprite_palettes.floodling]
+B = "#8a7040"
+D = "#141008"
+R = "#a82010"
+L = "#3a2810"
+N = "#d8c0a0"
+

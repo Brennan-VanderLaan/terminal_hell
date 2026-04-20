@@ -1,0 +1,10 @@
+id             = "bone_dust"
+tags           = ["undead", "bone", "dry"]
+# Dry bone + ash residue left where undead shatter. Revenants,
+# Eaters, skeletal variants. Ivory-beige fading to bone-gray.
+# No bloom — dust doesn't glow — but high jitter so each shatter
+# looks like a loose spray, not a round pool.
+fresh          = "#d8cfa6"
+dried          = "#6a6458"
+state_curve    = "fresh_to_dried"
+jitter         = 3

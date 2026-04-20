@@ -240,7 +240,7 @@ impl Menu {
         }
 
         queue!(out, ResetColor)?;
-        out.flush()?;
+        // Outer loop does a single flush after all overlays queue.
         Ok(())
     }
 }

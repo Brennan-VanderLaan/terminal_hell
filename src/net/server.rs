@@ -362,6 +362,12 @@ pub fn run_serve(port: u16) -> Result<()> {
                         }
                         continue;
                     }
+                    if let KeyCode::F(4) = k.code {
+                        if press && !matches!(k.kind, KeyEventKind::Repeat) {
+                            game.debug_spatial_grid = !game.debug_spatial_grid;
+                        }
+                        continue;
+                    }
                     if let KeyCode::Tab = k.code {
                         if press && !matches!(k.kind, KeyEventKind::Repeat) {
                             game.inventory_open = !game.inventory_open;
@@ -632,6 +638,13 @@ pub fn run_serve(port: u16) -> Result<()> {
         }
         game.console.render(&mut out, tc, tr)?;
         game.menu.render(&mut out, tc, tr, game.is_authoritative, game.paused)?;
+        // Single flush at end of render pass — HUD overlays used to
+        // flush individually which caused mid-frame repaints /
+        // flicker. One flush = one atomic terminal update.
+        {
+            use std::io::Write as _;
+            out.flush()?;
+        }
 
         if !game.alive {
             let (c2, r2) = crossterm::terminal::size()?;

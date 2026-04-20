@@ -1,6 +1,6 @@
 # Flood outbreak brand: Halo Flood / general parasitic-horror lineage.
 # Floodlings convert anything they touch into Flood combat forms;
-# Flood Carriers explode into more Floodlings. Zerglings + Splitters
+# Flood Carriers explode into more Floodlings. Splitters + swarmlings
 # round out the disposable-biomass roster — every death is another
 # conversion vector. The "emergent faction war" brand — watch the
 # Flood team (team=flood) attack regular horde + survivors alike.
@@ -13,9 +13,11 @@ spawn_pool = [
     "floodling",
     "flood",
     "flood_carrier",
-    "zergling",
     "splitter",
     "swarmling",
+    "rusher",
+    "leaper",
+    "marksman",
 ]
 miniboss = "miniboss"
 
@@ -28,14 +30,73 @@ signature_traversal = "blink"
 signature_perks = ["gloom_shroud", "last_stand", "corpse_pulse"]
 
 [spawn_weights]
-# Floodlings drive conversions — the conversion engine.
-floodling = 5
-# Flood combat forms spawned directly (not just via conversion).
-flood = 2
-# Carriers are the walking grenades. Rare to keep the bang special.
-flood_carrier = 1
-# Zerglings give Floodlings fodder to convert — swarm chain reaction.
-zergling = 3
+# Flood-faction members — team=flood, hostiles=[survivor,horde].
+# These are the ones that actually make the "Flood attacks everyone"
+# fantasy land: Floodlings convert anything nearby, regular Flood +
+# Carriers hunt BOTH players AND the uninfected horde. Bumped so
+# there's always a visible Flood presence, not an occasional one.
+floodling = 6
+flood = 4
+# Carriers are the walking grenades — bumped so the Floodling-burst
+# cascade triggers often enough to read as infection pressure.
+flood_carrier = 2
+# Fresh uninfected human fodder for the Floodlings to convert. When
+# a Floodling touches a Rusher, it becomes a Flood combat form —
+# the wave LITERALLY gets stronger as time passes.
+rusher = 4
+# Marine riflemen holding the line + dying screaming.
+marksman = 2
+# Flood carrier leaping out of a dark hallway — jumps feel right
+# for the conversion-horror vibe.
+leaper = 2
 # Splitters cascade into swarmlings that Floodlings then convert.
 splitter = 2
 swarmling = 2
+
+# ── Brand sprite overrides ─────────────────────────────────────────
+# Flood silhouettes: tiny tendril-legged Infection Forms, whip-armed
+# combat forms, bloated Carriers, and fresh-meat uninfected marines
+# that haven't been converted yet. Sickly green chitin + pale bone.
+# Art lives in content/core/art/halo_flood/.
+
+[sprite_overrides]
+floodling = "infection_form.art"
+flood = "flood_combat.art"
+flood_carrier = "flood_carrier.art"
+rusher = "marine.art"
+
+# Infection Form — pale bulb with two glowing eye-spots and a ring of
+# dangling tendrils. The crawling conversion vector.
+[sprite_palettes.floodling]
+B = "#d8d0a8"
+E = "#a8ff60"
+T = "#3a5a34"
+
+# Flood combat form — infected host, torso torn open, one huge whip
+# tentacle extending from the shoulder. W = whip arm, T = belly-tear.
+[sprite_palettes.flood]
+B = "#8ca878"
+D = "#2a3c26"
+W = "#5a8a4a"
+T = "#6a1828"
+C = "#1a1a12"
+
+# Flood Carrier — walking bloated sac studded with infection-form
+# pods ready to burst. S = spore-pod, C = dark foot.
+[sprite_palettes.flood_carrier]
+B = "#a8c48c"
+D = "#3a4a2a"
+S = "#6a283a"
+T = "#78905a"
+C = "#1a2014"
+
+# Uninfected Marine — UNSC silhouette: olive-green fatigues, helmet,
+# assault rifle extending from the shoulder. W = rifle barrel.
+[sprite_palettes.rusher]
+H = "#3a4a2a"
+F = "#d4b48c"
+E = "#2a2018"
+A = "#5a6a3a"
+W = "#2a2820"
+D = "#2a2418"
+C = "#1a1408"

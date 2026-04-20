@@ -11,6 +11,28 @@ use crossterm::{
 };
 use std::io::Write;
 
+/// Clip a Print to the remaining columns so terminal auto-wrap can't
+/// carry overflow onto the next row from column 0 (which shows up as
+/// "text on the other side of the screen"). Returns the trimmed
+/// slice — never allocates unless truncation actually happens.
+///
+/// `col` is the starting screen column; `cols` is the terminal width.
+/// If `col >= cols` the function returns an empty string so the caller
+/// can skip drawing entirely.
+fn clip_to_cols(text: &str, col: u16, cols: u16) -> String {
+    if col >= cols {
+        return String::new();
+    }
+    let avail = (cols - col) as usize;
+    // Count chars, not bytes — multibyte glyphs (box-drawing,
+    // sextants, emoji-ish) would otherwise get sliced mid-codepoint.
+    let len = text.chars().count();
+    if len <= avail {
+        return text.to_string();
+    }
+    text.chars().take(avail).collect()
+}
+
 pub fn draw_hud<W: Write>(
     out: &mut W,
     wave: u32,
@@ -47,7 +69,6 @@ pub fn draw_hud<W: Write>(
         Print(&text),
         ResetColor,
     )?;
-    out.flush()?;
     Ok(())
 }
 
@@ -101,7 +122,6 @@ pub fn draw_loadout<W: Write>(
             ResetColor,
         )?;
     }
-    out.flush()?;
     Ok(())
 }
 
@@ -125,7 +145,6 @@ pub fn draw_dead_banner<W: Write>(out: &mut W, cols: u16, rows: u16) -> Result<(
         Print(text),
         ResetColor,
     )?;
-    out.flush()?;
     Ok(())
 }
 
@@ -151,7 +170,6 @@ pub fn draw_paused_banner<W: Write>(
         Print(text),
         ResetColor,
     )?;
-    out.flush()?;
     Ok(())
 }
 
@@ -190,7 +208,6 @@ pub fn draw_intermission<W: Write>(out: &mut W, game: &crate::game::Game) -> Res
         Print(&line),
         ResetColor,
     )?;
-    out.flush()?;
     Ok(())
 }
 
@@ -213,6 +230,13 @@ fn short_brand(id: &str) -> &str {
         "rimworld_mechs" => "MECH",
         "factorio_biters" => "BITER",
         "soulsborne_invader" => "SOULS",
+        "killing_floor" => "KF",
+        "half_life" => "HL",
+        "tyranid_swarm" => "NIDS",
+        "halo_covenant" => "COVIE",
+        "gears_locust" => "GEARS",
+        "borderlands_pandora" => "BL",
+        "xenomorph_hive" => "XENO",
         other => other,
     }
 }
@@ -239,6 +263,21 @@ fn brand_rgb(id: &str) -> (u8, u8, u8) {
         "rimworld_mechs" => (180, 180, 200),
         "factorio_biters" => (120, 200, 120),
         "soulsborne_invader" => (220, 200, 160),
+        // Killing Floor — surgical red, for the trader-timer / Zed-
+        // red UI palette the series uses.
+        "killing_floor" => (220, 60, 60),
+        // Half-Life — Lambda orange, the one unmistakable cue.
+        "half_life" => (255, 140, 40),
+        // 40K Tyranids — bio-purple chitin over yellow carapace.
+        "tyranid_swarm" => (200, 90, 220),
+        // Halo Covenant — energy-shield blue-violet.
+        "halo_covenant" => (120, 130, 255),
+        // Gears Locust — emergence-hole red / Crimson Omen.
+        "gears_locust" => (180, 40, 30),
+        // Borderlands — that yellow-black comic-book banner.
+        "borderlands_pandora" => (255, 200, 50),
+        // Xenomorph — acid-green blood on black chitin.
+        "xenomorph_hive" => (60, 220, 100),
         _ => (220, 220, 220),
     }
 }
@@ -266,7 +305,6 @@ pub fn draw_perks<W: Write>(out: &mut W, perks: &[crate::perk::Perk]) -> Result<
         )?;
     }
     queue!(out, ResetColor)?;
-    out.flush()?;
     Ok(())
 }
 
@@ -429,7 +467,6 @@ pub fn draw_inventory<W: Write>(
     }
 
     queue!(out, ResetColor)?;
-    out.flush()?;
     Ok(())
 }
 
@@ -468,7 +505,6 @@ pub fn draw_active_brands<W: Write>(
         )?;
     }
     queue!(out, ResetColor)?;
-    out.flush()?;
     Ok(())
 }
 
@@ -530,27 +566,34 @@ pub fn draw_pickup_labels<W: Write>(
                 b: (c.b as u16 * 6 / 10) as u8,
             }
         };
+        let clipped = clip_to_cols(&text, start_col as u16, total_cols);
+        if clipped.is_empty() {
+            continue;
+        }
         queue!(
             out,
             MoveTo(start_col as u16, row as u16),
             SetForegroundColor(fg),
             SetBackgroundColor(Color::Rgb { r: 15, g: 8, b: 25 }),
-            Print(&text),
+            Print(&clipped),
         )?;
         // Interact hint for equipment — only shown when the player
         // is close enough to press E on it.
         if near && pickup.kind.requires_interact() {
             let hint = " [E]";
-            queue!(
-                out,
-                MoveTo((start_col + text.chars().count() as i32) as u16, row as u16),
-                SetForegroundColor(Color::Rgb { r: 255, g: 220, b: 140 }),
-                Print(hint),
-            )?;
+            let hint_col = (start_col + clipped.chars().count() as i32) as u16;
+            let hint_clipped = clip_to_cols(hint, hint_col, total_cols);
+            if !hint_clipped.is_empty() {
+                queue!(
+                    out,
+                    MoveTo(hint_col, row as u16),
+                    SetForegroundColor(Color::Rgb { r: 255, g: 220, b: 140 }),
+                    Print(&hint_clipped),
+                )?;
+            }
         }
     }
     queue!(out, ResetColor)?;
-    out.flush()?;
     Ok(())
 }
 
@@ -588,7 +631,6 @@ pub fn draw_pickup_toasts<W: Write>(
             ResetColor,
         )?;
     }
-    out.flush()?;
     Ok(())
 }
 
@@ -611,22 +653,28 @@ pub fn draw_kiosk_labels<W: Write>(
             continue;
         }
         let text = format!("{} ({})", kiosk.brand_name, kiosk.votes);
-        let half = (text.len() as i32) / 2;
+        let half = (text.chars().count() as i32) / 2;
         let start_col = (col - half).max(0);
         if start_col >= total_cols as i32 {
             continue;
         }
         let color = kiosk.brand_color;
+        // Clip to remaining columns so the label never runs past the
+        // right edge — auto-wrap would otherwise put the tail on the
+        // next row starting at column 0.
+        let clipped = clip_to_cols(&text, start_col as u16, total_cols);
+        if clipped.is_empty() {
+            continue;
+        }
         queue!(
             out,
             MoveTo(start_col as u16, row as u16),
             SetForegroundColor(Color::Rgb { r: color.r, g: color.g, b: color.b }),
             SetBackgroundColor(Color::Rgb { r: 20, g: 10, b: 30 }),
-            Print(&text),
+            Print(&clipped),
             ResetColor,
         )?;
     }
-    out.flush()?;
     Ok(())
 }
 
@@ -660,7 +708,6 @@ pub fn draw_zoom_indicator<W: Write>(
         Print(&text),
         ResetColor,
     )?;
-    out.flush()?;
     Ok(())
 }
 
@@ -693,7 +740,6 @@ pub fn draw_clear_countdown<W: Write>(
         Print(&text),
         ResetColor,
     )?;
-    out.flush()?;
     Ok(())
 }
 
@@ -722,7 +768,6 @@ pub fn draw_wave_banner<W: Write>(
         Print(&text),
         ResetColor,
     )?;
-    out.flush()?;
     Ok(())
 }
 
@@ -736,7 +781,101 @@ pub fn draw_connecting<W: Write>(out: &mut W) -> Result<()> {
         Print(text),
         ResetColor,
     )?;
-    out.flush()?;
+    Ok(())
+}
+
+/// Full-screen death report — the `-- YOU HAVE DIED --` overlay with
+/// per-player stats and a named killer. Gated behind
+/// `Game::death_report_accepts_input` so buffered keys from the
+/// frame the player died don't dismiss it instantly.
+pub fn draw_death_report<W: Write>(
+    out: &mut W,
+    cols: u16,
+    rows: u16,
+    game: &crate::game::Game,
+) -> Result<()> {
+    let elapsed = game.elapsed_secs as u64;
+    let mins = elapsed / 60;
+    let secs = elapsed % 60;
+    let wave = game.director.wave;
+    let team_kills = game.kills;
+    let local = game.local_player();
+    let damage_dealt = local.map(|p| p.damage_dealt).unwrap_or(0);
+    let damage_taken = local.map(|p| p.damage_taken).unwrap_or(0);
+    let blood_lost = local.map(|p| p.blood_lost).unwrap_or(0);
+    // Killer: prefer the recorded archetype; fall back to the
+    // highest-damage source if no single hit "killed" us (rare but
+    // possible when the final damage comes from a source we don't
+    // track, e.g. an AI pulse projectile).
+    let killer_name: String = if let Some(arch) = local.and_then(|p| p.killer_archetype) {
+        format!("{:?}", arch)
+    } else if let Some(p) = local {
+        p.damage_by_source
+            .iter()
+            .max_by_key(|(_, v)| **v)
+            .map(|(k, _)| format!("{:?}", k))
+            .unwrap_or_else(|| "the dark".to_string())
+    } else {
+        "the dark".to_string()
+    };
+    let killer_total: u32 = local
+        .and_then(|p| p.killer_archetype.and_then(|a| p.damage_by_source.get(&a).copied()))
+        .unwrap_or(0);
+
+    let title = " — YOU HAVE DIED — ";
+    let accept_hint = if game.death_report_accepts_input() {
+        "     press any key to exit      "
+    } else {
+        "       (the gold settles)       "
+    };
+
+    let lines: Vec<String> = vec![
+        "                                     ".into(),
+        format!("{:^37}", title),
+        "                                     ".into(),
+        format!("   killed by: {:<10} ({:>4})   ", killer_name, killer_total),
+        "                                     ".into(),
+        format!("   wave reached   : {:>10}   ", wave),
+        format!("   team kills     : {:>10}   ", team_kills),
+        format!("   time survived  : {:>7}m {:02}s", mins, secs),
+        "                                     ".into(),
+        format!("   damage dealt   : {:>10}   ", damage_dealt),
+        format!("   damage taken   : {:>10}   ", damage_taken),
+        format!("   blood lost     : {:>10}   ", blood_lost),
+        "                                     ".into(),
+        accept_hint.to_string(),
+        "                                     ".into(),
+    ];
+    let width = lines.iter().map(|l| l.chars().count() as u16).max().unwrap_or(0);
+    let height = lines.len() as u16;
+    let x = cols.saturating_sub(width) / 2;
+    let y = rows.saturating_sub(height) / 2;
+
+    // Gold-on-dark palette: gilded text over the near-black
+    // cinematic background. The world tint behind is already gold;
+    // this panel reads as the inscription solidifying on top of it.
+    let fg = Color::Rgb { r: 255, g: 220, b: 80 };
+    let bg = Color::Rgb { r: 20, g: 14, b: 0 };
+    let dim_fg = Color::Rgb { r: 160, g: 130, b: 60 };
+    queue!(out, SetBackgroundColor(bg))?;
+    for (i, line) in lines.iter().enumerate() {
+        let is_title = i == 1;
+        let is_hint = i + 2 == lines.len();
+        let color = if is_title {
+            Color::Rgb { r: 255, g: 240, b: 120 }
+        } else if is_hint && !game.death_report_accepts_input() {
+            dim_fg
+        } else {
+            fg
+        };
+        queue!(
+            out,
+            MoveTo(x, y + i as u16),
+            SetForegroundColor(color),
+            Print(line),
+        )?;
+    }
+    queue!(out, ResetColor)?;
     Ok(())
 }
 
@@ -774,6 +913,5 @@ pub fn draw_gameover<W: Write>(
         queue!(out, MoveTo(x, y + i as u16), Print(line))?;
     }
     queue!(out, ResetColor)?;
-    out.flush()?;
     Ok(())
 }

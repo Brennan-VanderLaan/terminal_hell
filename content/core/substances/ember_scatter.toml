@@ -1,0 +1,14 @@
+id             = "ember_scatter"
+tags           = ["fire", "glowing", "flammable", "burnt"]
+# Orange ember residue left by fire-bugs (swarmlings, fire-rushers,
+# any ignite-aura death). Complements the ignite_aura reaction —
+# the fire ring fades but the scatter stays warm for a bit, then
+# cools into ash. Bright bloom so a room full of burn-deaths glows.
+fresh          = "#ff8a28"
+dried          = "#6a3014"
+state_curve    = "fresh_to_dried"
+jitter         = 2
+bloom_color    = "#ffb860"
+bloom_radius   = 3
+bloom_falloff  = 0.75
+bloom_strength = 0.5

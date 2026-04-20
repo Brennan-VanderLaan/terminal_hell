@@ -59,6 +59,72 @@ impl ReactionRegistry {
             },
         );
 
+        // Flood ichor — green infection puddle for the Flood faction.
+        // The faction-visual tell: a room full of Flood deaths reads
+        // as GREEN instead of red, so survivors know which faction
+        // died here at a glance.
+        r.register(
+            "spawn_ichor",
+            Reaction::SpawnSubstance {
+                id: "flood_ichor",
+                radius: 1.8,
+                state: 10,
+            },
+        );
+        r.register(
+            "spawn_big_ichor",
+            Reaction::SpawnSubstance {
+                id: "flood_ichor",
+                radius: 3.2,
+                state: 0,
+            },
+        );
+
+        // Mech oil — dark iridescent puddle for turrets + sentinels +
+        // juggernauts. Reads "machine leaked" not "person bled."
+        r.register(
+            "spawn_oil",
+            Reaction::SpawnSubstance {
+                id: "oil_pool",
+                radius: 2.2,
+                state: 20,
+            },
+        );
+
+        // Bone dust — undead shatter residue. Revenants + Eaters
+        // leave dry ivory scatter instead of a wet puddle.
+        r.register(
+            "spawn_bone_dust",
+            Reaction::SpawnSubstance {
+                id: "bone_dust",
+                radius: 1.6,
+                state: 30,
+            },
+        );
+
+        // Ember scatter — fire-bug residue. Pairs with ignite_aura
+        // on archetypes that also spawn a burn ring. The glow
+        // lingers after the fire fades.
+        r.register(
+            "spawn_embers",
+            Reaction::SpawnSubstance {
+                id: "ember_scatter",
+                radius: 2.0,
+                state: 10,
+            },
+        );
+
+        // Psychic residue — arcane death for Orbs, Phasers, cultists.
+        // Violet bloom ties unnatural deaths into the Carcosa palette.
+        r.register(
+            "spawn_psychic_residue",
+            Reaction::SpawnSubstance {
+                id: "psychic_residue",
+                radius: 1.8,
+                state: 15,
+            },
+        );
+
         // Exploders — scorch + damage ring on death.
         r.register(
             "explode_small",

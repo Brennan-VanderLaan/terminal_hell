@@ -94,6 +94,20 @@ pub struct BrandDef {
     /// player already has all of them, fall back to any unowned perk.
     #[serde(default)]
     pub signature_perks: Option<Vec<String>>,
+    /// Optional per-archetype sprite overrides. When an enemy spawns
+    /// from this brand and renders, the render path checks for a
+    /// brand-specific sprite first, then the archetype default, then
+    /// the hardcoded builder. Entry format: `archetype_snake_name →
+    /// art_filename.art`, with the corresponding palette declared in
+    /// `sprite_palettes`. Art files live in
+    /// `content/core/art/<brand_id>/`.
+    #[serde(default)]
+    pub sprite_overrides: HashMap<String, String>,
+    /// Palettes for each sprite override — mirrors the archetype-
+    /// level `palette` field. Keyed by the same archetype snake
+    /// name as `sprite_overrides`. Values are {char → hex} maps.
+    #[serde(default)]
+    pub sprite_palettes: HashMap<String, HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -114,6 +128,12 @@ pub struct ContentDb {
     /// Optional ASCII-art sprites keyed by archetype. When present,
     /// sprite.rs uses these instead of the hardcoded builders.
     pub archetype_sprites: HashMap<Archetype, crate::sprite::Sprite>,
+    /// Brand-specific sprite overrides: `(brand_id, archetype) →
+    /// Sprite`. When an enemy spawned from a specific brand renders,
+    /// the lookup tries this first; falls back to `archetype_sprites`
+    /// and then the hardcoded builder. Authored via each brand's
+    /// `sprite_overrides` + `sprite_palettes` TOML sections.
+    pub brand_sprites: HashMap<(String, Archetype), crate::sprite::Sprite>,
 }
 
 impl std::fmt::Debug for ContentDb {
@@ -252,6 +272,90 @@ impl ContentDb {
             archetype_sprites.insert(*arch, sprite);
         }
 
+        // Brand-level sprite overrides. Each brand can declare a
+        // `[sprite_overrides]` map of archetype → art filename plus
+        // `[sprite_palettes.<arch>]` palette tables. When an enemy
+        // spawns from that brand and renders, the lookup tries this
+        // first. Art files live under `content/core/art/<brand_id>/`
+        // by convention, but any filename inside the art/ dir works.
+        let mut brand_sprites: HashMap<(String, Archetype), crate::sprite::Sprite> =
+            HashMap::new();
+        for (brand_id, brand) in &brands {
+            if brand.sprite_overrides.is_empty() {
+                continue;
+            }
+            let Some(dir) = art_dir else { continue };
+            for (arch_name, art_filename) in &brand.sprite_overrides {
+                let Some(arch) = Archetype::from_name(arch_name) else {
+                    tracing::warn!(
+                        brand = %brand_id,
+                        archetype = %arch_name,
+                        "sprite_overrides references unknown archetype"
+                    );
+                    continue;
+                };
+                // Try the brand's subdirectory first
+                // (`<brand>/<file>`), then root `art/`.
+                let sub = format!("{brand_id}/{art_filename}");
+                let file = dir
+                    .get_file(&sub)
+                    .or_else(|| dir.get_file(art_filename));
+                let Some(file) = file else {
+                    tracing::warn!(
+                        brand = %brand_id,
+                        archetype = %arch_name,
+                        art = %art_filename,
+                        "sprite_overrides art file missing"
+                    );
+                    continue;
+                };
+                let Some(pal_map) = brand.sprite_palettes.get(arch_name) else {
+                    tracing::warn!(
+                        brand = %brand_id,
+                        archetype = %arch_name,
+                        "sprite_overrides missing matching sprite_palettes entry"
+                    );
+                    continue;
+                };
+                let text = match file.contents_utf8() {
+                    Some(t) => t,
+                    None => {
+                        tracing::warn!(
+                            brand = %brand_id,
+                            archetype = %arch_name,
+                            "sprite_overrides art file not UTF-8"
+                        );
+                        continue;
+                    }
+                };
+                let palette = match crate::art::palette_from_toml(pal_map) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        tracing::warn!(
+                            brand = %brand_id,
+                            archetype = %arch_name,
+                            %e,
+                            "sprite_palettes parse failed"
+                        );
+                        continue;
+                    }
+                };
+                let sprite = match crate::art::parse_art(text, &palette) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::warn!(
+                            brand = %brand_id,
+                            archetype = %arch_name,
+                            %e,
+                            "sprite_overrides art parse failed"
+                        );
+                        continue;
+                    }
+                };
+                brand_sprites.insert((brand_id.clone(), arch), sprite);
+            }
+        }
+
         Ok(Self {
             archetypes,
             brands,
@@ -260,6 +364,7 @@ impl ContentDb {
             blood_pool_id,
             scorch_id,
             archetype_sprites,
+            brand_sprites,
         })
     }
 
@@ -376,6 +481,7 @@ fn raw_names(db: &HashMap<Archetype, ArchetypeStats>) -> Vec<&'static str> {
             Archetype::Flood => "flood",
             Archetype::FloodCarrier => "flood_carrier",
             Archetype::PlayerTurret => "player_turret",
+            Archetype::Phaser => "phaser",
         })
         .collect()
 }

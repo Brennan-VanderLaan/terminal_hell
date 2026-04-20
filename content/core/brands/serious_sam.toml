@@ -5,7 +5,7 @@ id = "serious_sam"
 name = "Serious Sam — Endless Horde"
 description = "Dozens at once. Circular strafing or death."
 
-spawn_pool = ["rusher", "zergling", "swarmling", "charger", "howler", "sapper"]
+spawn_pool = ["rusher", "swarmling", "charger", "howler", "sapper", "leaper"]
 miniboss = "miniboss"
 
 # Strafe-king flavor → Slide locks you into a committed movement arc
@@ -16,9 +16,70 @@ signature_traversal = "slide"
 signature_perks = ["adrenaline", "rampage", "quick_hands"]
 
 [spawn_weights]
-rusher = 5
-zergling = 6
-swarmling = 4
+# Headless kamikazes + kleer skeletons.
+rusher = 7
+# Biomechanoid werebulls.
 charger = 2
+# Beheaded firecracker / rocketeer pose.
+swarmling = 4
+# Scythian witch-harpy leap.
+leaper = 2
+# Scream of Sirian cult.
 howler = 1
+# Suicide-vomiter.
 sapper = 1
+
+# ── Brand sprite overrides ─────────────────────────────────────────
+# Serious Sam — Egyptian tomb horde. Headless bombers, armored
+# werebulls, bone kleers, Sirian harpies. Bright golden-sand + bone
+# + Egyptian bronze palette.
+
+[sprite_overrides]
+rusher = "beheaded_kamikaze.art"
+charger = "werebull.art"
+rocketeer = "beheaded_rocketeer.art"
+howler = "sirian_harpy.art"
+sapper = "kleer_skeleton.art"
+
+# Beheaded Kamikaze — stump neck, red-pipe arteries, bombs each fist.
+[sprite_palettes.rusher]
+B = "#d8a848"
+D = "#6a4818"
+N = "#c01818"
+F = "#2a2a2e"
+H = "#ff4020"
+
+# Werebull — huge biomech bull, bronze armor plates, horns.
+[sprite_palettes.charger]
+B = "#c89438"
+D = "#5a3810"
+E = "#ff3020"
+H = "#f0e4b0"
+A = "#402010"
+M = "#886028"
+
+# Beheaded Rocketeer — headless torso with twin launcher tubes.
+[sprite_palettes.rocketeer]
+B = "#d8a848"
+D = "#6a4818"
+N = "#c01818"
+R = "#3a3c40"
+
+# Sirian Harpy — winged screamer, open shrieking maw.
+[sprite_palettes.howler]
+B = "#d8a058"
+D = "#6a4818"
+E = "#ff3020"
+M = "#2a1608"
+W = "#8a6028"
+C = "#6a4818"
+T = "#e8c878"
+
+# Kleer Skeleton — stark bone frame with spiked ball mace on chain.
+[sprite_palettes.sapper]
+B = "#f0ead0"
+D = "#5a5238"
+E = "#ff3020"
+S = "#3a3a40"
+M = "#707078"
+

@@ -76,6 +76,11 @@ pub enum Archetype {
     /// ["horde", "flood"]. Stationary hitscan — shoots enemies,
     /// enemies shoot back, dies like any other entity.
     PlayerTurret,
+    /// Phaser: short-range teleport stalker. Flickers in and out of
+    /// position in 4–8 tile hops toward the nearest player, with a
+    /// brief shimmer telegraph. Fragile but punishing in melee once
+    /// it lands next to you — survives on being hard to track.
+    Phaser,
 }
 
 /// Generic team + hostility system. Instead of a hardcoded Faction
@@ -120,6 +125,7 @@ impl Archetype {
             21 => Archetype::Flood,
             22 => Archetype::FloodCarrier,
             23 => Archetype::PlayerTurret,
+            24 => Archetype::Phaser,
             _ => Archetype::Rusher,
         }
     }
@@ -149,6 +155,7 @@ impl Archetype {
             Archetype::Flood => 21,
             Archetype::FloodCarrier => 22,
             Archetype::PlayerTurret => 23,
+            Archetype::Phaser => 24,
         }
     }
 
@@ -180,8 +187,69 @@ impl Archetype {
             "flood" => Archetype::Flood,
             "flood_carrier" => Archetype::FloodCarrier,
             "player_turret" => Archetype::PlayerTurret,
+            "phaser" => Archetype::Phaser,
             _ => return None,
         })
+    }
+
+    /// Does this archetype actively dodge incoming projectiles?
+    /// Agile / alert units lean sideways out of the firing line;
+    /// fodder + heavy + stationary archetypes just eat the hit.
+    /// Gated by `dodge_cooldown` downstream so even dodgers can't
+    /// sidestep every bullet — they commit, recover, then maybe
+    /// dodge again.
+    pub fn dodges_projectiles(self) -> bool {
+        matches!(
+            self,
+            Archetype::Leaper
+                | Archetype::Phaser
+                | Archetype::Marksman
+                | Archetype::Rocketeer
+                | Archetype::Charger
+                | Archetype::Killa
+                | Archetype::Revenant
+        )
+    }
+
+
+    /// Snake-case content id for this archetype. Alias for
+    /// `audio_id` — both return the same string, and other systems
+    /// (brand sprite overrides, content lookups) key off this.
+    pub fn snake_name(self) -> &'static str {
+        self.audio_id()
+    }
+
+    /// Snake-case content id for this archetype. Used as the `<id>`
+    /// segment in audio sample pool keys ("<id>.<event>") and as the
+    /// folder name under `content/<pack>/audio/samples/units/<id>/`.
+    pub fn audio_id(self) -> &'static str {
+        match self {
+            Archetype::Rusher => "rusher",
+            Archetype::Pinkie => "pinkie",
+            Archetype::Charger => "charger",
+            Archetype::Revenant => "revenant",
+            Archetype::Marksman => "marksman",
+            Archetype::Pmc => "pmc",
+            Archetype::Swarmling => "swarmling",
+            Archetype::Orb => "orb",
+            Archetype::Miniboss => "miniboss",
+            Archetype::Eater => "eater",
+            Archetype::Breacher => "breacher",
+            Archetype::Rocketeer => "rocketeer",
+            Archetype::Leaper => "leaper",
+            Archetype::Sapper => "sapper",
+            Archetype::Juggernaut => "juggernaut",
+            Archetype::Howler => "howler",
+            Archetype::Sentinel => "sentinel",
+            Archetype::Splitter => "splitter",
+            Archetype::Killa => "killa",
+            Archetype::Zergling => "zergling",
+            Archetype::Floodling => "floodling",
+            Archetype::Flood => "flood",
+            Archetype::FloodCarrier => "flood_carrier",
+            Archetype::PlayerTurret => "player_turret",
+            Archetype::Phaser => "phaser",
+        }
     }
 }
 
@@ -241,6 +309,26 @@ pub struct Enemy {
     pub stuck_ticks: u16,
     pub unstick_timer: f32,
     pub unstick_dir: (f32, f32),
+    /// Active dodge-slide timer. While > 0 the enemy moves in
+    /// `dodge_vec` at an elevated speed to step out of an incoming
+    /// projectile's path. Ticked down each frame; when 0 the enemy
+    /// resumes normal movement. Only agile archetypes ever set this.
+    pub dodge_timer: f32,
+    /// Unit vector of the active dodge sidestep. Chosen perpendicular
+    /// to the incoming projectile's heading, biased away from the
+    /// projectile's line so the enemy actually leaves the danger lane.
+    pub dodge_vec: (f32, f32),
+    /// Seconds until this enemy can dodge again. Prevents an agile
+    /// unit from dodge-spamming through a continuous projectile
+    /// stream — they dodge, commit, recover, then may dodge again.
+    pub dodge_cooldown: f32,
+    /// Brand this enemy was attributed to when it spawned. Used by
+    /// the sprite renderer to pick a brand-specific art override
+    /// when available — a Doom rusher gets the Doom imp sprite, a
+    /// Tarkov rusher gets the scav sprite, etc. `None` for spawns
+    /// that predate the brand-tracking feature (legacy saves) or
+    /// for scripted spawns (bench mode, player turret deployments).
+    pub brand_id: Option<crate::tag::Tag>,
     /// Camp this enemy belongs to. Defaults to `"horde"`; Flood-style
     /// archetypes switch to `"flood"`. Generic — content can add new
     /// teams (`"syndicate"`, `"marines"`, etc) without touching Rust.
@@ -295,6 +383,10 @@ impl Enemy {
             stuck_ticks: 0,
             unstick_timer: 0.0,
             unstick_dir: (0.0, 0.0),
+            dodge_timer: 0.0,
+            dodge_vec: (0.0, 0.0),
+            dodge_cooldown: 0.0,
+            brand_id: None,
             // Flood-lineage archetypes carry the "flood" team and
             // hostile to both "horde" and "survivor" — that's the
             // faction-war behavior. Everyone else is "horde" and
@@ -325,10 +417,12 @@ impl Enemy {
         self.current_speed()
     }
 
-    /// Effective move speed this tick, including sprint / leap
-    /// modifiers. Chargers get 2.5× while their sprint_timer is
-    /// positive; Leapers get 4× while leaping. Cryo stacks slow
-    /// linearly down to 0 speed at 3 stacks (fully frozen).
+    /// Effective move speed this tick, including sprint / leap /
+    /// dodge modifiers. Chargers get 2.5× while their sprint_timer
+    /// is positive; Leapers get 4× while leaping; a mid-dodge enemy
+    /// steps at 2.2× normal speed so the sidestep lands before the
+    /// projectile does. Cryo stacks slow linearly down to 0 speed
+    /// at 3 stacks (fully frozen).
     pub fn current_speed(&self) -> f32 {
         let mut s = self.speed;
         if self.sprint_timer > 0.0 {
@@ -336,6 +430,9 @@ impl Enemy {
         }
         if self.leap_state == 2 {
             s *= 4.0;
+        }
+        if self.dodge_timer > 0.0 {
+            s *= 2.2;
         }
         if let Some(f) = &self.frost {
             // 1 stack → 85%, 2 → 70%, 3+ → 30% (functionally frozen).
@@ -397,6 +494,9 @@ impl Enemy {
             Archetype::Flood => Pixel::rgb(120, 255, 140),
             Archetype::FloodCarrier => Pixel::rgb(200, 240, 150),
             Archetype::PlayerTurret => Pixel::rgb(80, 220, 255),
+            // Phaser: pale violet with a warp-edge shimmer. Reads as
+            // "something moved through the air here."
+            Archetype::Phaser => Pixel::rgb(200, 140, 255),
         }
     }
 
@@ -426,6 +526,7 @@ impl Enemy {
             Archetype::Flood => Pixel::rgb(80, 180, 100),
             Archetype::FloodCarrier => Pixel::rgb(140, 200, 110),
             Archetype::PlayerTurret => Pixel::rgb(30, 120, 160),
+            Archetype::Phaser => Pixel::rgb(120, 70, 180),
         }
     }
 
@@ -491,6 +592,17 @@ impl Enemy {
             dir_y = self.unstick_dir.1;
         }
 
+        // Dodge override: an active projectile-dodge steps sideways
+        // out of the firing line regardless of normal chase. The
+        // dodge_vec is already perpendicular to the incoming round;
+        // current_speed() picks up the 2.2× multiplier so the
+        // sidestep outruns the bullet. After dodge_timer expires,
+        // normal pursuit resumes on the next tick.
+        if self.dodge_timer > 0.0 {
+            dir_x = self.dodge_vec.0;
+            dir_y = self.dodge_vec.1;
+        }
+
         let want_motion = dir_x.abs() > 0.001 || dir_y.abs() > 0.001;
         let step_x = dir_x * self.speed() * dt;
         let step_y = dir_y * self.speed() * dt;
@@ -546,9 +658,16 @@ impl Enemy {
         let dist2 = dx * dx + dy * dy;
         // Max engagement range scales with the archetype's
         // preferred_distance — Marksman/Sentinel/Killa shoot far;
-        // other ranged units stay mid-range.
+        // other ranged units stay mid-range. Snipers (Sentinel,
+        // Marksman) get a wider multiplier so they can actually
+        // threaten across the full 1200-wide arena instead of
+        // creeping into mid-range to fire.
         let pref = self.preferred_distance.max(30.0);
-        let max_range = pref * 1.9;
+        let range_mul = match self.archetype {
+            Archetype::Sentinel | Archetype::Marksman => 2.4,
+            _ => 1.9,
+        };
+        let max_range = pref * range_mul;
         if dist2 > max_range * max_range || dist2 < 4.0 * 4.0 {
             return None;
         }
@@ -673,7 +792,11 @@ impl Enemy {
 
         let mip = camera.mip_level();
         if mip.shows_sprite() {
-            let mut s = sprite::enemy_sprite_from_content(self.archetype, content);
+            let mut s = sprite::enemy_sprite_branded(
+                self.archetype,
+                self.brand_id.map(|t| t.as_str()),
+                content,
+            );
             if self.hit_flash > 0.0 {
                 s.tint_toward(Pixel::rgb(255, 255, 255), self.hit_flash.min(0.75));
             } else if self.tell_timer > 0.0 {

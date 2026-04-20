@@ -1,4 +1,4 @@
-# Terminal Hell — Design & Technical Specification (v2)
+# Terminal Hell — Design & Technical Specification (v2, reflects v0.7 shipped state)
 
 > *"You opened a terminal. You shouldn't have read that log."*
 
@@ -229,7 +229,7 @@ engine exposes a small set of base effect-verbs (apply-damage, spawn-entity,
 modify-stat, trigger-on-event, move-entity, etc.) that primitives are built
 from in TOML.
 
-#### 6.1.1 Starter primitive pool (v1 design list — ~24; 6 shipped in v0.6)
+#### 6.1.1 Starter primitive pool (v1 design list — ~24; 12 shipped in v0.7)
 
 **Combat primitives:**
 - ✅ `ignite` — burns target; ticks damage; ignites adjacent flammables.
@@ -237,30 +237,26 @@ from in TOML.
 - ✅ `ricochet` — projectile bounces off terrain; preserves damage for N
   bounces.
 - ✅ `chain` — on-hit, arcs to nearest N unlinked targets.
-- `contagion` — on applied-effect, spreads to adjacent allies/enemies. *(planned)*
-- `acid` — leaves damaging pool on hit; pools linger. *(planned)*
+- ✅ `contagion` — on-hit, status effects (burn, slow) propagate to
+  adjacent enemies. Turns a single Ignite proc into a cascading fire.
+- ✅ `acid` — enemy hit leaves a damaging green pool on the ground
+  (shipped as a bloom-capable substance `acid_pool`).
 - ✅ `pierce` — projectile passes through target; preserves damage.
-- `cryo` — slows target; stacking cryo eventually freezes for shatter
-  bonus. *(planned)*
-- `gravity-well` — hit creates brief attractor; pulls nearby entities. *(planned)*
-- ✅ `overdrive` — next shot after kill is empowered; stacks to cap.
-
-**Movement primitives (traversal slot; also composable with weapons):**
-*None shipped in v0.6 — the traversal slot itself isn't wired yet. See §6.3.*
-- `dash` — short directional burst; brief i-frames.
-- `blink` — short teleport; no i-frames; ignores terrain.
-- `slide` — maintain speed while crouched; under low cover; kicks debris.
-- `grapple` — hook to terrain or enemy; rapid pull toward target.
-- `rocket-jump` — self-damaging explosive-propelled launch; rewards HP
-  economy.
-- `phase` — briefly pass through one tile of wall; sanity cost.
-- `afterburn` — sprint leaves brief trail (ignitable by other primitives).
+- ✅ `cryo` — slows target by 15% per stack; 3 stacks = effectively frozen
+  + shatter crit on next hit.
+- ✅ `gravity-well` — hit creates brief attractor; pulls 3 nearest
+  enemies ~1.5 tiles inward. Soft CC for flanker control.
+- ✅ `overdrive` — next shot after kill is empowered (2× damage); consumed
+  on use.
 
 **Utility / defensive:**
+- ✅ `shield-break` — +50% damage vs archetypes with `armored`/`heavy`
+  tags. Anti-armor primitive.
+- ✅ `siphon` — on kill, restores +8 sanity to the owning player. Rewards
+  clean kills during Carcosa spirals.
 - `deployable` — primitive applied to an item makes it placeable as a
   stationary trap/turret version of itself. *(planned)*
 - `sustained` — extends duration of any duration-bearing effect. *(planned)*
-- `shield-break` — ignores shield/armor layer on hit. *(planned)*
 - `marked` — on hit, target is highlighted and takes bonus damage from
   others. *(planned; marks currently applied by Hastur's gaze, not by
   player weapon hits)*
@@ -268,7 +264,10 @@ from in TOML.
 - `phoenix-seed` *(removed for v1 per design)* — (placeholder: was
   considered, cut to preserve "no second chances")
 - `feedback` — taking damage charges next outgoing shot. *(planned)*
-- `siphon` — on kill, regenerate sanity (not HP). *(planned)*
+
+**Movement primitives (traversal slot):** shipped as a separate system —
+see §6.3 traversal verbs. The primitive pool and the traversal slot are
+adjacent systems, not unified in v0.7.
 
 **Carcosa primitives (rare, granted by Hastur events only; none shipped):**
 - `yellow-glyph` — projectile or hit leaves a Yellow Sign tile for 5s that
@@ -309,23 +308,30 @@ matrix is deferred pending more primitives in the pool.
 
 Weapons are **base fire-mode + primitive slots**.
 
-#### 6.2.1 Base fire-modes (v1 design list — 8; 1 shipped in v0.6)
+#### 6.2.1 Base fire-modes (v1 design list — 8; 5 shipped in v0.7)
 
 | Fire mode      | Status | Feel                                                    |
 |----------------|--------|---------------------------------------------------------|
-| `pulse`        | ✅     | Hitscan, fast cadence, forgiving spread                 |
-| `auto`         | planned | Full-auto projectile, medium cadence, spread on sustained|
-| `burst`        | planned | 3-round burst, high single-click damage                 |
-| `pump`         | planned | Shotgun cone; slow reload; pellet count                 |
-| `rail`         | planned | High-damage pierce line; long cooldown; tracer          |
+| `pulse`        | ✅     | Single projectile per click; baseline feel. Glyph `·`   |
+| `auto`         | ✅     | 16 Hz projectile stream, ~18 damage; medium cadence. Glyph `»` |
+| `burst`        | ✅     | 3-round burst per click, 0.07s spacing; high click damage. Glyph `⋯` |
+| `pump`         | ✅     | 5-pellet cone (~25° spread); slow cooldown; close-range. Glyph `◊` |
+| `rail`         | ✅     | Single high-damage pierce (+4 pierces stacked on top of any Pierce primitives); 260 world-px/s. Glyph `═` |
 | `lob`          | planned | Grenade launcher; arcs, bounces                         |
 | `cone`         | planned | Continuous cone stream (flamer/plasma); no reload, heats|
 | `beam`         | planned | Continuous line; locks on held target; ramps damage     |
 
-The shipped `pulse` is treated as a projectile (not hitscan) today — it
-fires a visible 2×2-pixel projectile with a trail at ~140 world pixels
-per second. Primitive slots on the weapon transfer to each projectile at
-fire time.
+Every projectile `pulse` fires carries the weapon's primitive list; each
+fire-mode chooses how many projectiles spawn per click, at what spacing,
+and with what base damage. The mode is stored on the `Weapon` runtime
+struct and travels through the `WeaponLoadout` snapshot so clients render
+the same mode icon in the HUD loadout strip + the Tab inventory panel.
+
+**Signature fire-modes per archetype:** every archetype in
+`content/core/archetypes.toml` declares a `signature_fire_mode` — weapons
+that drop from that enemy's corpse default to that mode. Marksmen drop
+rails, Rocketeers drop pulse (the explosive kind), Pinkies drop pumps,
+Killa drops auto. See §9.2.
 
 #### 6.2.2 Slots & rarity
 
@@ -344,54 +350,119 @@ decisions happen every pickup.
 
 #### 6.2.3 Authored signature passes
 
-*(planned — no signature exotics shipped in v0.6.)* Most weapons will be
-parameterized archetypes — two pulse-SMGs identical except for their
-slotted primitives. BUT a handful of **authored signature** weapons will
-exist in the pool as named exotics: the `Nail Gun` (sticks nails that
-tick; over 3 nails = rupture), the `Bent Fork` (melee, one shot, severs
-armor type), the `Harpoon` (grapples + chain-pulls + deals damage),
-`Blood Rattle` (beam; damages *you* while it heats up enemy). The
-authored signature weapons carry a unique base fire-mode variant and do
-not spawn randomly — they unlock via achievement and appear in runs as
-hand-placed Carcosa rewards (e.g., always in the Hastur-mark-survived
-drop).
+**v0.7 shipped: per-archetype signature-drop system** — not the "named
+exotic weapon" layer, but the lighter archetype-biasing layer that makes
+kills feel thematic. Every archetype TOML row declares:
+
+- `signature_primitives: Vec<String>` — the primitive pool rolled into
+  slots when *this* enemy drops a weapon. Sampled with replacement so a
+  Rare 3-slot roll can stack the same primitive.
+- `signature_fire_mode: Option<String>` — fire mode for the dropped
+  weapon. Optional; absent = random.
+
+Examples: Marksman → `[pierce, shield_break]` + `rail`; Pinkie →
+`[breach, shield_break]` + `pump`; Rocketeer → `[breach, ignite]` +
+`pulse`; Killa → `[overdrive, shield_break, breach]` + `auto`.
+
+Drops flow through this pool in two places:
+1. **Miniboss kills** — always drop a Rare weapon with the dying
+   archetype's signature.
+2. **Regular kills** — 1.5% chance (3% with Butcher perk) to drop a
+   weapon using the killed archetype's signature. Rarity scales with
+   wave number so late runs see more Uncommon/Rare.
+
+**Brand signatures** extend the system to the perk + traversal layer:
+each brand TOML declares `signature_traversal` + `signature_perks`. Perk
+drops bias toward the brand's picks; traversal drops default to the
+brand's verb. Tarkov → slide + survivor/last-stand/quick-hands; Doom →
+dash + rampage/adrenaline/quick-hands; Halo Flood → blink + gloom-shroud/
+last-stand/corpse-pulse; etc.
+
+**Still planned (deferred to M12+):** named-exotic weapons — the `Nail
+Gun`, `Bent Fork`, `Harpoon`, `Blood Rattle` lineage. Carry unique
+base-fire-mode variants, unlock via achievement, appear as hand-placed
+Carcosa rewards. Not in v0.7.
 
 ### 6.3 Movement
 
-*(v0.6 reality: the traversal slot isn't wired yet. Movement is plain
-WASD-at-fixed-speed with axis-separated wall collision. The design below
-remains the target; see deferral note in §19 milestones.)*
+**v0.7 shipped:** the traversal slot is wired. 5 verbs available; each
+player has exactly one equipped. Pickup replaces the equipped verb.
+Activated with **F** (kept separate from LShift — LShift is reserved for
+future sprint). Each verb has its own cooldown.
 
-Movement verbs are primitives (§6.1). Each character has **1 traversal
-slot**. Default is `walk` (baseline running speed). Picking up a traversal
-primitive replaces your current one (or composes, depending on the verb).
+| Verb      | Cooldown | Effect                                                            |
+|-----------|----------|-------------------------------------------------------------------|
+| `dash`    | 1.4s     | Short directional burst in movement direction + 0.25s i-frames    |
+| `blink`   | 2.5s     | Short teleport in aim direction; passes through walls; small sanity cost |
+| `grapple` | 3.5s     | Hook pulls player rapidly toward first wall/enemy/corpse in aim line |
+| `slide`   | 2.0s     | Locked-motion forward slide 0.6s; 30% damage resist through slide |
+| `phase`   | 5.0s     | Next wall tile walked into is ignored for collision (2s window); sanity cost |
 
-A traversal primitive can be socketed with weapon-primitive compositions
-that trigger on its use. `dash + ignite` = dashing leaves a burn trail.
-`blink + contagion` = blink teleports nearby allies with you on a share
-reaction. This is the *insane* stacking Risk of Rain promised but never
-delivered.
+The "verbs-as-primitives" unification (§6.1 movement list) and the
+composition matrix (e.g. `dash + ignite` = burn trail) are still planned
+for a later milestone. Today the traversal verb is a self-contained
+state machine on the `Player` struct; it doesn't compose with weapon
+primitives yet.
 
-Mouse aim is always mouse aim; movement is WASD; the traversal verb is
-bound to **LShift tap** by default (rebindable).
+Movement itself is WASD-at-fixed-speed with axis-separated wall
+collision. Mouse is always aim. Traversal verb fires on F press-edge.
 
 ### 6.4 Inventory
 
-**v0.6 shipped:** 2 weapon slots, `Q` to cycle, `E` to pick up / swap
-active. Pickup replaces the active slot; old weapon is discarded.
+**v0.7 shipped:**
+- 2 weapon slots, `Q` to cycle, `E` to pick up / swap active ✅
+- 1 traversal slot (replaced on pickup, auto-grab on collision) ✅
+- 1 perk stack: up to all 10 perks — picked perks are permanent for the
+  run, auto-grab on collision ✅
+- Consumable inventory: turret kits (deployable via T), medkits, sanity
+  doses, armor plates ✅
+- **Tab inventory panel** — full overlay showing HP/armor/sanity,
+  consumable counts, perk list with flavor text, loadout per slot with
+  rarity + mode + primitives ✅
+- **Pickup toasts** — "+ medkit +35" HUD stack on the right edge; newest
+  at top, fades over 3.5s, capped at 5 entries ✅
+- **Ground labels** — floating text above each pickup showing its
+  contents ("Rare · pump [BR]", "perk · Rampage"); brightens when the
+  player is near ✅
+- **Auto-grab rule** — consumables (medkit/sanity/armor/perk/traversal)
+  pick up on collision. Equipment (weapons, turret kits) still require
+  E, so a rare rolled loadout isn't accidentally swapped by jogging past
+  a Common weapon ✅
 
 **Full design (planned):**
 
-- 2 weapon slots (swap with Q or 1/2; picking up overflows → swap prompt) ✅
-- 1 traversal slot (replaced on pickup) *(planned)*
-- 1 armor slot (replaced on pickup) *(planned)*
+- 1 armor slot (replaced on pickup) *(planned — armor currently an
+  unslotted damage buffer)*
 - 3 utility slots (grenades, deployables, consumables; cycled with mouse
   wheel or 3/4/5) *(planned)*
 - 1 "sidearm" slot — a fixed cheap pistol that cannot be lost, the only
   guaranteed weapon you keep. *(planned)*
 
 No crafting. No combining. No drop-and-pick-up-again micro. Picking up is
-swapping.
+swapping (for weapons) or auto-consuming (for everything else).
+
+### 6.4a Perks
+
+Run-persistent passive modifiers picked up from miniboss drops + wave-
+milestone rewards (every 5 waves). 10 shipped; each perk is a single
+enum variant, modifier hooks fire from the relevant sim path.
+
+| Perk         | Glyph | Effect                                              |
+|--------------|-------|-----------------------------------------------------|
+| Corpse Pulse | `+`   | +4 HP on every enemy kill                            |
+| Iron Will    | `I`   | +1.5 sanity regen / s                                |
+| Quick Hands  | `Q`   | +25% fire rate on every weapon                       |
+| Survivor     | `S`   | +50 max armor; each new wave starts with +10 armor   |
+| Rampage      | `R`   | 3 kills within 4s → +30% outgoing damage for 8s      |
+| Last Stand   | `L`   | HP < 25% → 40% incoming damage resistance            |
+| Bloodhound   | `B`   | Standing on a blood pool regens +2 HP/s              |
+| Butcher      | `U`   | 2× chance on consumable drops + 2× signature-weapon  |
+| Gloom Shroud | `G`   | Carcosa terrain drains sanity 60% slower             |
+| Adrenaline   | `A`   | Taking damage → 0.6s of +60% movement speed          |
+
+Brand-signature perk pools bias which perks drop (§6.2.3). Duplicate
+perks don't stack — rolls skip any perk already owned, falling back to
+the full unowned set if the brand's signature pool is exhausted.
 
 ### 6.5 Controls (default, rebindable)
 
@@ -401,18 +472,22 @@ swapping.
 | Aim                 | Mouse                                  | ✅      |
 | Fire                | LMB or Space                           | ✅      |
 | Zoom camera         | Scrollwheel (0.2×–3.0×)                | ✅      |
-| Pickup / Interact / Vote | E                                 | ✅      |
+| Pickup (equipment)  | E                                      | ✅      |
+| Pickup (consumables)| Run into them                          | ✅      |
+| Vote at kiosk       | E                                      | ✅      |
 | Cycle weapon        | Q                                      | ✅      |
+| Deploy turret kit   | T                                      | ✅      |
+| Traversal verb      | F                                      | ✅      |
+| Inventory overlay   | Tab                                    | ✅      |
+| Perf overlay        | F3                                     | ✅      |
+| Spatial-grid debug  | F4                                     | ✅      |
 | ESC menu            | Esc                                    | ✅      |
 | Log console         | Backtick `` ` ``                       | ✅      |
 | Alt-fire            | RMB or Shift+LMB                       | planned |
 | Reload              | R                                      | planned |
 | Swap / Cycle utility| 1–2 / 3–5                              | planned |
-| Traversal verb      | LShift tap                             | planned |
 | Ping                | Middle-click or G                      | planned |
 | Team chat           | Enter (line-buffered)                  | planned |
-| Scoreboard          | Tab (hold)                                |
-| Menu                | Esc                                       |
 
 **Director controls:** A separate binding set for cursor-driven spawn /
 possess / hazard / breach commands. See §10.3.
@@ -456,6 +531,14 @@ Drop in ─► Hold position ─► Wave builds ─► Intermission (vote, repos
 - **Ambient pressure:** During intermissions, 10–20% of baseline spawns
   continue. Never total peace.
 - **No cap:** Waves do not end the run. Only death does.
+- ✅ **Clear-phase auto-advance timer (v0.7):** once spawns are done the
+  wave enters a `Clearing` state with a countdown — 50s at wave 1,
+  shrinking 0.5s per wave to a floor of 25s. Killing every hostile
+  advances immediately (the original "clear the wave" path); the
+  countdown is a fallback that force-advances so one straggler camping
+  in a corner can't stall the whole run. Surfaced in the HUD as a
+  "next wave in X.Xs" strip, flashing red under 10s. Synced to clients
+  via the Snapshot.
 
 ### 7.3 Intermission loop
 
@@ -904,9 +987,15 @@ below are design targets.*
   1. ✅ Spawns glyph-particles radially with drag + TTL decay + color
      fade.
   2. ✅ Leaves a rubble tile behind (passable, rendered darker).
-  3. planned — Dust-cloud effect.
-  4. planned — Explosive knockback to adjacent entities.
-  5. planned — Destruction propagation through `collapses_adjacent`
+  3. ✅ Projectiles pass through rubble (v0.7). Arena exposes
+     `blocks_projectile` as a separate predicate from `blocks_los` —
+     `DebrisPile` (loose rubble) blocks sight but not bullets, so
+     walking-through and shooting-through are symmetric. Enemy AI
+     still uses `blocks_los` for target sighting so rubble remains
+     soft cover vs ranged scans.
+  4. planned — Dust-cloud effect.
+  5. planned — Explosive knockback to adjacent entities.
+  6. planned — Destruction propagation through `collapses_adjacent`
      tiles.
 
 ### 11.2 Glyph particles & gore
@@ -1241,6 +1330,28 @@ Bevy ECS is overkill and pulls deps.
   vote registration) are server-arbitrated.
 - ✅ Pause is host-controlled (§17.13). Snapshot carries `paused`;
   clients freeze their particle / phantom ticks when the host pauses.
+- ✅ **Enemy soft separation (v0.7):** pairwise push-apart at the end
+  of the enemy tick — each overlapping pair (`hit_radius_a + hit_radius_b
+  + 0.75 personal-space padding`) contributes half the overlap depth
+  to each enemy's displacement, scaled by `PUSH_STIFFNESS × dt`.
+  Mobs visibly spread out into a spiral/ring when they cluster on a
+  player rather than stacking on one tile — "wall of teeth" feel.
+  Stationary archetypes (turrets, sentinels) are anchored but still
+  radiate repulsion so mobile enemies flow around them. Wall-clamped
+  via `arena.is_passable` so pushes never clip into structures.
+- ✅ **Uniform spatial grid (v0.7):** `src/spatial.rs`. Rebuilt per
+  tick; `cell_size` = 14 world-units (≈ 2× miniboss hit_radius, so
+  any overlap fits inside the 3×3 cell neighborhood). O(1) neighbor
+  lookup via `for_each_near(x, y, fn)`. Cuts separation work from
+  O(N²) to O(N × 9) at dense populations. F4 overlays the grid in
+  watch modes — green-to-red cell fill scales with log(population)
+  so hot spots pop visually.
+- ✅ **Team-bucketed cross-faction scan (v0.7):** enemies are bucketed
+  by `team` tag once per tick; each enemy only scans buckets matching
+  its own `hostiles` set. Zerg-on-zerg is free because the horde tag
+  isn't in any horde enemy's hostile set. This replaced an earlier
+  flat-Vec scan that was O(N²) per tick (100M team-checks at 10k
+  enemies). See §17.14 for the benchmark data that caught it.
 - planned — Client-side input prediction for movement. Today clients
   snap to server state each snapshot @ 20Hz, which is fine on LAN.
 - planned — 100ms interpolation buffer. Today: hard snap.
@@ -1569,6 +1680,155 @@ the console when both are open.
   peers. Host sees "press ESC → Unpause"; clients see "HOST PAUSED"
   for clarity on who holds the toggle.
 
+### 17.14 Benchmark mode
+
+Shipped in v0.7. Peer to `solo` / `serve` / `connect`: a new CLI
+subcommand `terminal_hell bench` that reuses the main `Game` engine
+verbatim, swapping keyboard/network input for scripted inputs and the
+wave director for declarative timed spawn batches. Purpose: quantify
+where frames go, catch regressions on CI, and isolate rendering cost
+from sim cost.
+
+```
+terminal_hell bench [--scenario NAME] [--headless] [--debug-grid] [--output FILE]
+```
+
+#### 17.14.1 CLI flags
+
+- `--scenario NAME` — run one scenario from the catalogue. Omit to run
+  the full batch.
+- `--headless` — skip rendering entirely. No `TerminalGuard`, no
+  framebuffer compose, no stdout writes. Sim + particle tick still run
+  at wall-clock 30Hz so telemetry matches live gameplay. CI-friendly;
+  runs without a TTY.
+- `--watch` (default) — full render pipeline at 60 fps so you can
+  literally watch 10k zerglings stampede a turret ring. Delta between
+  watch + headless reports attributes cost to rendering.
+- `--debug-grid` — start the spatial-grid overlay on. F4 also toggles
+  it mid-scenario.
+- `--output results.json` — writes a structured JSON batch report.
+  Pretty-printed text still goes to stderr.
+
+#### 17.14.2 Interrupt handling
+
+Both paths respect Ctrl+C. Watch mode polls crossterm events each frame
+(raw-mode swallows the native signal, so Esc + Ctrl+C are read from the
+event stream). Headless installs a `ctrlc` OS-level handler. Both flip
+a shared `AtomicBool`; the runner checks it every frame, breaks
+cleanly, emits a **partial report** for the scenario in flight, and
+skips the remainder of the batch.
+
+#### 17.14.3 Scenario authoring
+
+Rust-native for v0.7 — scenarios live in `src/bench/scenarios.rs` as
+plain structs, one function per scenario. TOML authoring is planned
+once the schema has settled.
+
+```rust
+pub struct Scenario {
+    pub name: &'static str,
+    pub summary: &'static str,
+    pub arena: (u16, u16),           // can differ per scenario
+    pub arena_seed: u64,             // fixed for reproducibility
+    pub players: Vec<ScriptedPlayer>,
+    pub spawns: Vec<ScenarioSpawn>,  // time-gated dispatch
+    pub duration: Duration,
+    pub stop_when_clear: bool,       // early-out on full clear
+}
+```
+
+Each `ScriptedPlayer` carries a `pos`, optional `turret_kits`, and a
+`PlayerScript` enum driving per-tick input:
+
+- `Stationary` — no input. Canonical idle baseline.
+- `ShootNearest` — no movement; aim at nearest enemy, hold fire.
+- `CircleStrafe { center, radius, rate }` — circle a point, aim at
+  nearest enemy, hold fire. Closest to "real play."
+- `HoldAndDeploy { deploy_secs }` — stand and shoot; consume turret
+  kits on a cadence. Used by the `turret_wall_vs_zerg` scenario so
+  the player builds a ring of turrets at realistic deploy pace.
+
+Each `ScenarioSpawn` is a timed batch — at `at_secs`, place `count`
+instances of `archetype` using a `SpawnLayout`:
+
+- `Point(x, y)` — all at one spot with a small deterministic jitter
+  (golden-ratio stir so the tie-break is stable).
+- `Ring { center, radius }` — evenly distributed on a circle.
+- `Grid { center, spacing }` — square grid pattern.
+- `Edges` — biased along the outer rim, mirroring the wave director's
+  "from every direction" flavor. This is what most scenarios use.
+
+#### 17.14.4 Starter catalogue
+
+Shipped in `src/bench/scenarios.rs`. Short durations (5–20s) so the
+full batch runs inside a CI minute; longer stress tests opt in.
+
+| Scenario                 | Purpose                                      |
+|--------------------------|----------------------------------------------|
+| `baseline_empty`         | Solo player, no enemies — idle sim cost       |
+| `rusher_50`              | Combat baseline                              |
+| `rusher_500`             | Mid-swarm stress                             |
+| `rusher_2000`            | Big-swarm stress                             |
+| `zerg_tide_10k`          | Ten thousand zerglings — limit case          |
+| `turret_wall_vs_zerg`    | Player + 12 turret ring vs 10k zerglings     |
+| `map_scale_small/medium/large` | Same 500-enemy swarm across 3 arena sizes |
+| `breacher_wall_stress`   | 30 breachers A*-smashing walls               |
+| `sentinel_gauntlet`      | 20 sentinels around a strafing player        |
+
+#### 17.14.5 Report format
+
+Each `ScenarioReport` carries: name + render mode, arena dims, frame
+count, tick latency percentiles (p50/p95/p99/max), frame latency
+percentiles, effective FPS, peak entity counts (enemies / particles /
+projectiles / corpses), and a sorted subsystem breakdown sourced from
+`FrameProfile::take_totals` (a whole-scenario aggregate alongside the
+existing 1s rolling window).
+
+Pretty-printed example:
+
+```
+─── turret_wall_vs_zerg [headless] arena 1200×800 · 20.0s / 592 frames · 29.6 fps ───
+  tick   p50   3545µs  p95   4485µs  p99   4979µs  max   8686µs
+  frame  p50   3562µs  p95   4487µs  p99   4981µs  max   8688µs
+  peak  enemies 10012  particles 13  projectiles 21  corpses 0
+  subsystems (avg µs/frame):
+    tick_total               2191µs  total calls    599
+    enemy_separation         1427µs  total calls    349
+    enemy_loop                667µs  total calls    349
+    projectile_step            69µs  total calls    349
+```
+
+JSON output for diffing across commits is hand-rolled (flat schema,
+no `serde_json` dep).
+
+#### 17.14.6 CI hook
+
+`tests/bench_smoke.rs` runs 3 short headless scenarios and asserts
+tick-time thresholds. Regression catches live in PR CI:
+
+- `bench_smoke_baseline` — idle sim; asserts tick p95 < 2ms.
+- `bench_smoke_rusher_200` — 200-enemy swarm; asserts tick p95 < 5ms.
+- `bench_smoke_sentinel_ring` — 8 sentinels + circle-strafe player;
+  asserts peak enemies + frame count sanity.
+
+Thresholds are intentionally loose — catch catastrophic regressions,
+not chase false failures. Tune downward as the sim stabilizes.
+
+#### 17.14.7 Measured wins from v0.7
+
+The bench's first useful finding was a hidden O(N²) in the enemy
+loop's cross-faction target scan — a flat-Vec scan over every living
+enemy's team tag, per enemy. The team-bucket fix (§17.3) dropped
+`enemy_loop` at 10k enemies from **2175ms/frame → 0.994ms** (~2000×).
+At the same time, the spatial grid cut `enemy_separation` at 10k from
+**410ms → 30ms** (~13×). `turret_wall_vs_zerg` went from 0.2 fps to
+~30 fps sustained.
+
+Both fixes were invisible to normal play (sub-1k enemies never
+triggered the quadratic cost enough to register) and would have
+surfaced as "game feels fine until late game, then jank" without a
+dedicated stress-bench.
+
 ---
 
 ## 18. Data model (sketch)
@@ -1711,6 +1971,42 @@ Covers:
 - HTTP install server + bash/PowerShell auto-install + HMAC signing.
 - ESC menu (Resume / Pause / Copy / Quit) with host-synced pause.
 - Backtick log console pulling from an in-memory tracing ring buffer.
+
+**M7.6 — Progression + quality-of-life + perf scaffolding (new
+milestone, ✅ v0.7).** Another unplanned chunk — shipped because the
+game reached "technically complete loop" and immediately needed a
+progression layer + data-driven perf work to feel like a real game
+instead of a tech demo. Covers:
+- **Primitives pool expanded to 12:** added `acid`, `cryo`, `contagion`,
+  `gravity-well`, `siphon`, `shield-break`.
+- **Fire modes: 5 shipped** (pulse/auto/burst/pump/rail) — every weapon
+  drop carries a mode, rendered in the HUD loadout strip + Tab panel.
+- **10 perks** with run-persistent passive effects; picked from
+  miniboss drops + every-5-waves milestone drops.
+- **5 traversal verbs** (dash/blink/grapple/slide/phase) with per-verb
+  cooldowns + i-frames + sanity costs, bound to F.
+- **Tab inventory overlay**, pickup labels, pickup toasts
+  (per-player multiplayer-aware), auto-grab for consumables.
+- **Wave clearing timer** — force-advance after a timeout so one
+  straggler can't stall the run.
+- **Rubble shoot-through** — projectiles pass broken walls the same
+  way the player does.
+- **Player bleed FX** — damage taken triggers a seconds-long blood
+  emission scaled by hit severity.
+- **Enemy soft separation** — pairwise push-apart with personal-space
+  padding so the horde reads as a wave, not a stack.
+- **Signature drop passes** — per-archetype signature primitives +
+  fire mode; per-brand signature traversal + signature perks.
+- **Self-healing install scripts** — HMAC mismatch re-fetches the
+  installer from the host, matching the current session's token.
+- **Benchmark mode** — full `bench` subcommand with scripted scenarios,
+  telemetry capture, headless + watch modes, JSON reports, CI
+  integration tests. See §17.14.
+- **Uniform spatial grid** + **team-bucketed AI scans**. The bench
+  caught a hidden O(N²) in cross-faction targeting (2175ms/frame at
+  10k zerglings); team-bucket fix brought it to 0.994ms. Separation
+  grid trimmed another 410ms → 30ms. Game runs 10k zerglings at
+  ~30fps sustained now.
 
 **M8 — Director mode (3 weeks).** *Not started.* Death-to-Director
 transition, Influence economy, possession / spawn / hazard / breach /
@@ -1944,7 +2240,7 @@ before the spec fully lands.
   carries `paused`; all client-side motion freezes when the host
   toggles. Banner tells clients who holds the toggle.
 
-### 24.1 Shipped in v0.6 (as of this writing)
+### 24.1 Shipped in v0.6
 
 **Playable today:**
 
@@ -2019,6 +2315,61 @@ before the spec fully lands.
 - Signed-release channel / multi-platform binary bundles (Ed25519
   public-key verification on top of HMAC).
 - Persistent late-joiner tile-delta replay.
+
+### 24.2 Shipped in v0.7 (as of this writing)
+
+Delta on top of v0.6 — the "progression layer + QoL + perf scaffolding"
+milestone (§M7.6):
+
+**Progression:**
+- Primitive pool went 6 → **12**. Added `acid`, `cryo`, `contagion`,
+  `gravity-well`, `siphon`, `shield-break`. See §6.1.1.
+- Fire modes went 1 → **5**: `pulse`, `auto`, `burst`, `pump`, `rail`.
+  Every weapon carries a mode, rendered in the loadout strip + Tab
+  panel. See §6.2.1.
+- **10 perks** shipped — run-persistent passive modifiers granted from
+  miniboss drops + every-5-waves milestone drops. See §6.4a.
+- **5 traversal verbs** shipped — `dash`, `blink`, `grapple`, `slide`,
+  `phase`, bound to F with per-verb cooldowns + i-frames. See §6.3.
+- **Signature drop system**: per-archetype `signature_primitives` +
+  `signature_fire_mode` so Marksmen drop rails, Pinkies drop pumps,
+  etc. Per-brand `signature_traversal` + `signature_perks` bias the
+  perk + verb pool. See §6.2.3 and §9.2.
+
+**Quality-of-life:**
+- **Tab inventory overlay** showing HP/armor/sanity, consumable counts,
+  perk list, per-slot loadout with rarity + mode + primitives.
+- **Pickup toasts** — per-player multiplayer-aware notifications with
+  fade-out.
+- **Ground pickup labels** floating above each drop.
+- **Auto-grab for consumables** — medkits / sanity / armor / perks /
+  traversals pick up on collision; weapons + turret kits still need E.
+- **Wave clear-timer** force-advance after 25–50s (wave-scaled) so a
+  single straggler can't stall the run. Surfaced in the HUD.
+- **Rubble shoot-through** — projectiles pass broken walls the same
+  way the player does. AI sight still treats rubble as soft cover.
+- **Player bleed FX** — damage taken triggers seconds-long blood
+  emission at the player's position, scaled by hit severity.
+- **Enemy soft separation** with a personal-space padding so a 10k
+  zergling stampede spreads into a visible wall-of-teeth wave rather
+  than stacking on one tile.
+- **Self-healing install scripts** — stale HMACs after a host restart
+  now re-fetch the installer from the server instead of throwing.
+
+**Perf / tooling:**
+- **Benchmark mode (`terminal_hell bench`)** — scripted scenarios,
+  watch + headless render paths, Ctrl+C/Esc/F4 handling, JSON reports,
+  CI smoke tests (`tests/bench_smoke.rs`). See §17.14.
+- **Uniform spatial grid** (`src/spatial.rs`) with 3×3-neighborhood
+  and radius-span queries. Used by enemy separation; available for
+  chain / gravity / contagion etc. F4 overlays the grid with
+  population heat-coloring.
+- **Team-bucketed cross-faction targeting** — fixed a hidden O(N²)
+  that was dominating tick cost at scale. Enemy loop at 10k enemies
+  went from **2175ms/frame → 0.994ms** (~2000× speedup). Game runs
+  zerg_tide_10k at ~30 fps sustained.
+- `FrameProfile::take_totals()` — whole-scenario aggregate alongside
+  the existing 1s rolling window.
 
 Sections 6–16 of this document remain the design target. Use §19
 Milestones to navigate what's done vs. ahead.

@@ -21,3 +21,60 @@ charger = 3
 rocketeer = 2
 sentinel = 1
 leaper = 2
+
+# ── Brand sprite overrides ─────────────────────────────────────────
+# Quake-branded enemies render as Id-FPS arena gladiators — chrome
+# plating, blood-red flesh, industrial grays, bright plasma accents.
+
+[sprite_overrides]
+rusher = "gladiator.art"
+charger = "knight.art"
+marksman = "railgun_sniper.art"
+rocketeer = "grunt_rl.art"
+leaper = "tank_jr.art"
+
+# Gladiator rusher — spiked chrome armor over red muscle, sprinting.
+[sprite_palettes.rusher]
+B = "#b82418"
+D = "#5a1008"
+E = "#ffd038"
+S = "#d8dae0"
+H = "#f0f2f6"
+R = "#ff4028"
+
+# Knight charger — bigger gladiator with whirling saw-blade arm.
+[sprite_palettes.charger]
+B = "#a01c14"
+D = "#500c06"
+E = "#ff2020"
+S = "#c8ccd2"
+H = "#808890"
+R = "#ffe040"
+W = "#e8ecf0"
+
+# Railgun sniper — tall chrome cyborg, glowing plasma coils.
+[sprite_palettes.marksman]
+B = "#909098"
+D = "#3a3c44"
+E = "#40e8ff"
+S = "#d8dae0"
+P = "#80f0ff"
+R = "#ff2020"
+
+# Grunt rocketeer — chunky red armor plates, shoulder launcher.
+[sprite_palettes.rocketeer]
+B = "#b02018"
+D = "#5a1008"
+E = "#ffd038"
+S = "#b0b4bc"
+R = "#404248"
+P = "#ff8020"
+
+# Tank Jr. leaper — squat quad-leg bio-tank, plasma core.
+[sprite_palettes.leaper]
+B = "#8a2418"
+D = "#401008"
+E = "#ffe040"
+S = "#b0b4bc"
+P = "#60f0ff"
+

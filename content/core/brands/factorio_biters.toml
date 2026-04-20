@@ -6,7 +6,7 @@ id = "factorio_biters"
 name = "Factorio — Biter Wave"
 description = "Bug swarm chewing through the perimeter."
 
-spawn_pool = ["zergling", "swarmling", "breacher", "sapper", "charger", "rocketeer"]
+spawn_pool = ["swarmling", "breacher", "sapper", "charger", "rocketeer"]
 miniboss = "miniboss"
 
 # Engineer-kit flavor → Dash for that exoskeleton-leg burst. Perks
@@ -18,8 +18,7 @@ signature_perks = ["survivor", "quick_hands", "iron_will"]
 
 [spawn_weights]
 # Small biters.
-zergling = 5
-swarmling = 3
+swarmling = 6
 # Medium/Big biters breaching.
 breacher = 3
 # Behemoth spitters — arcing AoE attacks.
@@ -27,3 +26,64 @@ rocketeer = 1
 sapper = 1
 # Charger-class big biter.
 charger = 2
+
+# ── Brand sprite overrides ─────────────────────────────────────────
+# Factorio biter wave: pollution-stained biomass, sickly yellow-green
+# carapace, chitin-black limbs, jet-black mandible tips. Behemoth is
+# the wall-cracker. Spitter rears up to arc acid.
+# Art lives in content/core/art/factorio_biters/.
+
+[sprite_overrides]
+swarmling = "small_biter.art"
+charger = "big_biter.art"
+breacher = "behemoth_biter.art"
+rocketeer = "spitter.art"
+sapper = "suicide_biter.art"
+
+# Small Biter — scurrying fodder, red eye dots, bone mandibles.
+[sprite_palettes.swarmling]
+B = "#1a1208"
+H = "#a89040"
+E = "#ff4030"
+M = "#281808"
+D = "#080402"
+
+# Big Biter — yellow-green armored plates over the back, larger
+# scissor jaws.
+[sprite_palettes.charger]
+B = "#1a1208"
+H = "#c0a848"
+A = "#707020"
+E = "#ff3020"
+M = "#1a0a04"
+D = "#080402"
+
+# Behemoth — massive wall-cracker, pollution-green armor slabs, jaws
+# crunching the base wall.
+[sprite_palettes.breacher]
+B = "#201810"
+H = "#809038"
+E = "#ff5020"
+M = "#0a0402"
+D = "#0a0604"
+
+# Spitter — rearing posture, distended acid-gland sac under the jaws,
+# green toxin pooling in the mouth opening.
+[sprite_palettes.rocketeer]
+B = "#2a2818"
+H = "#a89030"
+G = "#78c040"
+A = "#b0ff50"
+E = "#ff4020"
+D = "#0a0604"
+
+# Suicide Biter — pollution-green, swollen with explosive biomass
+# sacs, crimson core glowing through translucent skin.
+[sprite_palettes.sapper]
+G = "#78c040"
+P = "#b0ff50"
+B = "#201810"
+H = "#a89040"
+E = "#ff4020"
+M = "#1a0a04"
+D = "#080402"

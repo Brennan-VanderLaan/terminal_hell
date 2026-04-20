@@ -1,0 +1,14 @@
+id             = "psychic_residue"
+tags           = ["arcane", "carcosa", "glowing"]
+# Arcane death-spatter. Violet with a warp-edge bloom — Orbs,
+# Phasers, cultists, Zoanthropes. Ties the "something unnatural
+# died here" beat into the Carcosa palette so the corruption
+# ramp has a visual rhyme in normal combat.
+fresh          = "#a060ff"
+dried          = "#2e1850"
+state_curve    = "fresh_to_dried"
+jitter         = 2
+bloom_color    = "#c89cff"
+bloom_radius   = 3
+bloom_falloff  = 0.7
+bloom_strength = 0.55

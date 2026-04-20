@@ -1,0 +1,16 @@
+id             = "oil_pool"
+tags           = ["mechanical", "oil", "flammable", "slippery"]
+# Mech/turret death spatter. Dark iridescent black with a hint of
+# violet sheen — NOT just red blood. Any archetype tagged
+# `mechanical` paints this instead of blood_pool. Reads as "the
+# machine leaked" and gives mech brands a totally different floor
+# palette from biological ones.
+fresh          = "#1a1220"
+dried          = "#0a070e"
+state_curve    = "fresh_to_dried"
+jitter         = 1
+# Subtle violet sheen — catches light without overpowering.
+bloom_color    = "#3a2860"
+bloom_radius   = 2
+bloom_falloff  = 0.85
+bloom_strength = 0.18

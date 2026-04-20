@@ -80,7 +80,6 @@ impl Console {
         let body_rows = panel_h.saturating_sub(1);
         if body_rows == 0 {
             queue!(out, ResetColor)?;
-            out.flush()?;
             return Ok(());
         }
         // Wrap long log lines onto multiple terminal rows so they
@@ -134,7 +133,7 @@ impl Console {
         }
 
         queue!(out, ResetColor)?;
-        out.flush()?;
+        // Outer loop does a single flush per frame.
         Ok(())
     }
 }

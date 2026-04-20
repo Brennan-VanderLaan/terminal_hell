@@ -174,6 +174,16 @@ pub fn behaviors_for(archetype: Archetype) -> BehaviorSet {
             attacker: Attacker::Melee,
             tags: TagSet::from_strs(&["biological", "agile", "leaper"]),
         },
+        // Phaser: direct pursuit in standard gameplay, but the
+        // game-layer phase-hop override (see game.rs) overrides
+        // position in discrete jumps. Behavior tags mark it as
+        // arcane/agile so interaction rules can key off "phaser."
+        Archetype::Phaser => BehaviorSet {
+            targeter: Targeter::NearestPlayer,
+            mover: Mover::Direct,
+            attacker: Attacker::Melee,
+            tags: TagSet::from_strs(&["arcane", "agile", "phaser"]),
+        },
         Archetype::Sapper => BehaviorSet {
             targeter: Targeter::NearestPlayer,
             mover: Mover::Direct,

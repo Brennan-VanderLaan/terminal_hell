@@ -1,0 +1,95 @@
+# Aliens — Xenomorph Hive Infestation. Facehuggers convert, drones
+# skitter out of ceiling vents, warriors flank in packs, carriers
+# burst into more facehuggers, chestbursters tear out of downed
+# bodies. Black-biomechanical nightmare with the same conversion
+# engine the Flood brand uses but a tighter, more claustrophobic
+# texture.
+
+id = "xenomorph_hive"
+name = "Aliens — Xenomorph Hive"
+description = "Facehuggers convert, warriors flank, carriers burst. The hive breathes."
+
+spawn_pool = [
+    "floodling",
+    "flood",
+    "flood_carrier",
+    "leaper",
+    "charger",
+    "pinkie",
+    "phaser",
+]
+miniboss = "pinkie"
+
+# Alien acrobatics / drop-from-ceiling → Phase. Perks for the
+# survival-horror loop: GloomShroud for the resin-walled dread,
+# LastStand for the "one bite from death" squeeze, IronWill to
+# resist the psionic pressure of the hive.
+signature_traversal = "phase"
+signature_perks = ["gloom_shroud", "last_stand", "iron_will"]
+
+[spawn_weights]
+# Facehuggers — the conversion engine.
+floodling = 5
+# Xenomorph Drone — post-conversion combat form.
+flood = 3
+# Praetorian / carrier bursting chestbursters.
+flood_carrier = 2
+# Warrior leap — skittering out of walls EVERY wave.
+leaper = 5
+# Crusher — mass charge with armored head plate.
+charger = 3
+# Drone drop-from-ceiling phase — the "it was on the ceiling the
+# whole time" jumpscare.
+phaser = 2
+# Queen — the endgame silhouette.
+pinkie = 1
+
+# ── Brand sprite overrides ─────────────────────────────────────────
+# Xenomorph silhouettes: low spider-legged Facehuggers, tall smooth-
+# skulled Drones, crested Warriors mid-pounce, and the spindly head-
+# crowned Queen. Black chitin + smokey dark-gray + bio-green ichor.
+# Art lives in content/core/art/xenomorph_hive/.
+
+[sprite_overrides]
+floodling = "facehugger.art"
+flood = "xeno_drone.art"
+leaper = "xeno_warrior.art"
+pinkie = "xeno_queen.art"
+
+# Facehugger — bone-pale sac with twin eye spots, splayed spider
+# legs, and a tail trailing behind. L = leg, T = tail, E = eye spot.
+[sprite_palettes.floodling]
+B = "#d8c8a0"
+E = "#1a0a14"
+L = "#6a5a48"
+T = "#4a3a28"
+
+# Xenomorph Drone — jet-black chitin, elongated smooth skull, curled
+# tail segment behind the spine. S = inner-mouth glisten, T = tail.
+[sprite_palettes.flood]
+H = "#3a3a44"
+B = "#0a0a14"
+S = "#4a8a60"
+T = "#1a1a24"
+D = "#000004"
+C = "#000000"
+
+# Xenomorph Warrior — ridged skull-crest distinguishes it from the
+# Drone. R = dorsal ridge crest, T = trailing tail, S = inner jaw.
+[sprite_palettes.leaper]
+R = "#3a3a44"
+B = "#0a0a14"
+S = "#4a8a60"
+T = "#1a1a24"
+D = "#000004"
+C = "#000000"
+
+# Xenomorph Queen — enormous flat head-crown (R) fanning out above a
+# slender crowned skull. S = inner maw glisten, T = secondary tongue.
+[sprite_palettes.pinkie]
+R = "#2a2a38"
+B = "#080810"
+S = "#4a8a60"
+T = "#1a1a24"
+D = "#000004"
+C = "#000000"

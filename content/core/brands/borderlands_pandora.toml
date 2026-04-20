@@ -1,0 +1,95 @@
+# Borderlands — Pandora Bandit Raid. Cel-shaded comic violence —
+# Psychos screaming with buzz-axes, Midget Goliaths riding bigger
+# ones, Skag packs leaping from dunes, Badass variants that just
+# won't die, suicide Psychos lighting themselves on fire. The
+# "loot-and-yell" brand, pure tonal counterweight to the horror
+# brands.
+
+id = "borderlands_pandora"
+name = "Borderlands — Pandora Bandit Raid"
+description = "Psychos scream, Skags leap, Badass variants won't die, suicide Psychos ignite."
+
+spawn_pool = [
+    "rusher",
+    "leaper",
+    "charger",
+    "marksman",
+    "sapper",
+    "pinkie",
+    "howler",
+]
+miniboss = "pinkie"
+
+# Digi-struct / Decepti0n fantasy → Blink. Perks lean full Vault
+# Hunter: Butcher (every Psycho drops loot), Rampage (stacking
+# kills for the damage ramp every Borderlands class loves),
+# QuickHands for the fire-rate curve.
+signature_traversal = "blink"
+signature_perks = ["butcher", "rampage", "quick_hands"]
+
+[spawn_weights]
+# Psycho — running at you with a buzz-axe.
+rusher = 5
+# Skag leap — the pack animals.
+leaper = 3
+# Goliath / Bruiser charge.
+charger = 2
+# Marauder / Nomad with SMG.
+marksman = 3
+# Suicide Psycho — grenade-strapped.
+sapper = 2
+# Badass Goliath — the bullet-sponge.
+pinkie = 1
+# Nomad war chief screaming to rally the pack.
+howler = 1
+
+# Brand-specific sprite overrides. Cel-shaded comic violence —
+# buzz-axe Psychos, goggled Marauders with rifles, helmet-caged
+# Goliaths, quadruped Skags with hinged mouths, grenade-strapped
+# suicide Psychos. Palette: MAXIMUM saturation yellows/oranges,
+# thick black outlines, red meat tones.
+[sprite_overrides]
+rusher = "psycho.art"
+marksman = "marauder.art"
+charger = "goliath.art"
+leaper = "skag.art"
+sapper = "suicide_psycho.art"
+
+[sprite_palettes.rusher]
+D = "#0a0a0a"
+M = "#f0f0e8"
+E = "#101010"
+B = "#e8a060"
+A = "#b85020"
+X = "#808080"
+
+[sprite_palettes.marksman]
+D = "#0a0a0a"
+B = "#e8b038"
+E = "#40e0ff"
+G = "#202020"
+J = "#8a4020"
+R = "#303030"
+
+[sprite_palettes.charger]
+D = "#0a0a0a"
+H = "#808080"
+E = "#ff3020"
+B = "#f0a830"
+A = "#b8601a"
+
+[sprite_palettes.leaper]
+D = "#0a0a0a"
+B = "#d87030"
+M = "#8a1a10"
+E = "#ffe030"
+S = "#403020"
+
+[sprite_palettes.sapper]
+D = "#0a0a0a"
+M = "#f0f0e8"
+E = "#101010"
+B = "#e8a060"
+G = "#50a030"
+X = "#ff4020"
+

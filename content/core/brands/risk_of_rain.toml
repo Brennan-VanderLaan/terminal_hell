@@ -6,7 +6,7 @@ id = "risk_of_rain"
 name = "Risk of Rain — Escalating Chaos"
 description = "Slow boil. Each wave is messier than the last."
 
-spawn_pool = ["rusher", "charger", "orb", "swarmling", "leaper", "rocketeer"]
+spawn_pool = ["rusher", "charger", "orb", "swarmling", "leaper", "rocketeer", "phaser"]
 miniboss = "miniboss"
 
 # Item-stacking roguelike → Dash (the character kit feel). Perks are
@@ -18,10 +18,75 @@ signature_perks = ["rampage", "bloodhound", "butcher"]
 
 [spawn_weights]
 rusher = 3
-charger = 2
-# Floating orb elites.
+# Elder Lemurians + Imp Overlords locking in charges.
+charger = 3
+# Floating orb elites (Greater Wisps, Jellyfish).
 orb = 2
 swarmling = 3
-leaper = 1
+# Lemurian Archer + Clay Templar leaps.
+leaper = 3
 # Magma worm rocketeers.
-rocketeer = 1
+rocketeer = 2
+# Parent/Clay Dunestrider — teleports toward the player.
+phaser = 2
+
+# ── Brand sprite overrides ─────────────────────────────────────────
+# Saturated indie-roguelike palette — purples, oranges, teals. Chunky
+# silhouettes first, readable outlines, everything reads "escalating
+# density" even in the corner of the screen.
+
+[sprite_overrides]
+rusher = "lemurian.art"
+charger = "elder_lemurian.art"
+orb = "greater_wisp.art"
+leaper = "jellyfish.art"
+rocketeer = "magma_worm.art"
+phaser = "parent.art"
+
+# Lemurian — orange bipedal lizard, mid-fireball arc.
+[sprite_palettes.rusher]
+H = "#ffc060"
+B = "#d05820"
+E = "#fff0a0"
+D = "#401808"
+F = "#ff8020"
+C = "#6a2810"
+
+# Elder Lemurian — huge purple lizard, breath-fire pose.
+[sprite_palettes.charger]
+H = "#d8a040"
+B = "#6820a0"
+E = "#ffe080"
+D = "#2a0838"
+F = "#ff6030"
+C = "#3a1050"
+
+# Greater Wisp — spectral floating head, single eye, flames.
+[sprite_palettes.orb]
+B = "#2a1840"
+E = "#70e0ff"
+D = "#fff8c0"
+F = "#ff9028"
+
+# Jellyfish — floating bell with dangling tendrils.
+[sprite_palettes.leaper]
+B = "#90e8ff"
+E = "#ffffff"
+D = "#20607a"
+T = "#e060c0"
+
+# Magma Worm — segmented burrowing worm, arced.
+[sprite_palettes.rocketeer]
+B = "#3a1a08"
+D = "#180804"
+F = "#ff8020"
+E = "#ffffa0"
+
+# Parent — grotesque humanoid mid-teleport.
+[sprite_palettes.phaser]
+B = "#d898ff"
+E = "#ffe040"
+D = "#2a0a48"
+F = "#70e0ff"
+H = "#3a1060"
+

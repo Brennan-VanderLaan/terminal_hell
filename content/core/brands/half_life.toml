@@ -1,0 +1,109 @@
+# Half-Life — Black Mesa Incident. Two flavors in one brand: Xen
+# biology (headcrabs that turn marines into zombies) + Combine
+# paramilitary (Overwatch, Metrocops). The conversion chain mirrors
+# our Floodling system — parasites convert fodder into stronger
+# zombies. The "cascade was your fault" brand.
+
+id = "half_life"
+name = "Half-Life — Black Mesa Incident"
+description = "Headcrabs convert, zombies stagger, Combine close in with rifles."
+
+spawn_pool = [
+    "floodling",
+    "flood",
+    "rusher",
+    "marksman",
+    "pmc",
+    "leaper",
+]
+miniboss = "pmc"
+
+# Long-jump module + gravity-gun lore → Blink. Perks lean tactical:
+# QuickHands (9mm AR cadence), Survivor (HEV suit plates), IronWill
+# (the anomalous materials drain sanity).
+signature_traversal = "blink"
+signature_perks = ["quick_hands", "survivor", "iron_will"]
+
+[spawn_weights]
+# Standard Headcrabs — parasite converters.
+floodling = 4
+# Headcrab Zombies — marines post-conversion. Staggering shamblers.
+flood = 3
+# Security guards / scientists-turned-zombies — the raw fodder layer.
+rusher = 3
+# Combine Soldier / Metrocop — ranged riflemen.
+marksman = 3
+# Elite Combine / Overwatch — heavier armored push.
+pmc = 2
+# Fast Zombie / Houndeye pounce.
+leaper = 2
+
+# ── Brand sprite overrides ─────────────────────────────────────────
+# Half-Life: Xen biology (headcrab crown) + Combine paramilitary
+# (cold blue-black armor, orange visor slit). Art lives in
+# content/core/art/half_life/.
+
+[sprite_overrides]
+rusher = "headcrab_zombie.art"
+marksman = "combine_soldier.art"
+pmc = "combine_elite.art"
+floodling = "headcrab.art"
+leaper = "fast_zombie.art"
+
+# Headcrab Zombie — shambling host with the crab clinging to its skull.
+[sprite_palettes.rusher]
+H = "#c84830"
+C = "#3a1008"
+E = "#ffe040"
+L = "#782818"
+B = "#8a9a76"
+M = "#1a0a06"
+R = "#7a1a14"
+D = "#4a5036"
+S = "#241810"
+
+# Combine Soldier — cold blue-black tactical with the orange goggle eye.
+[sprite_palettes.marksman]
+H = "#283040"
+V = "#ff7820"
+M = "#141820"
+G = "#404858"
+D = "#1a1c26"
+B = "#4a5264"
+A = "#1e2230"
+E = "#78e0ff"
+R = "#1a1410"
+S = "#0c0c10"
+
+# Combine Elite — stark white armor, glowing shield core.
+[sprite_palettes.pmc]
+H = "#e4e8ec"
+V = "#ff8830"
+M = "#2c3040"
+G = "#c0c4c8"
+D = "#5a6068"
+W = "#f4f6f8"
+A = "#48526a"
+E = "#80ecff"
+C = "#ffb040"
+R = "#1a1410"
+S = "#14141a"
+
+# Headcrab alone — four splayed legs, curled maw.
+[sprite_palettes.floodling]
+L = "#7a2814"
+B = "#c85038"
+E = "#ffe040"
+M = "#1a0806"
+D = "#4a1408"
+
+# Fast Zombie — flayed red meat, skeletal ribs exposed.
+[sprite_palettes.leaper]
+B = "#c8281c"
+E = "#ffd848"
+M = "#2a0404"
+D = "#5a0a06"
+W = "#eae0c4"
+R = "#7a1410"
+C = "#30d8ff"
+

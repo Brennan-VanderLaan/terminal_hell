@@ -17,12 +17,77 @@ signature_traversal = "slide"
 signature_perks = ["survivor", "last_stand", "quick_hands"]
 
 [spawn_weights]
-# Plenty of fodder scavs.
+# Fodder scavs — the "player-1 Mosin" tier.
 rusher = 3
-marksman = 4
+# Tactical long-range riflemen — THE Tarkov sniper fantasy. Weight
+# bumped so a scav sightline from across the arena feels real, not
+# rare. Paired with the extended 2.4× engagement range in
+# try_ranged_attack, marksmen now credibly threaten from >200 tiles.
+marksman = 5
+# PMCs close the gap in kit.
 pmc = 3
-sentinel = 1
+# Fixed DSHK positions — long-range sniper turrets. Preferred
+# distance cranked to 120 so they set up in a corner + shoot across
+# the arena.
+sentinel = 2
 # Killa rolls into the pool late-wave.
 killa = 1
 # Scav with a pipe-bomb.
 sapper = 1
+
+# ── Brand sprite overrides ─────────────────────────────────────────
+# Muddy brown-beige scav fodder, plated BEAR/USEC operators.
+# Killa keeps his hardcoded sprite (already bespoke). Art files
+# in content/core/art/tarkov_scavs/.
+
+[sprite_overrides]
+rusher = "scav.art"
+marksman = "scav_sniper.art"
+pmc = "operator.art"
+
+# Scav — grubby balaclava + gas-mask filter, mismatched webbing.
+[sprite_palettes.rusher]
+H = "#4a3a24"
+M = "#1e1a14"
+F = "#786244"
+V = "#2a2418"
+T = "#58482e"
+D = "#362818"
+J = "#3c3022"
+B = "#6a5638"
+A = "#2a1e10"
+P = "#4a3828"
+S = "#141008"
+
+# Scav sniper — lanky silhouette + scoped long-barrel rifle held sideways.
+[sprite_palettes.marksman]
+H = "#4a3a24"
+M = "#1e1a14"
+F = "#786244"
+E = "#c8b878"
+V = "#2a2418"
+D = "#362818"
+J = "#3c3022"
+B = "#5a4a2e"
+A = "#2a1e10"
+R = "#2a241e"
+K = "#4a4238"
+O = "#6a6254"
+P = "#4a3828"
+S = "#141008"
+
+# PMC operator — heavy plate carrier, ballistic helmet, night-vision mounts.
+[sprite_palettes.pmc]
+H = "#3a4432"
+N = "#1a1e18"
+V = "#4c5c48"
+M = "#0e1008"
+D = "#202418"
+P = "#404c36"
+A = "#18201a"
+C = "#2e3a2a"
+K = "#8a983a"
+G = "#787050"
+B = "#1c201a"
+S = "#0a0c08"
+

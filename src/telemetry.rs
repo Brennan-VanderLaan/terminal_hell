@@ -118,6 +118,37 @@ impl FrameProfile {
         Some(timings)
     }
 
+    /// Drain the rolling window + any un-rolled current frame into
+    /// `(label, total, calls)` tuples and reset everything. Unlike
+    /// `maybe_report`, this ignores the 1-second report cadence — it
+    /// produces a single whole-run aggregate for bench runners.
+    ///
+    /// Folds `this_frame` into the result too, so callers that never
+    /// invoke `end_frame` (e.g. headless bench paths that skip the
+    /// render step where `end_frame` normally fires) still get every
+    /// scope's accumulated time. Sorted descending by total.
+    pub fn take_totals(&mut self) -> Vec<(&'static str, Duration, u32)> {
+        // Fold any open-but-not-rolled frame into rolling_total first
+        // so headless bench runs (no render → no end_frame call)
+        // don't lose their last frames' data.
+        for (label, dur) in self.this_frame.drain() {
+            *self.rolling_total.entry(label).or_default() += dur;
+        }
+        let mut out: Vec<(&'static str, Duration, u32)> = self
+            .rolling_total
+            .iter()
+            .map(|(k, total)| {
+                let calls = self.rolling_calls.get(k).copied().unwrap_or(0);
+                (*k, *total, calls)
+            })
+            .collect();
+        out.sort_by(|a, b| b.1.cmp(&a.1));
+        self.rolling_total.clear();
+        self.rolling_calls.clear();
+        self.frames_in_window = 0;
+        out
+    }
+
     /// Current counter values as a sorted Vec of (label, value).
     pub fn counts_snapshot(&self) -> Vec<(&'static str, u64)> {
         let mut out: Vec<_> = self.counts.iter().map(|(k, v)| (*k, *v)).collect();

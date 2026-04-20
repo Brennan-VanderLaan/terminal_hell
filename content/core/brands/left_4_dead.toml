@@ -20,11 +20,68 @@ signature_perks = ["bloodhound", "butcher", "corpse_pulse"]
 # The horde.
 rusher = 5
 swarmling = 3
-# Charger special.
-charger = 2
+# Charger special — bumped so its signature "locked-in bowling
+# charge" actually shows up every couple waves, not once per run.
+charger = 4
 # Howler = Witch scream calling the horde.
 howler = 1
 # Sapper = Boomer explosion.
 sapper = 1
-# Leaper = Hunter pounce.
-leaper = 2
+# Hunter pounce = the Left 4 Dead sound effect. Bumped so jumps
+# happen often enough to be the brand's signature moment.
+leaper = 4
+
+# ── Brand sprite overrides ─────────────────────────────────────────
+# L4D Infected — grim browns + greens for common, bile yellow Boomer,
+# pale ghostly Witch, iconic asymmetric Charger silhouette.
+
+[sprite_overrides]
+rusher = "common_infected.art"
+charger = "l4d_charger.art"
+leaper = "hunter.art"
+howler = "witch.art"
+sapper = "boomer.art"
+
+# Common infected — tattered shirt, messed hair, pale sickly skin.
+[sprite_palettes.rusher]
+B = "#6e5a3c"
+D = "#2e2418"
+E = "#c82820"
+H = "#8a7458"
+R = "#a82818"
+
+# L4D Charger — giant knotted right arm, stunted left arm.
+[sprite_palettes.charger]
+B = "#5a4a30"
+D = "#241c10"
+H = "#826a44"
+E = "#c82020"
+A = "#302414"
+F = "#eae0c8"
+
+# Hunter — zipped hoodie, coiled claws, masked face.
+[sprite_palettes.leaper]
+H = "#3a4028"
+B = "#50563a"
+D = "#1e2010"
+E = "#ffe030"
+C = "#705030"
+
+# Witch — stringy white hair, pale flesh, red claws, huddled grief.
+[sprite_palettes.howler]
+W = "#e8e4d8"
+B = "#e8d8c4"
+P = "#8a6a50"
+E = "#ff2020"
+D = "#4a2820"
+C = "#b02418"
+
+# Boomer — bloated bile-green, gas vents, oozing green spots.
+[sprite_palettes.sapper]
+B = "#a8a838"
+D = "#3a3a10"
+Y = "#e8d838"
+G = "#58782a"
+E = "#ff2020"
+M = "#2a2010"
+

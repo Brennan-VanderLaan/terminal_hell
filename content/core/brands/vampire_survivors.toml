@@ -6,7 +6,7 @@ id = "vampire_survivors"
 name = "Vampire Survivors — Closing Walls"
 description = "Walls of hostile bats. You are always about to be surrounded."
 
-spawn_pool = ["swarmling", "zergling", "splitter", "leaper", "howler"]
+spawn_pool = ["swarmling", "rusher", "splitter", "leaper", "howler"]
 miniboss = "miniboss"
 
 # Nothing but a punch-through-the-wall feel → Dash. Perks are the
@@ -17,10 +17,58 @@ signature_traversal = "dash"
 signature_perks = ["butcher", "rampage", "corpse_pulse"]
 
 [spawn_weights]
-# Raw numbers. The point.
-swarmling = 8
-zergling = 6
-# Splitters multiply the wall.
+# Raw numbers. The point — bats + skeletons closing from every side.
+swarmling = 10
+rusher = 5
+# Splitters multiply the wall — every kill becomes more kills.
 splitter = 3
 leaper = 1
 howler = 1
+
+# ── Brand sprite overrides ─────────────────────────────────────────
+# 16-bit Halloween palette — deep purples + bone-white + blood-orange
+# + green poison. Chunky silhouettes because VS itself is pixel-art,
+# so we lean into low-res SNES-era readability.
+
+[sprite_overrides]
+swarmling = "pixel_bat.art"
+rusher = "zombie.art"
+splitter = "big_bone.art"
+leaper = "bat_spirit.art"
+howler = "witch.art"
+
+# Pixel Bat — tiny winged silhouette, glowing eyes.
+[sprite_palettes.swarmling]
+B = "#2a1038"
+W = "#602080"
+E = "#ff4030"
+
+# Shambling Zombie — rotten green flesh, bone teeth.
+[sprite_palettes.rusher]
+B = "#6ea048"
+D = "#2a4018"
+E = "#ffe800"
+G = "#90c868"
+
+# Big Bone — bone-white skeleton, about to fragment.
+[sprite_palettes.splitter]
+T = "#f8f4d8"
+B = "#c8c0a0"
+D = "#40381c"
+E = "#ff3020"
+
+# Bat Spirit — diagonal-flying claw-forward bat.
+[sprite_palettes.leaper]
+B = "#3a1050"
+W = "#8038b0"
+E = "#ff4020"
+C = "#f8d4a0"
+
+# Witch — wide hat, pale face, cackling.
+[sprite_palettes.howler]
+H = "#180820"
+B = "#d8c4a8"
+E = "#ff3020"
+D = "#402020"
+G = "#60b040"
+

@@ -1,5 +1,5 @@
 # Helldivers — Managed Democracy. Bug waves (Terminids) + Automaton
-# assault. Zergling-class bugs rushing in numbers, Rocketeer Automaton
+# assault. Swarm bugs rushing in numbers, Rocketeer Automaton
 # devastators, Sentinel tower turrets. Brand that always feels
 # OUTSIDE of cover.
 
@@ -7,7 +7,7 @@ id = "helldivers"
 name = "Helldivers — Bug Breach"
 description = "Bug stampedes + Automaton devastators. Never out of the fight."
 
-spawn_pool = ["zergling", "swarmling", "rocketeer", "sentinel", "sapper", "charger"]
+spawn_pool = ["swarmling", "rocketeer", "sentinel", "sapper", "charger", "leaper", "marksman"]
 miniboss = "miniboss"
 
 # Stim-injector slide → Slide verb matches Helldivers 2 diving for
@@ -18,13 +18,95 @@ signature_traversal = "slide"
 signature_perks = ["survivor", "rampage", "quick_hands"]
 
 [spawn_weights]
-# Bug horde.
-zergling = 5
-swarmling = 3
-# Automaton fire support.
-rocketeer = 2
+# Terminid horde — the bug-breach "hunt from every angle" pressure.
+swarmling = 6
+# Stalker-class leapers closing from flanks — bumped so the
+# "something jumped over the rock" moment lands per wave.
+leaper = 4
+# Automaton long-range laser crossbow — snipers across the map.
+marksman = 3
+# Automaton fire support — rockets lobbed from far cover.
+rocketeer = 3
+# Automaton tower turrets — long-range dug-in positions.
 sentinel = 2
-# Bile titans / Hive Guards — ground-pound.
-charger = 2
+# Bile titans / Chargers — committed bowling charges.
+charger = 3
 # Suicide spore-spewers.
 sapper = 1
+
+# ── Brand sprite overrides ─────────────────────────────────────────
+# Mixed-enemy brand: Terminid bugs (muted green-brown exoskeleton +
+# yellow mandible tips) plus Automaton war-machines (industrial black-
+# red, glowing eye slit). Silhouettes must never be confused: bug =
+# chitin + mandibles + multiple legs; Automaton = armor plates +
+# visible gun mount + single leg pair.
+# Art lives in content/core/art/helldivers/.
+
+[sprite_overrides]
+swarmling = "hunter_terminid.art"
+leaper = "stalker.art"
+charger = "bile_titan.art"
+rocketeer = "devastator.art"
+sentinel = "automaton_tower.art"
+marksman = "commissar.art"
+
+# Hunter — quadruped Terminid scout, low-slung, mandibles splayed.
+[sprite_palettes.swarmling]
+C = "#3a4a20"
+H = "#5a6830"
+E = "#ff4040"
+M = "#d8c058"
+L = "#1a2010"
+D = "#0a0a02"
+
+# Stalker — cloaked chameleon bug mid-pounce, shimmer-pattern across
+# the carapace (C + H alternating), luminous predator eye.
+[sprite_palettes.leaper]
+C = "#2a3a1c"
+H = "#48582a"
+E = "#80ffc0"
+M = "#c0a848"
+L = "#100a04"
+D = "#080402"
+
+# Bile Titan — colossal terminid, green mortar sac bulging off the
+# back, dripping acid, armored chitin slabs across the abdomen.
+[sprite_palettes.charger]
+C = "#3a4a20"
+G = "#508040"
+A = "#80c848"
+M = "#c8b058"
+E = "#ff5030"
+L = "#1a0a04"
+D = "#0a0604"
+
+# Automaton Devastator — bipedal black-red war machine, rocket pod
+# bolted to the right shoulder, glowing eye slit.
+[sprite_palettes.rocketeer]
+A = "#2a1a18"
+B = "#5a2820"
+E = "#ff3020"
+R = "#383028"
+W = "#181010"
+S = "#0a0604"
+
+# Automaton Tower — tripod sentinel emplacement, heavy MG muzzle
+# glowing hot, spotlight eye scanning.
+[sprite_palettes.sentinel]
+A = "#3a2a22"
+B = "#6a3020"
+E = "#ff4020"
+G = "#ffb040"
+W = "#281810"
+S = "#0a0604"
+
+# Automaton Commissar — tall bipedal sniper unit, crimson robe-armor
+# plating, laser rifle at the shoulder.
+[sprite_palettes.marksman]
+A = "#2a1818"
+B = "#7a2a20"
+E = "#ff3020"
+R = "#1a0808"
+W = "#382820"
+G = "#ff6030"
+S = "#0a0402"

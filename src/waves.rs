@@ -176,12 +176,21 @@ impl WaveDirector {
                                 let oy: f32 =
                                     self.rng.gen_range(-params.spread..params.spread);
                                 let stats = content.stats(archetype);
-                                enemies.push(Enemy::spawn(
-                                    archetype,
-                                    stats,
-                                    cx + ox,
-                                    cy + oy,
-                                ));
+                                let sx = cx + ox;
+                                let sy = cy + oy;
+                                let brand_id = self
+                                    .pick_contributing_brand(
+                                        archetype, content, active_brands,
+                                    )
+                                    .map(|s| crate::tag::Tag::new(&s));
+                                let mut e = Enemy::spawn(archetype, stats, sx, sy);
+                                e.brand_id = brand_id;
+                                enemies.push(e);
+                                crate::audio::emit(
+                                    archetype.audio_id(),
+                                    "spawn",
+                                    Some((sx, sy)),
+                                );
                             }
                         }
                         self.wave_budget =
@@ -192,7 +201,17 @@ impl WaveDirector {
 
                     if let Some((sx, sy)) = pick_spawn(&mut self.rng, arena, player_anchors) {
                         let stats = content.stats(archetype);
-                        enemies.push(Enemy::spawn(archetype, stats, sx, sy));
+                        let brand_id = self
+                            .pick_contributing_brand(archetype, content, active_brands)
+                            .map(|s| crate::tag::Tag::new(&s));
+                        let mut e = Enemy::spawn(archetype, stats, sx, sy);
+                        e.brand_id = brand_id;
+                        enemies.push(e);
+                        crate::audio::emit(
+                            archetype.audio_id(),
+                            "spawn",
+                            Some((sx, sy)),
+                        );
                     }
                     self.wave_budget -= 1;
                     // Faster spawn cadence so bigger budgets actually
@@ -268,6 +287,7 @@ impl WaveDirector {
                 if let Some((sx, sy)) = pick_spawn(&mut self.rng, arena, player_anchors) {
                     let stats = content.stats(boss);
                     enemies.push(Enemy::spawn(boss, stats, sx, sy));
+                    crate::audio::emit(boss.audio_id(), "spawn", Some((sx, sy)));
                 }
             }
         }
@@ -298,6 +318,49 @@ impl WaveDirector {
             }
         }
         self.weighted_pool[0].0
+    }
+
+    /// Pick which brand is attributed to a rolled spawn. When
+    /// multiple brands contribute the same archetype (e.g. both
+    /// Doom and Tarkov declaring a `rusher`), we pick one weighted
+    /// by that brand's declared weight for the archetype. This makes
+    /// sprite flavor follow the pool contribution — a brand that
+    /// weights rusher=8 gets 80% of the visual identity of rushers
+    /// spawned during a mixed wave.
+    pub fn pick_contributing_brand(
+        &mut self,
+        archetype: Archetype,
+        content: &ContentDb,
+        active_brands: &[String],
+    ) -> Option<String> {
+        // Build (brand_id, weight) list of brands that actually pool
+        // this archetype. Brands that don't pool it contribute 0.
+        let arch_name = archetype.snake_name();
+        let mut candidates: Vec<(String, u32)> = Vec::new();
+        let mut total: u32 = 0;
+        for id in active_brands {
+            let Some(brand) = content.brand(id) else {
+                continue;
+            };
+            if !brand.spawn_pool.iter().any(|a| a == arch_name) {
+                continue;
+            }
+            let weight = brand.spawn_weights.get(arch_name).copied().unwrap_or(1);
+            total += weight;
+            candidates.push((id.clone(), weight));
+        }
+        if candidates.is_empty() || total == 0 {
+            return active_brands.first().cloned();
+        }
+        let pick = self.rng.gen_range(0..total);
+        let mut acc = 0u32;
+        for (id, w) in &candidates {
+            acc += *w;
+            if pick < acc {
+                return Some(id.clone());
+            }
+        }
+        Some(candidates[0].0.clone())
     }
 }
 

@@ -1,0 +1,28 @@
+[unit]
+id            = "rusher"
+description   = """
+Light melee chaser. Comes through small glyph-tears in the arena wall —
+a hungry silhouette, not a monster. The sound emerges rather than strikes.
+"""
+sonic_palette = "thin, papery, wet. pitched under player gunfire. no vocal cords."
+motif         = "carcosa.glyph_tear"
+bus           = "sfx"
+
+[events.spawn]
+description = "Fires once when a Rusher enters the arena."
+filter_hint = "body 140-900Hz. leave 1.8-3.2kHz clear for gunfire."
+spatial     = true
+
+[events.footstep]
+description = "Per-step, while moving. Light, quick."
+filter_hint = "dry scuff, no low end, HPF @ 200Hz."
+spatial     = true
+
+[events.death]
+description = "Glyph-tear collapses back on the thing. Wet, short."
+filter_hint = "body + short splash tail, mid-focus."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-1.5, 1.5]
+max_concurrent  = 3

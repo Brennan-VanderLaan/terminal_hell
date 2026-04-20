@@ -1,0 +1,62 @@
+# Audio bus topology — see audio-spec.md §8.
+#
+# Six primary busses (music / carcosa_overlay / sfx / vox / ambient / ui)
+# plus aux reverb send targets. Static topology — authored once, rarely
+# touched. Live modulation lives in reactions.toml.
+
+[bus.music]
+gain_db = -6
+chain = [
+  { id = "lpf",  type = "lowpass",    cutoff_hz = 20000, resonance = 0.0 },
+  { id = "duck", type = "compressor", threshold_db = -18, ratio = 2 },
+]
+
+[bus.carcosa_overlay]
+# Dynamic bus gain. "corruption_curve" is a named curve resolved by
+# the engine against Corruption %. At 0% the overlay is effectively
+# muted; at 100% it dominates.
+gain_db = "corruption_curve"
+chain = [
+  { id = "lpf",  type = "lowpass", cutoff_hz = 8000 },
+  { id = "verb", type = "send",    target = "reverb_hall", amount = 0.35 },
+]
+
+[bus.sfx]
+gain_db = -3
+chain = [
+  { id = "lpf",  type = "lowpass",    cutoff_hz = 20000, resonance = 0.15 },
+  { id = "peak", type = "bell",       hz = 2500, q = 0.8, gain_db = 1.5 },
+  { id = "comp", type = "compressor", threshold_db = -12, ratio = 3 },
+  { id = "verb", type = "send",       target = "reverb_small", amount = 0.15 },
+]
+
+[bus.vox]
+# Deferred — King's voice post-M9. Bus exists so reactions and units
+# can reference it without a load error.
+gain_db = -3
+
+[bus.ambient]
+gain_db = -9
+
+[bus.ui]
+gain_db = -6
+chain = [
+  { id = "hpf", type = "highpass", cutoff_hz = 120 },
+]
+ducks = "music:-3db:120ms"
+
+# ----- aux send targets -----
+
+[bus.reverb_small]
+type = "reverb"
+size = 0.25
+decay_s = 0.6
+damping = 0.6
+pre_delay_ms = 8
+
+[bus.reverb_hall]
+type = "reverb"
+size = 0.85
+decay_s = 2.4
+damping = 0.2
+pre_delay_ms = 40

@@ -28,3 +28,57 @@ pmc = 3
 juggernaut = 2
 # Killa as a regular spawn is the "oh no" moment.
 killa = 1
+
+# ── Brand sprite overrides ─────────────────────────────────────────
+# Muted armor-gray-black with deep crimson accents + old-gold + cold
+# bronze-steel. Everything must feel HEAVY — silhouettes wider than
+# tall where possible, plated shoulders, grim posture.
+
+[sprite_overrides]
+pmc = "black_knight.art"
+marksman = "painting_archer.art"
+juggernaut = "havel_knight.art"
+killa = "killa.art"
+leaper = "basilisk.art"
+
+# Black Knight — full plate, greatsword on shoulder, cape.
+[sprite_palettes.pmc]
+B = "#3a3a44"
+D = "#18181e"
+E = "#ff3818"
+C = "#c8a648"
+S = "#60482a"
+
+# Painting Guardian — robed, crossbow, pale mask.
+[sprite_palettes.marksman]
+M = "#e8e0c8"
+B = "#2a2028"
+D = "#18100c"
+E = "#181010"
+W = "#6a5030"
+S = "#402820"
+
+# Havel — stone-dragon-tooth armor, huge shield and great-hammer.
+[sprite_palettes.juggernaut]
+B = "#4a4038"
+D = "#1a1410"
+E = "#d8a040"
+H = "#786050"
+S = "#3a2818"
+
+# Killa — crimson-cloaked invader overlord with unique helm + claymore.
+# Brand miniboss. Silhouette MUST read "oh no."
+[sprite_palettes.killa]
+R = "#902018"
+C = "#c8a648"
+B = "#2a2028"
+D = "#100808"
+E = "#ffb020"
+S = "#50382a"
+
+# Basilisk — squat bulging-eye frog-thing, petrifying gaze.
+[sprite_palettes.leaper]
+B = "#4a4a4a"
+D = "#1a1a1a"
+E = "#f8e8a0"
+
