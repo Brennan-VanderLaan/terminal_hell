@@ -13,9 +13,9 @@ description = "Fires once when a Rusher enters the arena."
 filter_hint = "body 140-900Hz. leave 1.8-3.2kHz clear for gunfire."
 spatial     = true
 
-[events.footstep]
-description = "Per-step, while moving. Light, quick."
-filter_hint = "dry scuff, no low end, HPF @ 200Hz."
+[events.attack]
+description = "Melee touch-damage hit on a player."
+filter_hint = "wet slap 400-900Hz + tusk-tick 3kHz accent."
 spatial     = true
 
 [events.death]

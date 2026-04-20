@@ -1,0 +1,27 @@
+[unit]
+id            = "marksman"
+description   = """
+Tactical mil-sim brand sniper. Holds range, fires on a tell.
+"""
+sonic_palette = "taut, disciplined. ballistic crack on fire."
+motif         = "mil_sim.mechanical_precision"
+bus           = "sfx"
+
+[events.spawn]
+description = "Fires on arrival."
+filter_hint = "gear rustle, bolt-cycle 2-4kHz, no body."
+spatial     = true
+
+[events.fire]
+description = "Hitscan shot discharge."
+filter_hint = "transient crack 2-5kHz + sub-thump 80Hz, 30ms."
+spatial     = true
+
+[events.death]
+description = "Slumps. Minimal vocal."
+filter_hint = "gear clatter, no breath."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-0.5, 0.5]
+max_concurrent  = 2

@@ -1,0 +1,28 @@
+[unit]
+id            = "revenant"
+description   = """
+Robotic FPS-brand hitscan chaser. Mechanical skeleton with a ranged
+shot.
+"""
+sonic_palette = "servo-whine + hitscan discharge. no flesh."
+motif         = "mil_sim.mechanical_precision"
+bus           = "sfx"
+
+[events.spawn]
+description = "Systems-online boot sequence."
+filter_hint = "relay chatter 1-3kHz + capacitor charge 200-800Hz."
+spatial     = true
+
+[events.fire]
+description = "Ranged shot fires — hitscan projectile leaves the barrel."
+filter_hint = "whine 800Hz → 2kHz sweep + discharge crack at release."
+spatial     = true
+
+[events.death]
+description = "Servo collapse — pitch drops, arc crackle."
+filter_hint = "descending whine + electrical spark 4-6kHz tail."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-0.5, 0.5]
+max_concurrent  = 2

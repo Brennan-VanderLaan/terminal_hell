@@ -1,0 +1,29 @@
+[unit]
+id            = "floodling"
+description   = """
+Halo-homage parasite. Fast, low HP. On contact with a player, damages
+and dies. On contact with a horde enemy, converts it (handled via
+game logic — audio is the contact hit).
+"""
+sonic_palette = "sloppy bubble + squeak on contact."
+motif         = "flood.parasitic_bubble"
+bus           = "sfx"
+
+[events.spawn]
+description = "Pop out of spore."
+filter_hint = "wet pop 400-800Hz + squeak 2-3kHz."
+spatial     = true
+
+[events.attack]
+description = "On-contact hit (player or conversion moment)."
+filter_hint = "sucking slurp 200-800Hz + wet tear."
+spatial     = true
+
+[events.death]
+description = "Wet splat."
+filter_hint = "short burst 300-700Hz."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-2.5, 2.5]
+max_concurrent  = 8

@@ -1,0 +1,18 @@
+[unit]
+id            = "burst"
+description   = """
+3-round burst rifle. Each trigger pull is a tight cluster — audio must
+read "three rapid shots then pause" as a single rhythmic gesture.
+"""
+sonic_palette = "tight cluster. mechanical precision between rounds."
+motif         = "weapon.kinetic_round"
+bus           = "sfx"
+
+[events.fire]
+description = "Per-round inside the burst (x3 per trigger pull)."
+filter_hint = "crack 1.5-3kHz, 40ms intra-burst spacing; HPF @ 60Hz."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-0.4, 0.4]
+max_concurrent  = 6

@@ -1,0 +1,28 @@
+[unit]
+id            = "pmc"
+description   = """
+Tactical mil-sim brand close-range melee operator. Moves purposefully,
+closes the distance. Sound has to feel rehearsed.
+"""
+sonic_palette = "boot-slap + close-quarter strike. utilitarian."
+motif         = "mil_sim.mechanical_precision"
+bus           = "sfx"
+
+[events.spawn]
+description = "Insertion — brief radio click, gear settle."
+filter_hint = "squelch 3-4kHz, vest creak 600Hz."
+spatial     = true
+
+[events.attack]
+description = "Melee strike — close-in blade/butt-stock."
+filter_hint = "thud 300-600Hz + gear rattle tail."
+spatial     = true
+
+[events.death]
+description = "Slump + equipment drop."
+filter_hint = "dull thud + metal clatter tail."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-0.5, 0.5]
+max_concurrent  = 3

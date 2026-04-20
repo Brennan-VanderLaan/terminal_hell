@@ -1,0 +1,28 @@
+[unit]
+id            = "orb"
+description   = """
+Floating chaos-brand unit. No ground contact — audio identity is
+tonal rather than tactile.
+"""
+sonic_palette = "glassy tonal hum. weightless."
+motif         = "carcosa.glyph_tear"
+bus           = "sfx"
+
+[events.spawn]
+description = "Fires when an Orb manifests."
+filter_hint = "pure tone 350-500Hz with shimmer partials 3-5kHz. no sub."
+spatial     = true
+
+[events.attack]
+description = "Contact shock — tonal rise then release."
+filter_hint = "rising sine from 400Hz → 900Hz, ~200ms."
+spatial     = true
+
+[events.death]
+description = "Tone collapses downward + glass-shatter tail."
+filter_hint = "descending pitch, crystalline 4-8kHz breakup."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-2.0, 2.0]
+max_concurrent  = 3

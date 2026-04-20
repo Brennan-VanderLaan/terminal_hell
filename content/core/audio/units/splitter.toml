@@ -1,0 +1,24 @@
+[unit]
+id            = "splitter"
+description   = """
+Fragile body — on death, spawns several Swarmlings where it fell.
+The `death` event IS the split. Swarmling audio follows via their own
+spawn events.
+"""
+sonic_palette = "papery body with a hollow interior. death is a wet pop."
+motif         = "carcosa.glyph_tear"
+bus           = "sfx"
+
+[events.spawn]
+description = "Fires on Splitter arrival."
+filter_hint = "hollow body 200-700Hz, no low end."
+spatial     = true
+
+[events.death]
+description = "Wet burst — cluster of swarmling spawn sounds follows via the swarmlings themselves."
+filter_hint = "transient burst + 300ms spray tail; 300-1.5kHz dominant."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-1.5, 1.5]
+max_concurrent  = 3

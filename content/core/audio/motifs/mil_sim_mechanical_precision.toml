@@ -1,0 +1,10 @@
+description = """
+Mechanical discipline. Crisp actions, ballistic cracks, servo whirs.
+Every sound should feel engineered — nothing wet, nothing organic.
+"""
+emotion     = "taut, competent, lethal"
+antipattern = "no meat, no breathing, no vocalizations. if it sounds alive it's wrong."
+shared_layers = [
+  "bolt-action click base layer (same recording, pitched per unit)",
+  "low mechanical hum 60-100Hz — servo idle",
+]

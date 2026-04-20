@@ -1,0 +1,28 @@
+[unit]
+id            = "pinkie"
+description   = """
+Wide armored brute with tusks. Tanky. Comes through bigger glyph-tears
+than the Rusher — the sound of something that already knew it wanted in.
+"""
+sonic_palette = "thick, wet, slow. more body than tear. no voice."
+motif         = "carcosa.glyph_tear"
+bus           = "sfx"
+
+[events.spawn]
+description = "Fires once when a Pinkie enters the arena."
+filter_hint = "body 90-400Hz, tusk-click 2-3kHz accents, HPF @ 50Hz."
+spatial     = true
+
+[events.attack]
+description = "Melee swing — wet tusk-meets-armor cluck."
+filter_hint = "transient + 800Hz body, no high sizzle."
+spatial     = true
+
+[events.death]
+description = "Collapses through the tear. Drawn-out wet thud."
+filter_hint = "short body, longer tail than spawn, deep-mid focus."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-1.0, 1.0]
+max_concurrent  = 2

@@ -1,0 +1,27 @@
+[unit]
+id            = "sentinel"
+description   = """
+Stationary hostile turret. Long-range hitscan on a cooldown.
+"""
+sonic_palette = "cooling fan + charging capacitor whine."
+motif         = "tech.turret_hum"
+bus           = "sfx"
+
+[events.spawn]
+description = "Boot-up — capacitor charge from silence."
+filter_hint = "rising whine 400Hz → 1.2kHz over 600ms."
+spatial     = true
+
+[events.fire]
+description = "Hitscan discharge."
+filter_hint = "pre-whine rise + crack 2-4kHz at release."
+spatial     = true
+
+[events.death]
+description = "Explosive collapse — arc discharge + metal."
+filter_hint = "spark 4-8kHz + bass crunch 80Hz."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-0.5, 0.5]
+max_concurrent  = 4

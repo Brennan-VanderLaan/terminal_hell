@@ -342,6 +342,17 @@ impl Preview {
         sink.detach();
         Ok(())
     }
+
+    /// Play a slice of in-memory mono f32 samples at `rate` Hz. Used
+    /// by the per-channel ▶ take-preview button so the recorder can
+    /// hear what it captured before saving.
+    pub fn play_samples(&self, samples: &[f32], rate: u32) -> Result<()> {
+        let buf = rodio::buffer::SamplesBuffer::new(1, rate, samples.to_vec());
+        let sink = rodio::Sink::try_new(&self.handle)?;
+        sink.append(buf);
+        sink.detach();
+        Ok(())
+    }
 }
 
 impl std::fmt::Debug for Preview {

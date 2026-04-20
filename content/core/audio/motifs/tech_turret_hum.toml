@@ -1,0 +1,10 @@
+description = """
+Stationary emitters. Capacitor charges, coolant whines, relay clicks.
+Alive only through current.
+"""
+emotion     = "cold attention"
+antipattern = "no breathing, no footsteps (never mobile), nothing biological."
+shared_layers = [
+  "cooling-fan whirr base layer",
+  "capacitor charge sweep 200Hz → 2kHz ramp",
+]

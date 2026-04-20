@@ -1,0 +1,28 @@
+[unit]
+id            = "eater"
+description   = """
+Emergent boss — spawns from rare necromantic-on-death interaction.
+Walks corpse-to-corpse consuming them, grows thicker, rampages.
+"""
+sonic_palette = "wet slurp + pitched-up gurgle. growing body."
+motif         = "biomass.wet_crawl"
+bus           = "sfx"
+
+[events.spawn]
+description = "Emergence from a corpse-pile."
+filter_hint = "glugging wet 100-400Hz + crack 800Hz."
+spatial     = true
+
+[events.attack]
+description = "Close-range maul on a player."
+filter_hint = "wet crunch 200-600Hz + bone snap 1-2kHz."
+spatial     = true
+
+[events.death]
+description = "Collapse — undoes the consumption."
+filter_hint = "wet splatter + bass drop."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-0.5, 0.5]
+max_concurrent  = 1

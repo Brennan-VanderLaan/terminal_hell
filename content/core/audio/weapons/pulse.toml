@@ -1,0 +1,18 @@
+[unit]
+id            = "pulse"
+description   = """
+Repeating single-shot fire mode — the default weapon archetype.
+Identity has to read clean in a mix of ten other things firing at once.
+"""
+sonic_palette = "crisp pulse snap + chamber click. short tail."
+motif         = "weapon.kinetic_round"
+bus           = "sfx"
+
+[events.fire]
+description = "Per-shot. Fires when the player clicks + weapon cooldown allows."
+filter_hint = "transient 1-3kHz + sub-thump 60Hz; HPF @ 50Hz; 120ms max tail."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-0.5, 0.5]
+max_concurrent  = 6

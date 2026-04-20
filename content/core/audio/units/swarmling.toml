@@ -1,0 +1,28 @@
+[unit]
+id            = "swarmling"
+description   = """
+Chaos-roguelike swarm unit. Paper-thin HP. Always arrives in bursts —
+sound has to stack clean without becoming mush.
+"""
+sonic_palette = "needle-thin, insectile clicks. sub-flutter without body."
+motif         = "carcosa.glyph_tear"
+bus           = "sfx"
+
+[events.spawn]
+description = "Per-spawn in a cluster; expect 5-20 simultaneous instances."
+filter_hint = "tiny body 400Hz, chitter 4-6kHz. keep 1-2kHz clear."
+spatial     = true
+
+[events.attack]
+description = "Bite/contact hit."
+filter_hint = "sharp 3-5kHz prick, <80ms."
+spatial     = true
+
+[events.death]
+description = "Short pop, wet-paper crinkle."
+filter_hint = "transient only, 200ms max tail."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-3.0, 3.0]
+max_concurrent  = 8

@@ -1,0 +1,29 @@
+[unit]
+id            = "flood_carrier"
+description   = """
+Slow bloated walking sac. On death vents 4-5 Floodlings. The `death`
+event IS the burst — the floodling spawns that follow ride their own
+audio.
+"""
+sonic_palette = "gelatinous waddle. bursts into droplet chorus."
+motif         = "flood.parasitic_bubble"
+bus           = "sfx"
+
+[events.spawn]
+description = "Arrival — bulging, quivering."
+filter_hint = "sub 50-100Hz + wet skin tension 400Hz."
+spatial     = true
+
+[events.attack]
+description = "Close-range flail."
+filter_hint = "wet slap 300-600Hz, heavier than flood.attack."
+spatial     = true
+
+[events.death]
+description = "Burst + release — the floodling chorus rides spawn events on the children."
+filter_hint = "wet pop 200-600Hz + droplet chorus 1-3kHz + low settle."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-0.5, 0.5]
+max_concurrent  = 2

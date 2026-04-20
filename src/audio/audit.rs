@@ -52,6 +52,10 @@ pub struct UnitSummary {
     pub id: String,
     pub motif: Option<String>,
     pub slots: Vec<SlotStatus>,
+    /// Which content category this entity belongs to. Used by the
+    /// renderer to group units / weapons / primitives / UI / carcosa
+    /// into separate sections of the report.
+    pub category: Category,
 }
 
 impl UnitSummary {
@@ -92,28 +96,51 @@ impl Coverage {
     }
 }
 
-/// Walk `<pack_root>/audio/` and produce a Coverage report.
+/// Categories walked as entities (every emitter with `[unit]` + `[events.*]`
+/// tables). Motifs are walked separately because they carry no slot matrix.
+/// Music is deferred until the music pipeline lands — its schema is
+/// stem-based rather than event-based.
+const ENTITY_CATEGORIES: &[Category] = &[
+    Category::Unit,
+    Category::Weapon,
+    Category::Primitive,
+    Category::Ui,
+    Category::Carcosa,
+];
+
+/// Walk `<pack_root>/audio/` and produce a Coverage report spanning
+/// every entity category (units / weapons / primitives / UI / carcosa)
+/// plus the motif catalogue.
 pub fn walk(pack_root: &Path) -> Result<Coverage> {
     let audio_root = paths::audio_root(pack_root);
     if !audio_root.is_dir() {
         return Ok(Coverage::default());
     }
 
-    let units = walk_units(pack_root, &audio_root)?;
+    let mut units = Vec::new();
+    for category in ENTITY_CATEGORIES {
+        let mut cat = walk_category(pack_root, &audio_root, *category)?;
+        units.append(&mut cat);
+    }
     let motifs = walk_motifs(&audio_root)?;
 
     Ok(Coverage { units, motifs })
 }
 
-fn walk_units(pack_root: &Path, audio_root: &Path) -> Result<Vec<UnitSummary>> {
-    let units_dir = audio_root.join(Category::Unit.dir_name());
-    if !units_dir.is_dir() {
+/// Walk one entity category's TOML dir and build per-file summaries.
+fn walk_category(
+    pack_root: &Path,
+    audio_root: &Path,
+    category: Category,
+) -> Result<Vec<UnitSummary>> {
+    let dir = audio_root.join(category.dir_name());
+    if !dir.is_dir() {
         return Ok(Vec::new());
     }
 
     let mut out = Vec::new();
-    let mut entries: Vec<_> = fs::read_dir(&units_dir)
-        .with_context(|| format!("read {}", units_dir.display()))?
+    let mut entries: Vec<_> = fs::read_dir(&dir)
+        .with_context(|| format!("read {}", dir.display()))?
         .filter_map(|e| e.ok())
         .collect();
     entries.sort_by_key(|e| e.path());
@@ -129,14 +156,19 @@ fn walk_units(pack_root: &Path, audio_root: &Path) -> Result<Vec<UnitSummary>> {
         let parsed: UnitFile = match toml::from_str(&text) {
             Ok(p) => p,
             Err(err) => {
-                tracing::warn!(path = %path.display(), ?err, "audio audit: unit TOML parse failed");
+                tracing::warn!(
+                    path = %path.display(),
+                    category = category.dir_name(),
+                    ?err,
+                    "audio audit: entity TOML parse failed"
+                );
                 continue;
             }
         };
         let id = parsed.unit.id.clone();
         let motif = parsed.unit.motif.clone();
 
-        let sample_dir = paths::sample_dir(pack_root, Category::Unit, &id);
+        let sample_dir = paths::sample_dir(pack_root, category, &id);
         let aud_dir = sample_dir.join(AUDITION_DIR);
 
         let mut slots = Vec::with_capacity(parsed.events.len() * VARIANTS.len());
@@ -160,6 +192,7 @@ fn walk_units(pack_root: &Path, audio_root: &Path) -> Result<Vec<UnitSummary>> {
             id: stem.to_string(),
             motif,
             slots,
+            category,
         });
     }
     Ok(out)
@@ -251,12 +284,24 @@ fn first_line(s: &str) -> String {
 }
 
 /// Pretty-printed report for humans. Mirrors the example in
-/// `audio-spec.md §7`.
+/// `audio-spec.md §7`, grouped by category so you can see at a glance
+/// how deep the hole is for each emitter family.
 pub fn format_pretty(cov: &Coverage) -> String {
     let mut out = String::new();
+
+    // Group + emit by category in a fixed order so the report layout
+    // stays stable across runs.
+    let mut last_cat: Option<Category> = None;
     for unit in &cov.units {
+        if last_cat != Some(unit.category) {
+            last_cat = Some(unit.category);
+            out.push_str(&format!(
+                "═══ {} ═══════════════════════════════════════\n",
+                unit.category.dir_name()
+            ));
+        }
         out.push_str(&format!(
-            "{:<14}[{}/{} slots filled]",
+            "{:<18}[{}/{} slots filled]",
             unit.id,
             unit.filled(),
             unit.total()
@@ -284,7 +329,7 @@ pub fn format_pretty(cov: &Coverage) -> String {
             };
             let flag = if slot.is_blocker() { "  [BLOCKS m9]" } else { "" };
             out.push_str(&format!(
-                "  {:<14}{:<10}{}{}\n",
+                "  {:<18}{:<10}{}{}\n",
                 event_col, slot.variant, status, flag
             ));
         }
@@ -366,9 +411,14 @@ fn render_markdown(cov: &Coverage, root: &Path) -> String {
         cov.total_slots(),
         cov.blocker_count(),
     ));
-    out.push_str("## Units\n\n");
+    out.push_str("## Entities\n\n");
+    let mut last_cat: Option<Category> = None;
     for unit in &cov.units {
-        out.push_str(&format!("### `{}`\n\n", unit.id));
+        if last_cat != Some(unit.category) {
+            last_cat = Some(unit.category);
+            out.push_str(&format!("### `{}`\n\n", unit.category.dir_name()));
+        }
+        out.push_str(&format!("#### `{}`\n\n", unit.id));
         if let Some(m) = &unit.motif {
             out.push_str(&format!("Motif: `{m}`\n\n"));
         }
@@ -454,6 +504,7 @@ mod tests {
 
         let cov = walk(&tmp).unwrap();
         assert_eq!(cov.units.len(), 1);
+        assert_eq!(cov.units[0].category, Category::Unit);
         let baseline = cov.units[0]
             .slots
             .iter()

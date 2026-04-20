@@ -1,0 +1,10 @@
+description = """
+Ceremonial boss presence. Bent brass, harmonic overtones, ritual cadence.
+A summoning, not a spawn.
+"""
+emotion     = "reverent, oppressive, certain"
+antipattern = "no snarls, no flesh. this is pure frequency and intention."
+shared_layers = [
+  "bent brass stab (same recording, pitched per phase)",
+  "dissonant fifth drone 80Hz × 120Hz",
+]

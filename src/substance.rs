@@ -32,6 +32,55 @@ impl SubstanceId {
     }
 }
 
+/// Gameplay behavior attached to a substance. Populated post-load
+/// by `apply_default_behaviors` and queried by the ambient emitter,
+/// standing-hazard, and fire-propagation passes. Zero-initialized
+/// by default so substances without explicit behavior (e.g.
+/// bone_dust) cost nothing at tick time.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SubstanceBehavior {
+    /// Damage dealt per second to any entity whose center is in
+    /// this substance's tile. Acid, fire, uranium slag.
+    pub damage_per_sec: f32,
+    /// Sanity drained per second from players standing in this
+    /// substance. Carcosa-adjacent; psychic residue + uranium +
+    /// future toxic substances.
+    pub sanity_drain_per_sec: f32,
+    /// Expected particle emissions per tile per second. Treat as
+    /// a Poisson rate; ambient pass rolls `rate * dt` per visible
+    /// tile. Zero = no ambient particles.
+    pub emit_rate: f32,
+    /// Up to three palette entries for ambient emissions. Picked
+    /// uniformly per emission. RGB packed as `Pixel`.
+    pub emit_palette: [Pixel; 3],
+    /// How many of `emit_palette` entries are populated.
+    pub emit_palette_len: u8,
+    /// Vertical drift of ambient particles. Negative = rising
+    /// (smoke/steam), positive = falling (ash/embers).
+    pub emit_drift_y: f32,
+    /// Max horizontal drift magnitude (signed by per-particle rng).
+    pub emit_drift_x: f32,
+    /// Particle TTL range (secs) for ambient emissions.
+    pub emit_ttl_min: f32,
+    pub emit_ttl_max: f32,
+    /// Particle size in pixels for ambient emissions.
+    pub emit_size: u8,
+    /// When true, adjacent flammable substance tiles have a chance
+    /// to ignite into `fire` when this substance is present.
+    /// Applies to the fire substance itself.
+    pub ignites_neighbors: bool,
+    /// When true, this substance is catchable by adjacent fire —
+    /// converts to fire on contact. Blood, oil, ember, ichor.
+    pub flammable: bool,
+    /// Optional lifetime. Substance decays its state field over
+    /// this many seconds, then the tile is reset to Floor. Used
+    /// by `fire` so burning tiles eventually go out.
+    pub ttl_secs: Option<f32>,
+    /// Burn status dot applied on entry (damage-per-sec, ttl-secs).
+    /// Stacks with the standing damage. Fire only, for now.
+    pub applies_burn: Option<(f32, f32)>,
+}
+
 /// Runtime substance definition, resolved from `SubstanceToml`.
 #[derive(Clone, Debug)]
 pub struct SubstanceDef {
@@ -49,6 +98,10 @@ pub struct SubstanceDef {
     /// Small jitter between sibling tiles so wide pools read as
     /// textured rather than flat rectangles. 0 = flat.
     pub jitter: u8,
+    /// Gameplay behavior — damage, emitters, flammability, TTL.
+    /// Populated by `SubstanceRegistry::apply_default_behaviors`
+    /// at content load after all substances are inserted.
+    pub behavior: SubstanceBehavior,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -100,6 +153,7 @@ impl SubstanceRegistry {
             mip_hint: MipHint::ground_default(),
             bloom: None,
             jitter: 0,
+            behavior: SubstanceBehavior::default(),
         });
         reg
     }
@@ -149,10 +203,257 @@ impl SubstanceRegistry {
             mip_hint: MipHint::ground_default(),
             bloom,
             jitter: toml.jitter.unwrap_or(0),
+            behavior: SubstanceBehavior::default(),
         };
         self.defs.push(def);
         self.by_name.insert(name, id);
         Ok(id)
+    }
+
+    /// Patch the behavior for a substance in-place after load.
+    /// Pairs with `apply_default_behaviors` below.
+    pub fn set_behavior(&mut self, id: SubstanceId, behavior: SubstanceBehavior) {
+        if let Some(def) = self.defs.get_mut(id.0 as usize) {
+            def.behavior = behavior;
+        }
+    }
+
+    /// Assign gameplay behaviors to every substance we ship. Called
+    /// by `ContentDb::load_core` after all substance TOMLs have
+    /// loaded. Keyed by name so content packs can add substances
+    /// without touching this table (they just won't have behavior
+    /// until authored here).
+    pub fn apply_default_behaviors(&mut self) {
+        // Helper to make palette declaration compact.
+        fn pal(a: (u8, u8, u8), b: (u8, u8, u8), c: (u8, u8, u8), n: u8) -> ([Pixel; 3], u8) {
+            (
+                [
+                    Pixel::rgb(a.0, a.1, a.2),
+                    Pixel::rgb(b.0, b.1, b.2),
+                    Pixel::rgb(c.0, c.1, c.2),
+                ],
+                n,
+            )
+        }
+
+        // Scorch — thin dark smoke drifting up slowly. No damage,
+        // just atmospheric. Smoke rises (negative y-drift).
+        if let Some(id) = self.by_name("scorch") {
+            let (palette, n) = pal(
+                (60, 55, 48),
+                (90, 82, 70),
+                (40, 36, 32),
+                3,
+            );
+            self.set_behavior(id, SubstanceBehavior {
+                emit_rate: 0.45,
+                emit_palette: palette,
+                emit_palette_len: n,
+                emit_drift_y: -6.0,
+                emit_drift_x: 1.2,
+                emit_ttl_min: 0.9,
+                emit_ttl_max: 1.8,
+                emit_size: 1,
+                ..SubstanceBehavior::default()
+            });
+        }
+
+        // Fresh blood — barely-there warm steam. Bloodhound perk
+        // still heals on it; ambient makes the kill floor feel
+        // recent rather than static.
+        if let Some(id) = self.by_name("blood_pool") {
+            let (palette, n) = pal(
+                (120, 40, 40),
+                (90, 24, 28),
+                (60, 20, 28),
+                3,
+            );
+            self.set_behavior(id, SubstanceBehavior {
+                emit_rate: 0.12,
+                emit_palette: palette,
+                emit_palette_len: n,
+                emit_drift_y: -3.5,
+                emit_drift_x: 0.7,
+                emit_ttl_min: 0.6,
+                emit_ttl_max: 1.1,
+                emit_size: 1,
+                flammable: true,
+                ..SubstanceBehavior::default()
+            });
+        }
+
+        // Acid — green bubbles + sickly fumes, plus DPS to anything
+        // standing in it. Bumped emit rate so the bubbling reads as
+        // active corrosion not an occasional pop.
+        if let Some(id) = self.by_name("acid_pool") {
+            let (palette, n) = pal(
+                (130, 255, 90),
+                (170, 255, 130),
+                (90, 200, 60),
+                3,
+            );
+            self.set_behavior(id, SubstanceBehavior {
+                damage_per_sec: 7.0,
+                emit_rate: 3.2,
+                emit_palette: palette,
+                emit_palette_len: n,
+                emit_drift_y: -10.0,
+                emit_drift_x: 1.6,
+                emit_ttl_min: 0.4,
+                emit_ttl_max: 0.9,
+                emit_size: 1,
+                ..SubstanceBehavior::default()
+            });
+        }
+
+        // Uranium slag — radioactive green motes + slow damage +
+        // sanity drain for players. "Cross this puddle carefully."
+        if let Some(id) = self.by_name("uranium_slag") {
+            let (palette, n) = pal(
+                (130, 255, 90),
+                (190, 255, 150),
+                (80, 220, 60),
+                3,
+            );
+            self.set_behavior(id, SubstanceBehavior {
+                damage_per_sec: 4.0,
+                sanity_drain_per_sec: 3.0,
+                emit_rate: 1.1,
+                emit_palette: palette,
+                emit_palette_len: n,
+                emit_drift_y: -5.0,
+                emit_drift_x: 1.1,
+                emit_ttl_min: 0.8,
+                emit_ttl_max: 1.5,
+                emit_size: 1,
+                ..SubstanceBehavior::default()
+            });
+        }
+
+        // Oil pool — iridescent shimmer, flammable. No damage; the
+        // threat is "one stray Ignite and the whole pool becomes
+        // fire."
+        if let Some(id) = self.by_name("oil_pool") {
+            let (palette, n) = pal(
+                (80, 60, 120),
+                (40, 30, 60),
+                (130, 90, 200),
+                3,
+            );
+            self.set_behavior(id, SubstanceBehavior {
+                emit_rate: 0.22,
+                emit_palette: palette,
+                emit_palette_len: n,
+                emit_drift_y: -2.0,
+                emit_drift_x: 0.5,
+                emit_ttl_min: 0.5,
+                emit_ttl_max: 1.0,
+                emit_size: 1,
+                flammable: true,
+                ..SubstanceBehavior::default()
+            });
+        }
+
+        // Flood ichor — sickly green infection wisps, flammable
+        // (Flood biomass burns eagerly in the lore). Bumped to read
+        // as actively-infected ground, not a faint stain.
+        if let Some(id) = self.by_name("flood_ichor") {
+            let (palette, n) = pal(
+                (90, 255, 120),
+                (60, 200, 90),
+                (150, 255, 160),
+                3,
+            );
+            self.set_behavior(id, SubstanceBehavior {
+                emit_rate: 1.4,
+                emit_palette: palette,
+                emit_palette_len: n,
+                emit_drift_y: -5.0,
+                emit_drift_x: 1.2,
+                emit_ttl_min: 0.5,
+                emit_ttl_max: 1.0,
+                emit_size: 1,
+                flammable: true,
+                ..SubstanceBehavior::default()
+            });
+        }
+
+        // Ember scatter — glowing orange flickers. Highly flammable
+        // (fire-bug leftovers re-ignite at the drop of a hat).
+        // Higher emit rate so the residue actually crackles instead
+        // of looking like dim spots on the floor.
+        if let Some(id) = self.by_name("ember_scatter") {
+            let (palette, n) = pal(
+                (255, 140, 40),
+                (255, 200, 80),
+                (200, 80, 20),
+                3,
+            );
+            self.set_behavior(id, SubstanceBehavior {
+                emit_rate: 3.0,
+                emit_palette: palette,
+                emit_palette_len: n,
+                emit_drift_y: -8.0,
+                emit_drift_x: 1.6,
+                emit_ttl_min: 0.3,
+                emit_ttl_max: 0.6,
+                emit_size: 1,
+                flammable: true,
+                ..SubstanceBehavior::default()
+            });
+        }
+
+        // Psychic residue — violet sparkle drifting upward. Faint
+        // sanity bleed for players (Carcosa-adjacent flavor).
+        if let Some(id) = self.by_name("psychic_residue") {
+            let (palette, n) = pal(
+                (180, 110, 255),
+                (230, 180, 255),
+                (110, 60, 180),
+                3,
+            );
+            self.set_behavior(id, SubstanceBehavior {
+                sanity_drain_per_sec: 1.5,
+                emit_rate: 0.8,
+                emit_palette: palette,
+                emit_palette_len: n,
+                emit_drift_y: -4.5,
+                emit_drift_x: 1.6,
+                emit_ttl_min: 0.6,
+                emit_ttl_max: 1.2,
+                emit_size: 1,
+                ..SubstanceBehavior::default()
+            });
+        }
+
+        // Fire — the NEW substance that makes Ignite actually leave
+        // burning ground. Damage-per-sec + burn status + propagates
+        // to flammable neighbors + auto-decays after ttl. Emit rate
+        // bumped to 6.5/s/tile so a row of fire reads as a wall of
+        // flame, not occasional flickers.
+        if let Some(id) = self.by_name("fire") {
+            let (palette, n) = pal(
+                (255, 120, 40),
+                (255, 200, 60),
+                (200, 60, 20),
+                3,
+            );
+            self.set_behavior(id, SubstanceBehavior {
+                damage_per_sec: 10.0,
+                emit_rate: 6.5,
+                emit_palette: palette,
+                emit_palette_len: n,
+                emit_drift_y: -14.0,
+                emit_drift_x: 2.4,
+                emit_ttl_min: 0.25,
+                emit_ttl_max: 0.7,
+                emit_size: 2,
+                ignites_neighbors: true,
+                ttl_secs: Some(3.5),
+                applies_burn: Some((8.0, 1.2)),
+                ..SubstanceBehavior::default()
+            });
+        }
     }
 
     pub fn len(&self) -> usize {

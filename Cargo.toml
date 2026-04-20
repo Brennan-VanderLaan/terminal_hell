@@ -2,6 +2,9 @@
 name = "terminal_hell"
 version = "0.1.0"
 edition = "2024"
+# `cargo run` without --bin launches the game. Use `cargo run --bin th_record`
+# for the recorder GUI.
+default-run = "terminal_hell"
 
 [dependencies]
 anyhow = "1"

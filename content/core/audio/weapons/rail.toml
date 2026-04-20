@@ -1,0 +1,18 @@
+[unit]
+id            = "rail"
+description   = """
+Precision energy weapon. Long cooldown, devastating single shot.
+Energy-family sibling to beam / cone when those land.
+"""
+sonic_palette = "single coherent discharge. capacitor-driven."
+motif         = "weapon.energy_beam"
+bus           = "sfx"
+
+[events.fire]
+description = "Discharge on trigger pull."
+filter_hint = "crack 2-4kHz + sub-thump 60Hz + 400ms beam decay."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-0.3, 0.3]
+max_concurrent  = 2

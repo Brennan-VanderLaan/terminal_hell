@@ -1,0 +1,16 @@
+id             = "fire"
+tags           = ["fire", "damaging", "flammable", "glowing"]
+# Orange/red flame leaves. Emissive — bloom is strong so a line of
+# burning tiles glows across the arena. The substance's own behavior
+# config (in substance.rs::apply_default_behaviors) paints flame
+# particles at a fast cadence and damages any entity standing on it;
+# a 3.5s auto-decay sets the tile back to Floor so ignite doesn't
+# permanently blacken the arena.
+fresh          = "#ff7828"
+dried          = "#6a1c08"
+state_curve    = "fresh_to_dried"
+jitter         = 1
+bloom_color    = "#ffbc60"
+bloom_radius   = 4
+bloom_falloff  = 0.65
+bloom_strength = 0.7

@@ -1,14 +1,11 @@
-//! Waveform visualization + trim handles.
-//!
-//! Draws a per-channel waveform with min/max downsampling (one
-//! vertical line per pixel) and overlays two draggable trim handles.
-//! Drag closer to the in-handle moves in; drag closer to the
-//! out-handle moves out. Outputs the trim indices back into the
-//! caller's state.
+//! Waveform visualization — min/max downsampled, draggable trim
+//! handles, optional time ruler at the bottom and a play cursor line
+//! when preview playback is active.
 
 use egui::{Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
-const HEIGHT: f32 = 64.0;
+const HEIGHT: f32 = 72.0;
+const RULER_HEIGHT: f32 = 14.0;
 const HANDLE_HITBOX_PX: f32 = 10.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,13 +22,32 @@ pub struct WaveformView {
     pub channel_index: usize,
     pub label: String,
     pub armed: bool,
+    /// Sample rate the waveform was captured at. Drives the time
+    /// ruler tick spacing + duration label.
+    pub rate: u32,
+    /// Sample index of the playback cursor, if previewing. When
+    /// `Some`, draws a vertical line + filled triangle at the top
+    /// of the waveform.
+    pub cursor_sample: Option<usize>,
+    /// Draws the second-stamped ruler underneath when true.
+    pub show_ruler: bool,
+    /// Red-outline the waveform card while recording this channel.
+    pub hot: bool,
 }
 
 impl WaveformView {
-    /// Render a waveform. `samples` is the captured channel data;
-    /// `trim_in` / `trim_out` are sample indices into it and may be
-    /// mutated by drag interaction. `meter_peak` drives a small peak
-    /// LED on the left edge.
+    pub fn new(channel_index: usize, label: String) -> Self {
+        Self {
+            channel_index,
+            label,
+            armed: true,
+            rate: 48_000,
+            cursor_sample: None,
+            show_ruler: true,
+            hot: false,
+        }
+    }
+
     pub fn show(
         &self,
         ui: &mut Ui,
@@ -41,36 +57,58 @@ impl WaveformView {
         meter_peak: f32,
     ) {
         let available = ui.available_width();
+        let height = if self.show_ruler { HEIGHT + RULER_HEIGHT } else { HEIGHT };
         let (response, painter) =
-            ui.allocate_painter(Vec2::new(available, HEIGHT), Sense::click_and_drag());
+            ui.allocate_painter(Vec2::new(available, height), Sense::click_and_drag());
 
-        let rect = response.rect;
-        paint_background(&painter, rect, self.armed);
-        paint_label(&painter, rect, &self.label, meter_peak);
+        let full_rect = response.rect;
+        let wave_rect = Rect::from_min_max(
+            full_rect.left_top(),
+            Pos2::new(full_rect.right(), full_rect.top() + HEIGHT),
+        );
+        let ruler_rect = Rect::from_min_max(
+            Pos2::new(full_rect.left(), full_rect.top() + HEIGHT),
+            full_rect.right_bottom(),
+        );
+
+        paint_background(&painter, wave_rect, self.armed, self.hot);
+        paint_label(&painter, wave_rect, &self.label, meter_peak, self.hot);
 
         if samples.is_empty() {
             painter.text(
-                rect.center(),
+                wave_rect.center(),
                 egui::Align2::CENTER_CENTER,
                 "no data — arm and hit REC",
                 egui::FontId::default(),
                 Color32::from_gray(140),
             );
+            if self.show_ruler {
+                paint_ruler(&painter, ruler_rect, 0, self.rate);
+            }
             return;
         }
 
-        paint_waveform(&painter, rect, samples, self.armed);
-        paint_trims(&painter, rect, samples.len(), *trim_in, *trim_out);
+        paint_waveform(&painter, wave_rect, samples, self.armed);
+        paint_trims(&painter, wave_rect, samples.len(), *trim_in, *trim_out);
+        if let Some(cursor) = self.cursor_sample {
+            paint_cursor(&painter, wave_rect, samples.len(), cursor);
+        }
+        paint_duration(&painter, wave_rect, *trim_in, *trim_out, samples.len(), self.rate);
+        if self.show_ruler {
+            paint_ruler(&painter, ruler_rect, samples.len(), self.rate);
+        }
 
-        // Drag handling. Decide which handle based on proximity at
-        // the drag-start point, then move that handle for the rest
-        // of the drag.
+        // Drag → move nearest trim handle. Only pay attention if the
+        // interaction started inside the waveform rect (not the
+        // ruler strip).
         if response.drag_started() {
             if let Some(pos) = response.interact_pointer_pos() {
-                let target = nearest_handle(pos, rect, samples.len(), *trim_in, *trim_out);
-                ui.data_mut(|d| {
-                    d.insert_temp::<DragTarget>(response.id, target);
-                });
+                if wave_rect.contains(pos) {
+                    let target = nearest_handle(pos, wave_rect, samples.len(), *trim_in, *trim_out);
+                    ui.data_mut(|d| {
+                        d.insert_temp::<DragTarget>(response.id, target);
+                    });
+                }
             }
         }
         if response.dragged() {
@@ -78,7 +116,7 @@ impl WaveformView {
                 .data(|d| d.get_temp::<DragTarget>(response.id))
                 .unwrap_or(DragTarget::None);
             if let Some(pos) = response.interact_pointer_pos() {
-                let sample_pos = pos_to_sample(pos.x, rect, samples.len());
+                let sample_pos = pos_to_sample(pos.x, wave_rect, samples.len());
                 match target {
                     DragTarget::In => {
                         *trim_in = sample_pos.min(trim_out.saturating_sub(1));
@@ -93,14 +131,21 @@ impl WaveformView {
     }
 }
 
-fn paint_background(p: &egui::Painter, rect: Rect, armed: bool) {
-    let bg = if armed {
+fn paint_background(p: &egui::Painter, rect: Rect, armed: bool, hot: bool) {
+    let bg = if hot {
+        Color32::from_rgb(36, 18, 22)
+    } else if armed {
         Color32::from_rgb(20, 26, 34)
     } else {
         Color32::from_rgb(24, 24, 24)
     };
     p.rect_filled(rect, 4.0, bg);
-    // Center line.
+    let border = if hot {
+        Stroke::new(1.5, Color32::from_rgb(230, 80, 80))
+    } else {
+        Stroke::new(1.0, Color32::from_gray(60))
+    };
+    p.rect_stroke(rect, 4.0, border);
     p.line_segment(
         [
             Pos2::new(rect.left(), rect.center().y),
@@ -110,7 +155,7 @@ fn paint_background(p: &egui::Painter, rect: Rect, armed: bool) {
     );
 }
 
-fn paint_label(p: &egui::Painter, rect: Rect, label: &str, peak: f32) {
+fn paint_label(p: &egui::Painter, rect: Rect, label: &str, peak: f32, hot: bool) {
     let db = if peak <= 0.0 { -120.0 } else { 20.0 * peak.log10() };
     let peak_color = if peak >= 0.98 {
         Color32::from_rgb(230, 80, 80)
@@ -119,12 +164,17 @@ fn paint_label(p: &egui::Painter, rect: Rect, label: &str, peak: f32) {
     } else {
         Color32::from_rgb(90, 210, 140)
     };
+    let label_color = if hot {
+        Color32::from_rgb(240, 170, 170)
+    } else {
+        Color32::from_gray(220)
+    };
     p.text(
         Pos2::new(rect.left() + 6.0, rect.top() + 6.0),
         egui::Align2::LEFT_TOP,
         label,
         egui::FontId::monospace(11.0),
-        Color32::from_gray(220),
+        label_color,
     );
     p.text(
         Pos2::new(rect.left() + 6.0, rect.top() + 22.0),
@@ -175,7 +225,6 @@ fn paint_trims(p: &egui::Painter, rect: Rect, total: usize, t_in: usize, t_out: 
     }
     let x_in = sample_to_x(t_in, rect, total);
     let x_out = sample_to_x(t_out, rect, total);
-    // Shaded regions outside the trim window.
     let dim = Color32::from_black_alpha(130);
     if x_in > rect.left() {
         p.rect_filled(
@@ -191,7 +240,6 @@ fn paint_trims(p: &egui::Painter, rect: Rect, total: usize, t_in: usize, t_out: 
             dim,
         );
     }
-    // Handle lines.
     let handle_color = Color32::from_rgb(240, 200, 60);
     p.line_segment(
         [
@@ -207,7 +255,6 @@ fn paint_trims(p: &egui::Painter, rect: Rect, total: usize, t_in: usize, t_out: 
         ],
         Stroke::new(2.0, handle_color),
     );
-    // Top/bottom grips on each handle.
     for x in [x_in, x_out] {
         p.rect_filled(
             Rect::from_center_size(Pos2::new(x, rect.top() + 4.0), Vec2::new(8.0, 8.0)),
@@ -220,6 +267,109 @@ fn paint_trims(p: &egui::Painter, rect: Rect, total: usize, t_in: usize, t_out: 
             handle_color,
         );
     }
+}
+
+fn paint_cursor(p: &egui::Painter, rect: Rect, total: usize, cursor: usize) {
+    if total == 0 {
+        return;
+    }
+    let x = sample_to_x(cursor, rect, total);
+    let line_color = Color32::from_rgb(120, 220, 220);
+    p.line_segment(
+        [
+            Pos2::new(x, rect.top()),
+            Pos2::new(x, rect.bottom()),
+        ],
+        Stroke::new(1.5, line_color),
+    );
+    // Triangular marker at top so the cursor reads at a glance
+    // even against a dense waveform.
+    let tri = [
+        Pos2::new(x, rect.top() + 0.0),
+        Pos2::new(x - 4.0, rect.top() - 6.0),
+        Pos2::new(x + 4.0, rect.top() - 6.0),
+    ];
+    p.add(egui::epaint::Shape::convex_polygon(
+        tri.to_vec(),
+        line_color,
+        Stroke::NONE,
+    ));
+}
+
+fn paint_duration(
+    p: &egui::Painter,
+    rect: Rect,
+    t_in: usize,
+    t_out: usize,
+    total: usize,
+    rate: u32,
+) {
+    if total == 0 || rate == 0 {
+        return;
+    }
+    let kept = t_out.saturating_sub(t_in);
+    let total_s = total as f32 / rate as f32;
+    let kept_s = kept as f32 / rate as f32;
+    let text = format!("kept {:.2}s  /  full {:.2}s", kept_s, total_s);
+    p.text(
+        Pos2::new(rect.right() - 6.0, rect.top() + 6.0),
+        egui::Align2::RIGHT_TOP,
+        text,
+        egui::FontId::monospace(10.0),
+        Color32::from_gray(200),
+    );
+}
+
+fn paint_ruler(p: &egui::Painter, rect: Rect, total: usize, rate: u32) {
+    p.rect_filled(rect, 0.0, Color32::from_rgb(14, 14, 20));
+    let label_color = Color32::from_gray(170);
+    let tick_color = Color32::from_gray(90);
+
+    if total == 0 || rate == 0 {
+        p.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "—",
+            egui::FontId::monospace(9.0),
+            label_color,
+        );
+        return;
+    }
+
+    let total_s = total as f32 / rate as f32;
+    // Pick a tick interval that yields 4–12 ticks across the rect.
+    let interval = pick_tick_interval(total_s);
+    let mut t = 0.0f32;
+    while t <= total_s + 1e-4 {
+        let frac = (t / total_s).clamp(0.0, 1.0);
+        let x = rect.left() + frac * rect.width();
+        p.line_segment(
+            [
+                Pos2::new(x, rect.top()),
+                Pos2::new(x, rect.top() + 4.0),
+            ],
+            Stroke::new(1.0, tick_color),
+        );
+        p.text(
+            Pos2::new(x + 2.0, rect.top() + 5.0),
+            egui::Align2::LEFT_TOP,
+            format!("{t:.2}s"),
+            egui::FontId::monospace(9.0),
+            label_color,
+        );
+        t += interval;
+    }
+}
+
+fn pick_tick_interval(total_s: f32) -> f32 {
+    let candidates = [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0];
+    for c in candidates {
+        if total_s / c <= 12.0 {
+            return c;
+        }
+    }
+    // Fallback for very long takes.
+    (total_s / 8.0).max(0.01)
 }
 
 fn sample_to_x(sample: usize, rect: Rect, total: usize) -> f32 {

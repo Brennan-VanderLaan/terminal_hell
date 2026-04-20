@@ -102,6 +102,13 @@ pub fn run_scenario_with_interrupt(
             game.players[i].x = sp.pos.0;
             game.players[i].y = sp.pos.1;
             game.players[i].turret_kits = sp.turret_kits;
+            // Optional HP boost so spectacle scenarios can outlast
+            // the swarm. Default 100 is fine for combat baselines;
+            // multi-stage shows want a few thousand HP so the
+            // operator gets to see the climax.
+            if let Some(hp) = sp.hp_override {
+                game.players[i].hp = hp;
+            }
         }
         player_ids.push(pid);
     }
@@ -113,6 +120,17 @@ pub fn run_scenario_with_interrupt(
 
     // Camera follows first player for Watch mode; no-op for headless.
     game.update_camera_follow();
+
+    // Substance paints: apply zero-time paints up front so the
+    // first frame already sees them; defer the rest into a sorted
+    // queue dispatched by `at_secs` alongside the spawn queue.
+    let mut pending_paints: Vec<&crate::bench::scenario::ScenarioSubstancePaint> =
+        scenario.paints.iter().filter(|p| p.at_secs > 0.0).collect();
+    pending_paints.sort_by(|a, b| a.at_secs.partial_cmp(&b.at_secs).unwrap());
+    let mut next_paint_idx: usize = 0;
+    for paint in scenario.paints.iter().filter(|p| p.at_secs <= 0.0) {
+        apply_substance_paint(&mut game, paint);
+    }
 
     // Queue spawns by time. Copy + sort to make dispatch O(n log n).
     let mut pending_spawns: Vec<&ScenarioSpawn> = scenario.spawns.iter().collect();
@@ -174,6 +192,16 @@ pub fn run_scenario_with_interrupt(
             let batch = pending_spawns[next_spawn_idx];
             apply_spawn(&mut game, batch);
             next_spawn_idx += 1;
+        }
+        // Same for staged substance paints — fire seeds, secondary
+        // oil drops, blood splash drops, etc. Lets a scenario
+        // choreograph cascading chaos.
+        while next_paint_idx < pending_paints.len()
+            && pending_paints[next_paint_idx].at_secs <= elapsed_secs
+        {
+            let paint = pending_paints[next_paint_idx];
+            apply_substance_paint(&mut game, paint);
+            next_paint_idx += 1;
         }
 
         // Script-driven inputs + turret-deploy cadence.
@@ -341,6 +369,78 @@ pub fn run_scenario_with_interrupt(
 /// Push a spawn batch into `game.enemies` according to its layout.
 /// Bypasses the wave director — benches want control over exact
 /// placement, not director pacing.
+/// Stamp a ScenarioSubstancePaint onto the arena ground layer.
+/// Tiles outside the arena bounds or on non-floor structures are
+/// skipped silently. Uses `Arena::set_substance` (which replaces
+/// any existing substance at that tile).
+fn apply_substance_paint(game: &mut Game, paint: &crate::bench::scenario::ScenarioSubstancePaint) {
+    use crate::bench::scenario::SubstanceLayout;
+    use rand::rngs::SmallRng;
+    use rand::{Rng, SeedableRng};
+
+    let Some(id) = game.content.substances.by_name(paint.substance) else {
+        tracing::warn!(substance = paint.substance, "scenario paint: unknown substance");
+        return;
+    };
+    let w = game.arena.width as i32;
+    let h = game.arena.height as i32;
+    let in_bounds = |x: i32, y: i32| x >= 0 && y >= 0 && x < w && y < h;
+    let mut stamp = |g: &mut Game, x: i32, y: i32| {
+        if in_bounds(x, y) && g.arena.is_passable(x, y) {
+            g.arena.set_substance(x, y, id, paint.state);
+        }
+    };
+    match paint.layout {
+        SubstanceLayout::Point(x, y) => stamp(game, x as i32, y as i32),
+        SubstanceLayout::Rect { center, half_w, half_h } => {
+            let x0 = (center.0 - half_w) as i32;
+            let x1 = (center.0 + half_w) as i32;
+            let y0 = (center.1 - half_h) as i32;
+            let y1 = (center.1 + half_h) as i32;
+            for y in y0..=y1 {
+                for x in x0..=x1 {
+                    stamp(game, x, y);
+                }
+            }
+        }
+        SubstanceLayout::Disk { center, radius } => {
+            let r2 = radius * radius;
+            let x0 = (center.0 - radius) as i32;
+            let x1 = (center.0 + radius) as i32;
+            let y0 = (center.1 - radius) as i32;
+            let y1 = (center.1 + radius) as i32;
+            for y in y0..=y1 {
+                for x in x0..=x1 {
+                    let dx = x as f32 + 0.5 - center.0;
+                    let dy = y as f32 + 0.5 - center.1;
+                    if dx * dx + dy * dy <= r2 {
+                        stamp(game, x, y);
+                    }
+                }
+            }
+        }
+        SubstanceLayout::Line { from, to } => {
+            let dx = to.0 - from.0;
+            let dy = to.1 - from.1;
+            let steps = (dx * dx + dy * dy).sqrt().ceil().max(1.0) as i32;
+            for i in 0..=steps {
+                let t = i as f32 / steps as f32;
+                let px = from.0 + dx * t;
+                let py = from.1 + dy * t;
+                stamp(game, px as i32, py as i32);
+            }
+        }
+        SubstanceLayout::Scatter { center, half_w, half_h, count, seed } => {
+            let mut rng = SmallRng::seed_from_u64(seed);
+            for _ in 0..count {
+                let x = (center.0 + rng.gen_range(-half_w..=half_w)) as i32;
+                let y = (center.1 + rng.gen_range(-half_h..=half_h)) as i32;
+                stamp(game, x, y);
+            }
+        }
+    }
+}
+
 fn apply_spawn(game: &mut Game, batch: &ScenarioSpawn) {
     let stats = game.content.stats(batch.archetype).clone();
     let arena_w = game.arena.width as f32;

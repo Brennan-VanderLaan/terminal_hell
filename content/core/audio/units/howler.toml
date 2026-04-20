@@ -1,0 +1,28 @@
+[unit]
+id            = "howler"
+description   = """
+Support archetype — never attacks, emits noise events that call the
+horde. The howl IS the threat.
+"""
+sonic_palette = "wet cavity reverb. single howl rings the room."
+motif         = "biomass.wet_crawl"
+bus           = "sfx"
+
+[events.spawn]
+description = "Arrival — sniffling wet intake."
+filter_hint = "200Hz moist rasp + 1kHz wet fricative."
+spatial     = true
+
+[events.howl]
+description = "Signature event — bone-chilling call. Audible arena-wide. Fires on the shriek cooldown."
+filter_hint = "rising formant 200Hz → 600Hz + long reverb tail."
+spatial     = true
+
+[events.death]
+description = "Cut-off mid-howl. Abrupt."
+filter_hint = "truncated mid-tone + wet gurgle."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-1.5, 1.5]
+max_concurrent  = 2

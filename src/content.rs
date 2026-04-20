@@ -125,6 +125,10 @@ pub struct ContentDb {
     /// have to look them up by name every tick.
     pub blood_pool_id: SubstanceId,
     pub scorch_id: SubstanceId,
+    /// Fire substance id. Cached so Ignite's paint path + the
+    /// standing-hazard pass + fire propagation don't have to lookup
+    /// by name every tick.
+    pub fire_id: SubstanceId,
     /// Optional ASCII-art sprites keyed by archetype. When present,
     /// sprite.rs uses these instead of the hardcoded builders.
     pub archetype_sprites: HashMap<Archetype, crate::sprite::Sprite>,
@@ -229,6 +233,14 @@ impl ContentDb {
         let scorch_id = substances
             .by_name("scorch")
             .ok_or_else(|| anyhow!("substance `scorch` required in content/core/substances/"))?;
+        // Apply gameplay behaviors (emitters, damage, flammability)
+        // now that every substance is loaded. Behaviors keyed by
+        // substance name so content packs opt in by naming matching
+        // a known key in `apply_default_behaviors`.
+        substances.apply_default_behaviors();
+        let fire_id = substances
+            .by_name("fire")
+            .ok_or_else(|| anyhow!("substance `fire` required in content/core/substances/"))?;
         // Prefer `tarkov_scavs` as the opening brand — grounded,
         // legible fire-team flavor matches the design spec's "start
         // recognizable" pillar. Fall back alphabetically if it's
@@ -363,6 +375,7 @@ impl ContentDb {
             substances,
             blood_pool_id,
             scorch_id,
+            fire_id,
             archetype_sprites,
             brand_sprites,
         })

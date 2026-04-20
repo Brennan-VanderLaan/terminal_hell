@@ -1,0 +1,28 @@
+[unit]
+id            = "flood"
+description   = """
+Converted host. Attacks every non-Flood entity. Spawned by Floodling
+conversion; doesn't appear in normal spawn pools.
+"""
+sonic_palette = "wet lurch with a rhythmic bubble-under."
+motif         = "flood.parasitic_bubble"
+bus           = "sfx"
+
+[events.spawn]
+description = "Conversion complete — transitional gurgle."
+filter_hint = "layered wet 200-800Hz + rising bubble."
+spatial     = true
+
+[events.attack]
+description = "Melee flail on contact."
+filter_hint = "wet slap 400-900Hz + bubble pop."
+spatial     = true
+
+[events.death]
+description = "Collapse back into parasite sludge."
+filter_hint = "wet splash + bubble tail."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-1.0, 1.0]
+max_concurrent  = 4

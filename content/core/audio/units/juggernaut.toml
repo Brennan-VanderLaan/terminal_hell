@@ -1,0 +1,32 @@
+[unit]
+id            = "juggernaut"
+description   = """
+Slow tank. Plows forward, punches whatever's in the way.
+"""
+sonic_palette = "enormous pulp steps. bassy."
+motif         = "biomass.wet_crawl"
+bus           = "sfx"
+
+[events.spawn]
+description = "Arrival — ground shudders."
+filter_hint = "deep sub 40-60Hz + resonant 200Hz body."
+spatial     = true
+
+[events.attack]
+description = "Melee strike on a player."
+filter_hint = "sub-thud 60Hz + mid-crunch 500Hz-1kHz."
+spatial     = true
+
+[events.wall_hit]
+description = "Smash on a wall tile. Fires per tile smashed."
+filter_hint = "sub 40Hz + mid-crunch 400-900Hz + stone dust 3-5kHz."
+spatial     = true
+
+[events.death]
+description = "Slow topple, ground-shaking."
+filter_hint = "sustained low rumble 40Hz + settling debris."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-0.3, 0.3]
+max_concurrent  = 1

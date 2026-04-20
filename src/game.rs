@@ -241,6 +241,11 @@ pub struct Game {
     /// Transient "you just grabbed X" toasts. Pushed by the pickup
     /// consume path; ticked every frame, drawn as a HUD strip.
     pub toasts: Vec<PickupToast>,
+    /// Accumulator for the fire-propagation tick. Fire doesn't need
+    /// sim-rate propagation — every 0.3s is plenty for the cascade
+    /// to read as "the oil caught." This accumulates dt between
+    /// frames and fires the spread pass on crossover.
+    pub fire_tick_accum: f32,
     /// True when this process owns the authoritative sim (solo or host).
     /// Clients of a remote server run with this false; the menu uses it
     /// to hide host-only controls (like the pause toggle) from clients.
@@ -355,6 +360,7 @@ impl Game {
             death_started_at: 0.0,
             death_report_elapsed: 0.0,
             toasts: Vec::new(),
+            fire_tick_accum: 0.0,
             is_authoritative: true,
             paused: false,
             local_id: None,
@@ -1461,6 +1467,19 @@ impl Game {
         self.tick_daemon(dt);
         self.tick_signs(dt);
         self.tick_toasts(dt);
+        // Substance world-interaction passes. Three tight loops that
+        // tie the ground layer to the rest of the sim:
+        //   • ambient emitters  — smoke/steam/bubbles/sparks from
+        //     substance tiles visible to the camera.
+        //   • standing hazards  — acid/fire/uranium damage + sanity
+        //     drain for entities in-tile.
+        //   • fire propagation  — fire tiles ignite flammable
+        //     neighbors; fire tiles decay toward Floor on TTL.
+        self.perf.begin("substance_world");
+        self.tick_substance_ambient(dt);
+        self.tick_substance_hazards(dt);
+        self.tick_fire_propagation(dt);
+        self.perf.end("substance_world");
 
         for (player, runtime) in self.players.iter_mut().zip(self.runtimes.iter_mut()) {
             // Dead players freeze in place — their last input is
@@ -1555,6 +1574,10 @@ impl Game {
             let salvo = weapon.try_fire(origin, target, player.id, damage_mul);
             if !salvo.is_empty() {
                 weapon.consume_overdrive();
+                // Emit a weapon-mode fire event per successful shot.
+                // `FireMode::label` returns the snake-case id
+                // ("pulse", "auto", etc) used as the audio pool key.
+                crate::audio::emit(weapon.mode.label(), "fire", Some(origin));
             }
             new_projectiles.extend(salvo);
         }
@@ -1899,6 +1922,7 @@ impl Game {
             // of its base speed).
             if e.archetype == Archetype::Howler && e.attack_cooldown <= 0.0 {
                 howler_shrieks.push((e.x, e.y));
+                crate::audio::emit("howler", "howl", Some((e.x, e.y)));
                 e.attack_cooldown = 4.5;
             }
 
@@ -1924,6 +1948,7 @@ impl Game {
                             e.sprint_timer = 1.6;
                             e.sprint_cooldown = 2.2;
                             e.tell_timer = 0.0;
+                            crate::audio::emit("charger", "charge_windup", Some((e.x, e.y)));
                         }
                     }
                 }
@@ -1956,6 +1981,7 @@ impl Game {
                                 let len = d2.sqrt().max(0.001);
                                 e.leap_vec = (dx / len, dy / len);
                                 e.tell_target = (tx, ty);
+                                crate::audio::emit("leaper", "leap_windup", Some((e.x, e.y)));
                             }
                         }
                     }
@@ -1973,6 +1999,7 @@ impl Game {
                             e.leap_state = 3;
                             e.leap_timer = 0.9; // recovery window
                             e.sprint_cooldown = 1.8;
+                            crate::audio::emit("leaper", "leap_land", Some((e.x, e.y)));
                         }
                     }
                     _ => {
@@ -2052,6 +2079,7 @@ impl Game {
                             rocketeer_shots.push((e.x, e.y, tx, ty));
                             e.tell_timer = 0.0;
                             e.attack_cooldown = 3.5;
+                            crate::audio::emit("rocketeer", "rocket_fire", Some((e.x, e.y)));
                         }
                     }
                 }
@@ -2129,6 +2157,11 @@ impl Game {
                         };
                         let dmg = ((base as f32) * scale).round() as i32;
                         player.take_damage_from(dmg, Some(e.archetype));
+                        // Melee contact connected — touch_player gates
+                        // this by touch_cooldown, so emits match the
+                        // actual strike cadence rather than firing
+                        // every tick of contact.
+                        crate::audio::emit(e.archetype.audio_id(), "attack", Some((e.x, e.y)));
                     }
                 }
                 if e.is_ranged() {
@@ -2136,6 +2169,11 @@ impl Game {
                         e.try_ranged_attack(fire_target, &self.arena)
                     {
                         ranged_shots.push((pid, shot));
+                        crate::audio::emit(
+                            e.archetype.audio_id(),
+                            "fire",
+                            Some((e.x, e.y)),
+                        );
                     }
                 }
             }
@@ -2259,6 +2297,7 @@ impl Game {
             for _ in 0..4 {
                 self.damage_wall_with_particles(tile, at, &[]);
             }
+            crate::audio::emit("juggernaut", "wall_hit", Some(at));
         }
 
         // Howler shrieks — big noise pings that gather the horde.
@@ -2353,6 +2392,7 @@ impl Game {
             for _ in 0..3 {
                 self.damage_wall_with_particles(tile, at, &[]);
             }
+            crate::audio::emit("breacher", "wall_hit", Some(at));
         }
 
         // Fire queued Rocketeer shots. Rockets are Projectile-kind
@@ -2695,11 +2735,24 @@ impl Game {
                 self.emit_blast(*at, color, seed, 0);
             }
 
-            // Acid — paint an acid pool under the hit enemy.
+            // Acid — paint a small acid pool around the hit point.
+            // Sized to enemy footprint; multiple hits in the same
+            // area still overlap into a proper corrosive lake.
             if primitives.contains(&Primitive::Acid) {
                 if let Some(id) = self.content.substances.by_name("acid_pool") {
-                    self.paint_substance(at.0 as i32, at.1 as i32, id, 30);
+                    let s = seed.wrapping_mul(0xACAD_BEEF);
+                    self.paint_substance_radius(at.0, at.1, id, 30, 2.5, s);
                 }
+            }
+
+            // Ignite — paint a small fire disk at the hit. Just
+            // big enough that the fire-propagation pass has a few
+            // flammable neighbors to cascade into without the
+            // single shot blanketing a room.
+            if primitives.contains(&Primitive::Ignite) {
+                let fire_id = self.content.fire_id;
+                let s = seed.wrapping_mul(0x1F11E_F00D_u64);
+                self.paint_substance_radius(at.0, at.1, fire_id, 0, 3.0, s);
             }
 
             // Contagion — if target was burning, burn two nearest
@@ -3437,6 +3490,254 @@ impl Game {
     /// Size + count scales with `intensity` (1 = scratch, 3 = crit).
     /// Pure visual — does not paint ground substances. Called on a
     /// per-player cadence by the main tick while `bleed_ttl > 0`.
+    /// Per-tick ambient particle emission from ground substances.
+    /// Only iterates tiles within the camera viewport (+ small
+    /// padding) — off-screen tiles wouldn't be rendered anyway and
+    /// would waste the particle budget. Each tile rolls a Poisson-
+    /// style `rate * dt` chance per substance behavior; particles
+    /// inherit the substance's configured palette, drift, and TTL.
+    ///
+    /// Budgeted — skips emission entirely once the particle Vec is
+    /// above 800 so combat gore always has room to spawn.
+    fn tick_substance_ambient(&mut self, dt: f32) {
+        const PARTICLE_BUDGET: usize = 800;
+        if self.particles.len() >= PARTICLE_BUDGET {
+            return;
+        }
+        // Viewport bounds in world tiles, +4 pad so edges stay alive
+        // when the camera pans.
+        let c = &self.camera;
+        let half_w = (c.viewport_w as f32) * 0.5 / c.zoom;
+        let half_h = (c.viewport_h as f32) * 0.5 / c.zoom;
+        let minx = ((c.center.0 - half_w) as i32 - 4).max(0);
+        let miny = ((c.center.1 - half_h) as i32 - 4).max(0);
+        let maxx = ((c.center.0 + half_w) as i32 + 4)
+            .min(self.arena.width as i32 - 1);
+        let maxy = ((c.center.1 + half_h) as i32 + 4)
+            .min(self.arena.height as i32 - 1);
+        if minx >= maxx || miny >= maxy {
+            return;
+        }
+
+        use rand::Rng;
+        let reg = &self.content.substances;
+        for y in miny..=maxy {
+            for x in minx..=maxx {
+                let g = self.arena.ground(x, y);
+                let (id, _state) = match g {
+                    crate::arena::Ground::Substance { id, state } => (id, state),
+                    _ => continue,
+                };
+                let def = match reg.get(id) {
+                    Some(d) => d,
+                    None => continue,
+                };
+                let b = def.behavior;
+                if b.emit_rate <= 0.0 || b.emit_palette_len == 0 {
+                    continue;
+                }
+                // Poisson-ish: per-tile probability per tick.
+                if self.kiosk_rng.r#gen::<f32>() > b.emit_rate * dt {
+                    continue;
+                }
+                // Palette pick.
+                let idx = (self.kiosk_rng.r#gen::<u8>() as usize)
+                    % (b.emit_palette_len as usize);
+                let color = b.emit_palette[idx];
+                // Slight per-particle jitter so wisps don't all stack
+                // on tile centers.
+                let jx = (self.kiosk_rng.r#gen::<f32>() - 0.5) * 0.9;
+                let jy = (self.kiosk_rng.r#gen::<f32>() - 0.5) * 0.9;
+                let vx = (self.kiosk_rng.r#gen::<f32>() - 0.5) * 2.0 * b.emit_drift_x;
+                let vy = b.emit_drift_y
+                    + (self.kiosk_rng.r#gen::<f32>() - 0.5) * 2.0;
+                let ttl = self
+                    .kiosk_rng
+                    .gen_range(b.emit_ttl_min..=b.emit_ttl_max.max(b.emit_ttl_min + 0.01));
+                self.particles.push(crate::particle::Particle {
+                    x: x as f32 + 0.5 + jx,
+                    y: y as f32 + 0.5 + jy,
+                    vx,
+                    vy,
+                    ttl,
+                    ttl_max: ttl,
+                    color,
+                    size: b.emit_size.max(1),
+                });
+                // Early-out if a very dense emitter tile pushed us
+                // to the cap this frame.
+                if self.particles.len() >= PARTICLE_BUDGET {
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Per-tick damage + sanity drain for entities standing on a
+    /// substance. Plays at sim cadence so DOT accumulates over the
+    /// same frames primitives+weapons tick. Applies to players AND
+    /// enemies — an acid pool hurts anyone in it, which is exactly
+    /// the friendly-fire-via-ground interaction the spec calls for.
+    fn tick_substance_hazards(&mut self, dt: f32) {
+        let reg = &self.content.substances;
+        // Players
+        for pi in 0..self.players.len() {
+            let (px, py, alive) = {
+                let p = &self.players[pi];
+                (p.x, p.y, p.hp > 0)
+            };
+            if !alive {
+                continue;
+            }
+            let g = self.arena.ground(px as i32, py as i32);
+            if let crate::arena::Ground::Substance { id, .. } = g {
+                let b = match reg.get(id) {
+                    Some(d) => d.behavior,
+                    None => continue,
+                };
+                if b.damage_per_sec > 0.0 {
+                    // Quantize to integer damage; accumulate the
+                    // fractional part so sub-1-dps substances still
+                    // eventually tick.
+                    let raw = (b.damage_per_sec * dt).ceil() as i32;
+                    if raw > 0 {
+                        self.players[pi].take_damage(raw);
+                    }
+                }
+                if b.sanity_drain_per_sec > 0.0 {
+                    self.players[pi].sanity =
+                        (self.players[pi].sanity - b.sanity_drain_per_sec * dt).max(0.0);
+                }
+            }
+        }
+        // Enemies — living ones take substance damage too. Dead +
+        // stationary (player turret = survivor team) skip; we don't
+        // want turrets eaten by their own oil pool.
+        let survivor_tag = crate::tag::Tag::new(crate::enemy::TEAM_SURVIVOR);
+        for ei in 0..self.enemies.len() {
+            let (ex, ey, alive, team) = {
+                let e = &self.enemies[ei];
+                (e.x, e.y, e.hp > 0, e.team)
+            };
+            if !alive || team == survivor_tag {
+                continue;
+            }
+            let g = self.arena.ground(ex as i32, ey as i32);
+            if let crate::arena::Ground::Substance { id, .. } = g {
+                let b = match reg.get(id) {
+                    Some(d) => d.behavior,
+                    None => continue,
+                };
+                if b.damage_per_sec > 0.0 {
+                    let raw = (b.damage_per_sec * dt).ceil() as i32;
+                    if raw > 0 {
+                        let _ = self.enemies[ei].apply_damage(raw);
+                    }
+                }
+                // Fire stamps a burn status on top of raw damage so
+                // the enemy keeps smoldering after walking out.
+                if let Some((dps, ttl)) = b.applies_burn {
+                    self.enemies[ei].apply_burn(dps, ttl);
+                }
+            }
+        }
+    }
+
+    /// Fire propagation + decay. Once every 0.3s of sim time we
+    /// iterate all fire tiles in the camera band, decay their state
+    /// toward zero (auto-removing tiles that finish their ttl), and
+    /// roll a chance to ignite adjacent flammable substances. The
+    /// payoff: a Rocketeer lobbing a breach-ignite rocket into an
+    /// oil pool turns a single tile into a spreading grease fire
+    /// that hoses the whole room.
+    fn tick_fire_propagation(&mut self, dt: f32) {
+        // Accumulate dt into a private clock on `Game`. Process when
+        // the clock crosses the period. 0.1s = 10 propagation
+        // ticks/sec, fast enough that fire reads as actually
+        // *spreading* visually instead of teleporting in chunks.
+        const PROPAGATE_PERIOD: f32 = 0.1;
+        self.fire_tick_accum += dt;
+        if self.fire_tick_accum < PROPAGATE_PERIOD {
+            return;
+        }
+        let tick_dt = self.fire_tick_accum;
+        self.fire_tick_accum = 0.0;
+        let fire_id = self.content.fire_id;
+        let reg = &self.content.substances;
+        // Widen the scan to the whole arena — fire shouldn't stop
+        // propagating just because the camera moved. Budgeted: we
+        // only process fire tiles, and their count is small in
+        // practice (ttl caps their lifetime).
+        let w = self.arena.width as i32;
+        let h = self.arena.height as i32;
+        // Collect (x, y, state) for every fire tile up front so we
+        // can mutate arena without borrow conflicts in the loop.
+        let mut fires: Vec<(i32, i32, u8)> = Vec::new();
+        for y in 0..h {
+            for x in 0..w {
+                if let crate::arena::Ground::Substance { id, state } =
+                    self.arena.ground(x, y)
+                {
+                    if id == fire_id {
+                        fires.push((x, y, state));
+                    }
+                }
+            }
+        }
+        if fires.is_empty() {
+            return;
+        }
+        let fire_behavior = match reg.get(fire_id) {
+            Some(d) => d.behavior,
+            None => return,
+        };
+        let ttl_total = fire_behavior.ttl_secs.unwrap_or(3.5).max(0.5);
+        // state 0..=255 tracks age; we step by (255/ttl) per tick.
+        let decay = ((255.0 / ttl_total) * tick_dt).ceil() as u32;
+        use rand::Rng;
+        for (fx, fy, state) in fires {
+            // Decay: bump state toward 255 (FreshToDried curve).
+            let new_state = (state as u32 + decay).min(255) as u8;
+            if new_state >= 250 {
+                // Burn out. Reset tile to Floor (strips substance).
+                self.arena.set_floor(fx, fy);
+                continue;
+            }
+            self.arena.set_substance(fx, fy, fire_id, new_state);
+            // Propagate to 4-adjacent flammable substances.
+            const DIRS: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+            for (dx, dy) in DIRS {
+                let nx = fx + dx;
+                let ny = fy + dy;
+                if nx < 0 || ny < 0 || nx >= w || ny >= h {
+                    continue;
+                }
+                if let crate::arena::Ground::Substance { id, .. } =
+                    self.arena.ground(nx, ny)
+                {
+                    if id == fire_id {
+                        continue;
+                    }
+                    let nb = match reg.get(id) {
+                        Some(d) => d.behavior,
+                        None => continue,
+                    };
+                    if !nb.flammable {
+                        continue;
+                    }
+                    // 70% chance per propagation tick × 10 ticks/sec
+                    // = the typical neighbor catches within ~150ms.
+                    // A connected oil pool now visibly cascades
+                    // outward like a fuse rather than ticking in
+                    // step-frame chunks.
+                    if self.kiosk_rng.r#gen::<f32>() < 0.70 {
+                        self.arena.set_substance(nx, ny, fire_id, 0);
+                    }
+                }
+            }
+        }
+    }
+
     fn emit_player_bleed(&mut self, x: f32, y: f32, intensity: u8, seed: u64) {
         use rand::rngs::SmallRng;
         use rand::{Rng, SeedableRng};

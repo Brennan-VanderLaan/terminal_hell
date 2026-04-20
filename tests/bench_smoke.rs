@@ -33,10 +33,12 @@ fn bench_smoke_baseline() {
             pos: c(arena.0, arena.1),
             turret_kits: 0,
             script: PlayerScript::Stationary,
+            hp_override: None,
         }],
         spawns: vec![],
         duration: Duration::from_millis(1500),
         stop_when_clear: false,
+        paints: vec![],
     };
     let report = run_scenario(&scenario, RenderMode::Headless).expect("smoke_baseline");
     assert!(report.frames > 10, "expected >10 frames, got {}", report.frames);
@@ -63,6 +65,7 @@ fn bench_smoke_rusher_200() {
             pos: c(arena.0, arena.1),
             turret_kits: 0,
             script: PlayerScript::ShootNearest,
+            hp_override: None,
         }],
         spawns: vec![ScenarioSpawn {
             archetype: Archetype::Rusher,
@@ -72,6 +75,7 @@ fn bench_smoke_rusher_200() {
         }],
         duration: Duration::from_millis(2000),
         stop_when_clear: false,
+        paints: vec![],
     };
     let report = run_scenario(&scenario, RenderMode::Headless).expect("smoke_rusher_200");
     assert!(report.peak_enemies >= 200, "expected 200+ enemies, got {}", report.peak_enemies);
@@ -110,6 +114,7 @@ fn bench_smoke_sentinel_ring() {
         }],
         duration: Duration::from_millis(1500),
         stop_when_clear: false,
+        paints: vec![],
     };
     let report = run_scenario(&scenario, RenderMode::Headless).expect("smoke_sentinel_ring");
     assert_eq!(report.peak_enemies, 8);

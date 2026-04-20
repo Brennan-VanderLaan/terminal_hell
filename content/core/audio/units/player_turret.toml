@@ -1,0 +1,28 @@
+[unit]
+id            = "player_turret"
+description   = """
+Player-deployed friendly turret. Team = survivor. Shares sonic DNA with
+Sentinel but tinted toward a reassuring synthetic palette.
+"""
+sonic_palette = "same family as sentinel, tint-shifted cyan-toned synthetic."
+motif         = "tech.turret_hum"
+bus           = "sfx"
+
+[events.spawn]
+description = "Deploy — satisfying lock-in click + spin-up."
+filter_hint = "mechanical click 3-5kHz + smooth fan ramp 200Hz."
+spatial     = true
+
+[events.fire]
+description = "Friendly hitscan — subtly higher-pitched than Sentinel."
+filter_hint = "crack 2-4kHz pitched up ~2st from Sentinel, softer body."
+spatial     = true
+
+[events.death]
+description = "Fizzle out — graceful power-down, no explosion."
+filter_hint = "descending whine 1.2kHz → 200Hz."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-0.3, 0.3]
+max_concurrent  = 4

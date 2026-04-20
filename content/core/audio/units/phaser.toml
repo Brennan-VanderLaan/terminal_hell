@@ -1,0 +1,29 @@
+[unit]
+id            = "phaser"
+description   = """
+Short-range stalker archetype (melee behavior per current behavior.rs;
+teleport-specific audio events — phase_in / phase_out — will land when
+the teleport mechanic is fully wired).
+"""
+sonic_palette = "static flicker + melee contact. arcane + agile."
+motif         = "carcosa.glyph_tear"
+bus           = "sfx"
+
+[events.spawn]
+description = "Initial manifestation."
+filter_hint = "short shimmer 2-4kHz + sub-click."
+spatial     = true
+
+[events.attack]
+description = "Close-in strike."
+filter_hint = "sharp 2-5kHz + body 400Hz, short tail."
+spatial     = true
+
+[events.death]
+description = "Collapse — pitch drops through the floor."
+filter_hint = "descending sweep 600Hz → 40Hz, 400ms."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-1.0, 1.0]
+max_concurrent  = 3

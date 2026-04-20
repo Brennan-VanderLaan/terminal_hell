@@ -8,14 +8,17 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::sync::{Arc, Mutex};
 
 /// Shared between the cpal callback thread and the UI thread. Holds
-/// the currently-recording buffer (per channel) and the running peak
-/// meters. UI reads both each frame.
+/// the currently-recording buffer (per channel), running peak meters,
+/// and a per-channel "this take clipped" flag. UI reads all of them.
 pub struct CaptureState {
     /// Per-channel sample buffer. Resized on stream start.
     pub samples: Vec<Vec<f32>>,
     /// Per-channel peak from the last callback burst. UI reads, UI
     /// decays. Capture thread only ever takes `max(current, abs)`.
     pub peak: Vec<f32>,
+    /// Per-channel clip flag. Set by the callback whenever a sample
+    /// abs value crosses 0.99 while recording; cleared on take start.
+    pub clipped: Vec<bool>,
     /// True while the user's holding REC. Capture callback drops
     /// frames when this is false so idle time doesn't fill memory.
     pub recording: bool,
@@ -30,6 +33,7 @@ impl CaptureState {
         Self {
             samples: Vec::new(),
             peak: Vec::new(),
+            clipped: Vec::new(),
             recording: false,
             rate: 48_000,
             channels: 0,
@@ -39,8 +43,17 @@ impl CaptureState {
     pub fn reset_buffers(&mut self, channels: u16, rate: u32) {
         self.samples = (0..channels).map(|_| Vec::new()).collect();
         self.peak = vec![0.0; channels as usize];
+        self.clipped = vec![false; channels as usize];
         self.rate = rate;
         self.channels = channels;
+    }
+
+    /// Wipe the per-channel clip flags. Called when a new take is
+    /// armed so stale clip warnings don't linger.
+    pub fn clear_clip_flags(&mut self) {
+        for c in &mut self.clipped {
+            *c = false;
+        }
     }
 
     /// Drain the captured buffers into owned Vecs, leaving the state
@@ -180,6 +193,7 @@ fn callback_f32(data: &[f32], channels: u16, state: &Arc<Mutex<CaptureState>>) {
     }
     append_interleaved(data, channels, &mut s.samples);
     update_peaks(data, channels, &mut s.peak);
+    update_clips(data, channels, &mut s.clipped);
 }
 
 fn callback_convert<T: Copy>(
@@ -204,6 +218,7 @@ fn callback_convert<T: Copy>(
     }
     append_interleaved(&tmp, channels, &mut s.samples);
     update_peaks(&tmp, channels, &mut s.peak);
+    update_clips(&tmp, channels, &mut s.clipped);
 }
 
 fn append_interleaved(data: &[f32], channels: u16, buffers: &mut Vec<Vec<f32>>) {
@@ -228,6 +243,23 @@ fn update_peaks(data: &[f32], channels: u16, peaks: &mut Vec<f32>) {
             let a = s.abs();
             if a > peaks[c] {
                 peaks[c] = a;
+            }
+        }
+    }
+}
+
+/// Scan the just-captured frames for clips; latch the flag on any
+/// sample >= 0.99 abs. Only called while recording so idle input
+/// noise doesn't falsely latch the flag.
+fn update_clips(data: &[f32], channels: u16, clipped: &mut Vec<bool>) {
+    let ch = channels as usize;
+    if clipped.len() < ch {
+        clipped.resize(ch, false);
+    }
+    for frame in data.chunks(ch) {
+        for (c, &s) in frame.iter().enumerate() {
+            if s.abs() >= 0.99 {
+                clipped[c] = true;
             }
         }
     }

@@ -1,0 +1,29 @@
+[unit]
+id            = "miniboss"
+description   = """
+Every-5-waves boss. Whichever brand was most-recently voted decides the
+skin; this brief is the generic skeleton — brands can override
+`samples` + `pitch_jitter_st` without breaking family DNA.
+"""
+sonic_palette = "pitched brass swell + bending ritual chord."
+motif         = "arcane.summoning_sigil"
+bus           = "sfx"
+
+[events.spawn]
+description = "Summoning — deliberate pre-wave stinger."
+filter_hint = "brass swell 80-400Hz over 800ms + harmonic 600Hz."
+spatial     = true
+
+[events.attack]
+description = "Melee hit — dissonant percussive chord."
+filter_hint = "detuned stab 200Hz + 800Hz bend."
+spatial     = true
+
+[events.death]
+description = "Sigil collapse — harmonics wind down."
+filter_hint = "pitch-bent descending chord, 1s+ tail."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-0.3, 0.3]
+max_concurrent  = 1

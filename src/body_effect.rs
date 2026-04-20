@@ -41,12 +41,16 @@ impl ReactionRegistry {
     pub fn with_builtins() -> Self {
         let mut r = Self::new();
 
-        // Bleeders — spawn a blood pool on death. The most common body.
+        // Bleeders — spawn a blood pool on death. Radii sized to
+        // roughly match the dying body's footprint plus a small
+        // splatter ring; adjacent kills still overlap into wet-room
+        // territory but a single rusher kill no longer leaves a
+        // pool 3× the enemy's silhouette.
         r.register(
             "spawn_blood",
             Reaction::SpawnSubstance {
                 id: "blood_pool",
-                radius: 1.5,
+                radius: 3.5,
                 state: 10,
             },
         );
@@ -54,20 +58,19 @@ impl ReactionRegistry {
             "spawn_big_blood",
             Reaction::SpawnSubstance {
                 id: "blood_pool",
-                radius: 3.0,
+                radius: 6.0,
                 state: 0,
             },
         );
 
-        // Flood ichor — green infection puddle for the Flood faction.
-        // The faction-visual tell: a room full of Flood deaths reads
-        // as GREEN instead of red, so survivors know which faction
-        // died here at a glance.
+        // Flood ichor — green infection puddle. Sized to enemy
+        // footprint; Flood-density still reads green because every
+        // Flood kill paints, not because each pool is huge.
         r.register(
             "spawn_ichor",
             Reaction::SpawnSubstance {
                 id: "flood_ichor",
-                radius: 1.8,
+                radius: 4.0,
                 state: 10,
             },
         );
@@ -75,41 +78,42 @@ impl ReactionRegistry {
             "spawn_big_ichor",
             Reaction::SpawnSubstance {
                 id: "flood_ichor",
-                radius: 3.2,
+                radius: 7.0,
                 state: 0,
             },
         );
 
         // Mech oil — dark iridescent puddle for turrets + sentinels +
-        // juggernauts. Reads "machine leaked" not "person bled."
+        // juggernauts. Slightly bigger than blood since mechs are
+        // larger frames + the slick is the cinematic "uh-oh, fire
+        // cascade waiting to happen."
         r.register(
             "spawn_oil",
             Reaction::SpawnSubstance {
                 id: "oil_pool",
-                radius: 2.2,
+                radius: 5.0,
                 state: 20,
             },
         );
 
         // Bone dust — undead shatter residue. Revenants + Eaters
-        // leave dry ivory scatter instead of a wet puddle.
+        // leave a dry ivory scatter sized to body footprint.
         r.register(
             "spawn_bone_dust",
             Reaction::SpawnSubstance {
                 id: "bone_dust",
-                radius: 1.6,
+                radius: 3.5,
                 state: 30,
             },
         );
 
         // Ember scatter — fire-bug residue. Pairs with ignite_aura
-        // on archetypes that also spawn a burn ring. The glow
-        // lingers after the fire fades.
+        // on archetypes that also spawn a burn ring.
         r.register(
             "spawn_embers",
             Reaction::SpawnSubstance {
                 id: "ember_scatter",
-                radius: 2.0,
+                radius: 4.5,
                 state: 10,
             },
         );
@@ -120,7 +124,7 @@ impl ReactionRegistry {
             "spawn_psychic_residue",
             Reaction::SpawnSubstance {
                 id: "psychic_residue",
-                radius: 1.8,
+                radius: 4.0,
                 state: 15,
             },
         );

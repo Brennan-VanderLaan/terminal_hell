@@ -1,0 +1,10 @@
+description = """
+Coherent-energy weapons. Capacitor bank, sustained oscillator,
+high-frequency content. Shared across rail / beam / cone.
+"""
+emotion     = "controlled violence, sci-fi confidence"
+antipattern = "no chemical punch, no brass — if it has percussive transient attack, it belongs in kinetic."
+shared_layers = [
+  "capacitor whine base 800Hz-1.2kHz (same recording, pitched per variant)",
+  "phased shimmer harmonic 4-6kHz",
+]

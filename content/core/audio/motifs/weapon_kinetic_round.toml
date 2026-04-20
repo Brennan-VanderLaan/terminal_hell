@@ -1,0 +1,10 @@
+description = """
+Physical projectile weapons. Chemical ignition, mechanical action,
+brass-hot transients. Shared across pulse / auto / burst / pump.
+"""
+emotion     = "authoritative, present, consequential"
+antipattern = "no energy-weapon whine, no sci-fi charge cycle. this is chemistry and steel."
+shared_layers = [
+  "charge-propellant thump base (same recording, pitched per fire-mode)",
+  "brass ejection click 3-5kHz",
+]

@@ -1,0 +1,17 @@
+[unit]
+id            = "pump"
+description   = """
+Pump-action slow-fire. Meaty single-shot. Slower cadence than pulse.
+"""
+sonic_palette = "meaty wallop. satisfying bass body."
+motif         = "weapon.kinetic_round"
+bus           = "sfx"
+
+[events.fire]
+description = "Per-shot."
+filter_hint = "bass thump 80-200Hz + crack 1-2kHz; 300ms tail."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-0.3, 0.3]
+max_concurrent  = 3

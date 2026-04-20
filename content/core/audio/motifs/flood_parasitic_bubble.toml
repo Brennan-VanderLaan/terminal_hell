@@ -1,0 +1,10 @@
+description = """
+Halo-Flood homage. Slopping wet membranes, bubble pops, parasite chorus.
+Singular-body sounds always feel like the surface tension of a mass.
+"""
+emotion     = "contamination, growing, involuntary"
+antipattern = "no bones, no bark, no punchy transients. everything undulates."
+shared_layers = [
+  "sub-bubble layer (record by blowing into water)",
+  "wet skin-slide 300-800Hz",
+]

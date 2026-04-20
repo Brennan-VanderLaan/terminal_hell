@@ -31,7 +31,10 @@ pub mod scripts;
 
 pub use report::ScenarioReport;
 pub use runner::{RenderMode, run_scenario, run_scenario_with_interrupt};
-pub use scenario::{Scenario, ScenarioSpawn, ScriptedPlayer, SpawnLayout};
+pub use scenario::{
+    Scenario, ScenarioSpawn, ScenarioSubstancePaint, ScriptedPlayer, SpawnLayout,
+    SubstanceLayout,
+};
 pub use scripts::PlayerScript;
 
 use std::sync::Arc;

@@ -1,0 +1,28 @@
+[unit]
+id            = "killa"
+description   = """
+Tarkov-homage heavy. Armored LMG operator. Boss-tier presence — every
+sound lands heavier than a PMC.
+"""
+sonic_palette = "armored footfalls. rolling LMG cadence."
+motif         = "mil_sim.mechanical_precision"
+bus           = "sfx"
+
+[events.spawn]
+description = "Arrival — heavy plate rattle, charge bolt."
+filter_hint = "metal-on-metal 2-3kHz + chest thud 80Hz."
+spatial     = true
+
+[events.fire]
+description = "LMG round discharges."
+filter_hint = "crack 1-2kHz + sub 60Hz, loop-friendly transients."
+spatial     = true
+
+[events.death]
+description = "Armor clang collapse."
+filter_hint = "sustained metal clatter tail."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-0.5, 0.5]
+max_concurrent  = 1

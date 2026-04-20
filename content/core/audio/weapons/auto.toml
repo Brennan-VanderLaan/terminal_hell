@@ -1,0 +1,18 @@
+[unit]
+id            = "auto"
+description   = """
+Sustained full-auto fire. 600-900 RPM. Loop-friendly transients so
+long bursts don't sound mechanically repetitive.
+"""
+sonic_palette = "rolling mechanical cadence. brass ejection pattern."
+motif         = "weapon.kinetic_round"
+bus           = "sfx"
+
+[events.fire]
+description = "Per-round in a sustained burst. Emits every weapon tick that produces a shot."
+filter_hint = "crack 1-2kHz + sub 60Hz; designed to round-robin cleanly at rate."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-0.3, 0.3]
+max_concurrent  = 8

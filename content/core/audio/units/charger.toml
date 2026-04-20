@@ -1,0 +1,33 @@
+[unit]
+id            = "charger"
+description   = """
+FPS-brand heavy. Winds up at distance, sprints hard. The windup is
+the audible tell that saves you.
+"""
+sonic_palette = "wet heavy slam. telegraphed wind-up."
+motif         = "biomass.wet_crawl"
+bus           = "sfx"
+
+[events.spawn]
+description = "Hoof-slam entry."
+filter_hint = "bass thud 60-120Hz + snort 500Hz."
+spatial     = true
+
+[events.attack]
+description = "Sprint-impact collision on a player."
+filter_hint = "heavy body 80-180Hz + impact thud."
+spatial     = true
+
+[events.charge_windup]
+description = "Pre-sprint growl. Fires when Charger begins its dash tell (sprint_timer starts)."
+filter_hint = "rising growl 80Hz → 200Hz, ~600ms ramp."
+spatial     = true
+
+[events.death]
+description = "Crash + slide."
+filter_hint = "bass thud tail + surface scrape 300-800Hz."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-1.0, 1.0]
+max_concurrent  = 2

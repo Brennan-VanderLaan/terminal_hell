@@ -1,0 +1,28 @@
+[unit]
+id            = "sapper"
+description   = """
+Walking bomb. Runs at nearest wall or player, detonates on contact.
+The `attack` event IS the detonation.
+"""
+sonic_palette = "slow thump + volatile chemistry on death."
+motif         = "biomass.wet_crawl"
+bus           = "sfx"
+
+[events.spawn]
+description = "Lumbering arrival — explosive bulk."
+filter_hint = "low body 60-100Hz + jittery waddle 400Hz."
+spatial     = true
+
+[events.attack]
+description = "Contact detonation — the bomb fires."
+filter_hint = "full-spectrum burst: sub 40Hz, crack 2kHz, crisp high tail."
+spatial     = true
+
+[events.death]
+description = "Follow-on collapse after the blast settles."
+filter_hint = "wet settle + ember hiss 3-5kHz."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-0.5, 0.5]
+max_concurrent  = 3

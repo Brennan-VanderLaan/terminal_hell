@@ -1,0 +1,33 @@
+[unit]
+id            = "breacher"
+description   = """
+Wall-smasher. A*-paths toward the player and attacks any wall in the
+way. Audio has to distinguish "wall hit" from "player hit" clearly.
+"""
+sonic_palette = "grinding flesh-on-stone scrape. seismic."
+motif         = "biomass.wet_crawl"
+bus           = "sfx"
+
+[events.spawn]
+description = "Entry — heavy body, earth-grind."
+filter_hint = "sub 50-90Hz + grit 300-800Hz."
+spatial     = true
+
+[events.attack]
+description = "Melee swing on a player."
+filter_hint = "wet thud 100-300Hz + tearing 600Hz."
+spatial     = true
+
+[events.wall_hit]
+description = "Smashes wall — concrete shatter + wet impact. Fires per tile smashed."
+filter_hint = "percussive 800Hz-3kHz crunch + 60Hz sub-impact."
+spatial     = true
+
+[events.death]
+description = "Topple — long slide into stillness."
+filter_hint = "bass thud + extended scrape tail."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-0.8, 0.8]
+max_concurrent  = 2

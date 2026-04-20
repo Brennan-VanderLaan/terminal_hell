@@ -7,6 +7,7 @@
 //! auditioning sounds against.
 
 mod app;
+mod brief;
 mod capture;
 mod io;
 mod queue;

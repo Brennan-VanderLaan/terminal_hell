@@ -1,0 +1,10 @@
+description = """
+Flesh in motion. Damp, tactile, weighted. Things made of meat that
+know the arena and want to eat you in it.
+"""
+emotion     = "oily dread, physical intimacy with an unwelcome body"
+antipattern = "no chirps, no mechanical textures, no clean transients. everything drags."
+shared_layers = [
+  "wet slap base layer (close-mic foley, same source)",
+  "bone-on-stone clatter 200-500Hz tail",
+]

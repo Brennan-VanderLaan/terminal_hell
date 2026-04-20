@@ -1,0 +1,37 @@
+[unit]
+id            = "leaper"
+description   = """
+Pouncer — prowls slowly, telegraphs windup, dashes in a straight line.
+"""
+sonic_palette = "skittery legs + high twang windup."
+motif         = "biomass.wet_crawl"
+bus           = "sfx"
+
+[events.spawn]
+description = "Crouched-in arrival."
+filter_hint = "claw-on-ground 2-4kHz + low snort 200Hz."
+spatial     = true
+
+[events.attack]
+description = "Contact strike during / after the leap."
+filter_hint = "wet thump 150Hz + claw-rake 3kHz."
+spatial     = true
+
+[events.leap_windup]
+description = "Rising twang. Fires on state 0→1 transition."
+filter_hint = "pitch ramp 400Hz → 1.5kHz over 500ms."
+spatial     = true
+
+[events.leap_land]
+description = "Impact on landing. Fires on state 2→3 transition."
+filter_hint = "wet thump 100Hz + claw-grip 3kHz."
+spatial     = true
+
+[events.death]
+description = "Broken collapse."
+filter_hint = "bone-crack + wet settle."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-1.0, 1.0]
+max_concurrent  = 3

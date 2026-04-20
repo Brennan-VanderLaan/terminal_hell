@@ -1,0 +1,27 @@
+[unit]
+id            = "rocketeer"
+description   = """
+Standoff ranged enemy — fires explosive projectiles.
+"""
+sonic_palette = "mechanical cough + rocket whoosh."
+motif         = "mil_sim.mechanical_precision"
+bus           = "sfx"
+
+[events.spawn]
+description = "Arrival with launcher shoulder-mount clunk."
+filter_hint = "metal clack 1.5kHz + launcher heft 150Hz."
+spatial     = true
+
+[events.rocket_fire]
+description = "Ignition + whoosh as a rocket leaves the tube."
+filter_hint = "compressed cough 200-400Hz + 400Hz whoosh tail with upward pitch drift."
+spatial     = true
+
+[events.death]
+description = "Crumple. Ammunition clatter."
+filter_hint = "metallic clang + high-pitched ring."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-0.5, 0.5]
+max_concurrent  = 2

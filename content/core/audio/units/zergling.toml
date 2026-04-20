@@ -1,0 +1,28 @@
+[unit]
+id            = "zergling"
+description   = """
+StarCraft-homage swarm unit. Paper-thin HP, sprint-class speed,
+spawns in bursts. Easy 1v1, a problem at dozens.
+"""
+sonic_palette = "frantic chitters + rapid pitter. insectile."
+motif         = "biomass.wet_crawl"
+bus           = "sfx"
+
+[events.spawn]
+description = "Cluster-spawn burst, expect 10-30 simultaneous."
+filter_hint = "chitter 3-5kHz + light body 400Hz. keep 1-2kHz clear."
+spatial     = true
+
+[events.attack]
+description = "Claw rake on contact."
+filter_hint = "sharp 3-4kHz + wet 600Hz accent, <100ms."
+spatial     = true
+
+[events.death]
+description = "Wet pop."
+filter_hint = "transient 500Hz + 2kHz crack, <200ms tail."
+spatial     = true
+
+[runtime]
+pitch_jitter_st = [-3.0, 3.0]
+max_concurrent  = 10
