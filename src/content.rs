@@ -14,7 +14,11 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 use crate::enemy::Archetype;
+use crate::perk::Perk;
+use crate::primitive::Primitive;
 use crate::substance::{SubstanceId, SubstanceRegistry, SubstanceToml};
+use crate::traversal::TraversalVerb;
+use crate::weapon::FireMode;
 
 static CORE_PACK: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/content/core");
 
@@ -45,6 +49,23 @@ pub struct ArchetypeStats {
     /// triggered when an instance of this archetype dies.
     #[serde(default)]
     pub body_on_death: Option<String>,
+    /// Gore profile name: "standard", "heavy", or "extreme". Controls
+    /// particle count, palette breadth, pool trail size, and wall
+    /// splatter behavior on death.
+    #[serde(default)]
+    pub gore_profile: Option<String>,
+    /// Primitive ids this archetype thematically drops. Used when a
+    /// weapon rolls off this archetype's corpse — entries are sampled
+    /// with replacement so a Rare 3-slot weapon can stack the same
+    /// primitive. Empty/absent means fall back to the global pool.
+    #[serde(default)]
+    pub signature_primitives: Option<Vec<String>>,
+    /// Fire-mode label for weapons this archetype drops. One of
+    /// pulse / auto / burst / pump / rail. Absent → random mode per
+    /// roll, preserving variety when the archetype is intentionally
+    /// generic (rusher, swarmling).
+    #[serde(default)]
+    pub signature_fire_mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -62,6 +83,17 @@ pub struct BrandDef {
     /// brand files remain loadable.
     #[serde(default)]
     pub scaling: Option<BrandScaling>,
+    /// Traversal verb id this brand's pickups default to. If unset,
+    /// traversal drops roll from the full verb pool. Brand flavor:
+    /// grounded mil-sim uses "slide", arcane brands use "blink",
+    /// Flood uses "phase", Deep Rock uses "grapple", etc.
+    #[serde(default)]
+    pub signature_traversal: Option<String>,
+    /// Perk-id pool this brand biases toward. When a perk is dropped
+    /// in this brand, we try to roll one from this list first; if the
+    /// player already has all of them, fall back to any unowned perk.
+    #[serde(default)]
+    pub signature_perks: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -122,6 +154,18 @@ impl ContentDb {
         require_arch(&archetypes, Archetype::Revenant)?;
         require_arch(&archetypes, Archetype::Miniboss)?;
 
+        // Log every loaded archetype name so missing rows are
+        // immediately visible in the backtick log console. Each new
+        // archetype should show up here the first run after adding
+        // it to the TOML.
+        let mut loaded_names: Vec<&str> = raw_names(&archetypes);
+        loaded_names.sort();
+        tracing::info!(
+            count = archetypes.len(),
+            archetypes = ?loaded_names,
+            "archetype stats loaded"
+        );
+
         let mut brands = HashMap::new();
         let brand_dir = CORE_PACK
             .get_dir("brands")
@@ -165,14 +209,21 @@ impl ContentDb {
         let scorch_id = substances
             .by_name("scorch")
             .ok_or_else(|| anyhow!("substance `scorch` required in content/core/substances/"))?;
-        // Prefer tactical as the opening brand so every run starts grounded
-        // per the design spec. Fall back to whatever's available.
-        let default_brand = if brands.contains_key("tactical") {
-            "tactical".to_string()
-        } else if brands.contains_key("fps_arena") {
-            "fps_arena".to_string()
+        // Prefer `tarkov_scavs` as the opening brand — grounded,
+        // legible fire-team flavor matches the design spec's "start
+        // recognizable" pillar. Fall back alphabetically if it's
+        // missing (e.g., a reduced content pack).
+        let default_brand = if brands.contains_key("tarkov_scavs") {
+            "tarkov_scavs".to_string()
+        } else if brands.contains_key("doom_inferno") {
+            "doom_inferno".to_string()
         } else {
-            brands.keys().next().cloned().unwrap_or_else(|| "fps_arena".into())
+            let mut keys: Vec<&String> = brands.keys().collect();
+            keys.sort();
+            keys.first()
+                .cloned()
+                .cloned()
+                .unwrap_or_else(|| "tarkov_scavs".into())
         };
 
         // Load any ASCII-art sprites referenced by archetype TOML. If
@@ -213,9 +264,21 @@ impl ContentDb {
     }
 
     pub fn stats(&self, archetype: Archetype) -> &ArchetypeStats {
+        if let Some(s) = self.archetypes.get(&archetype) {
+            return s;
+        }
+        // Fallback: warn loudly + return Rusher stats so a missing
+        // TOML entry for a newly-added archetype doesn't crash the
+        // run. Check the log console for the warning to identify
+        // which archetype needs its TOML row.
+        tracing::error!(
+            archetype = ?archetype,
+            loaded_count = self.archetypes.len(),
+            "stats() requested for archetype not in TOML; falling back to Rusher"
+        );
         self.archetypes
-            .get(&archetype)
-            .expect("stats table validated at load")
+            .get(&Archetype::Rusher)
+            .expect("rusher stats missing from archetypes.toml — unrecoverable")
     }
 
     pub fn brand(&self, id: &str) -> Option<&BrandDef> {
@@ -224,6 +287,50 @@ impl ContentDb {
 
     pub fn active_brand(&self) -> &BrandDef {
         self.brand(&self.default_brand).expect("default brand validated at load")
+    }
+
+    /// Resolved signature primitive pool for an archetype — skips any
+    /// TOML entries that don't parse as a known primitive id.
+    pub fn archetype_signature_primitives(&self, archetype: Archetype) -> Vec<Primitive> {
+        let Some(stats) = self.archetypes.get(&archetype) else {
+            return Vec::new();
+        };
+        let Some(names) = stats.signature_primitives.as_ref() else {
+            return Vec::new();
+        };
+        names
+            .iter()
+            .filter_map(|n| Primitive::from_name(n))
+            .collect()
+    }
+
+    /// Resolved signature fire-mode for an archetype. `None` means
+    /// "random / whatever the roller picks."
+    pub fn archetype_fire_mode(&self, archetype: Archetype) -> Option<FireMode> {
+        self.archetypes
+            .get(&archetype)
+            .and_then(|s| s.signature_fire_mode.as_deref())
+            .and_then(FireMode::from_name)
+    }
+
+    /// Resolved signature traversal verb for a brand. `None` means
+    /// the brand does not prescribe a verb; drops should roll freely.
+    pub fn brand_traversal(&self, brand_id: &str) -> Option<TraversalVerb> {
+        self.brand(brand_id)
+            .and_then(|b| b.signature_traversal.as_deref())
+            .and_then(TraversalVerb::from_name)
+    }
+
+    /// Resolved signature perk pool for a brand. Empty vec means no
+    /// brand bias; perk drops roll from the full unowned set.
+    pub fn brand_perks(&self, brand_id: &str) -> Vec<Perk> {
+        let Some(brand) = self.brand(brand_id) else {
+            return Vec::new();
+        };
+        let Some(names) = brand.signature_perks.as_ref() else {
+            return Vec::new();
+        };
+        names.iter().filter_map(|n| Perk::from_name(n)).collect()
     }
 }
 
@@ -237,6 +344,40 @@ fn require_arch(db: &HashMap<Archetype, ArchetypeStats>, a: Archetype) -> Result
     } else {
         Ok(())
     }
+}
+
+/// Short, human-readable labels for loaded archetypes — used in the
+/// startup log line so the user can eyeball which TOML sections made
+/// it into the runtime map.
+fn raw_names(db: &HashMap<Archetype, ArchetypeStats>) -> Vec<&'static str> {
+    db.keys()
+        .map(|a| match a {
+            Archetype::Rusher => "rusher",
+            Archetype::Pinkie => "pinkie",
+            Archetype::Charger => "charger",
+            Archetype::Revenant => "revenant",
+            Archetype::Marksman => "marksman",
+            Archetype::Pmc => "pmc",
+            Archetype::Swarmling => "swarmling",
+            Archetype::Orb => "orb",
+            Archetype::Miniboss => "miniboss",
+            Archetype::Eater => "eater",
+            Archetype::Breacher => "breacher",
+            Archetype::Rocketeer => "rocketeer",
+            Archetype::Leaper => "leaper",
+            Archetype::Sapper => "sapper",
+            Archetype::Juggernaut => "juggernaut",
+            Archetype::Howler => "howler",
+            Archetype::Sentinel => "sentinel",
+            Archetype::Splitter => "splitter",
+            Archetype::Killa => "killa",
+            Archetype::Zergling => "zergling",
+            Archetype::Floodling => "floodling",
+            Archetype::Flood => "flood",
+            Archetype::FloodCarrier => "flood_carrier",
+            Archetype::PlayerTurret => "player_turret",
+        })
+        .collect()
 }
 
 fn read_embedded(path: &str) -> Result<String> {

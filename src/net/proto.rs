@@ -4,6 +4,7 @@
 //! - `Unreliable` (1): Snapshot (positions), Input, Blast (visual-only)
 
 use crate::primitive::{Primitive, Rarity};
+use crate::weapon::FireMode;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -14,6 +15,12 @@ pub enum ClientMsg {
     Interact,
     /// One-shot "swap to next weapon slot" event. Reliable-ordered.
     CycleWeapon,
+    /// One-shot "deploy a turret from inventory" event. Reliable-
+    /// ordered. Host validates the player has a TurretKit + spawns.
+    DeployTurret,
+    /// One-shot "activate my traversal verb" event. Host validates
+    /// cooldown + executes the verb against world state.
+    ActivateTraversal,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Default)]
@@ -41,9 +48,18 @@ pub enum ServerMsg {
         substance_id: u16,
         state: u8,
     },
-    /// Projectile landed on a corpse. `seed` drives deterministic hole
-    /// synthesis so every peer punches out the same sprite pixels.
-    CorpseHit { id: u32, seed: u64 },
+    /// Projectile landed on a corpse. `seed` drives deterministic
+    /// hole synthesis + gore RNG; `dir_x/dir_y` is the bullet's unit
+    /// direction so every peer sprays particles in the same forward
+    /// cone.
+    CorpseHit {
+        id: u32,
+        seed: u64,
+        #[serde(default)]
+        dir_x: f32,
+        #[serde(default)]
+        dir_y: f32,
+    },
     /// A body-on-death / body-on-interaction reaction fired. The
     /// `name` keys into the ReactionRegistry; the seed drives any
     /// RNG-driven placement so host + client paint identical
@@ -63,6 +79,14 @@ pub enum ServerMsg {
     PlayerJoined { id: u32 },
     PlayerLeft { id: u32 },
     RunEnded { wave: u32, kills: u32, elapsed_secs: f32 },
+    /// Player-specific pickup notification. Host emits one to the
+    /// client whose player_id matches so their HUD toast column
+    /// reflects their own grabs (not everyone else's).
+    PickupToast {
+        player_id: u32,
+        text: String,
+        color: [u8; 3],
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
@@ -98,6 +122,17 @@ pub struct Blast {
     pub color: [u8; 3],
     pub seed: u64,
     pub intensity: u8,
+    /// Gore tier: 0=standard, 1=heavy, 2=extreme, 3=corpse_hit.
+    /// Drives client-side particle synthesis profile.
+    #[serde(default)]
+    pub gore_tier: u8,
+    /// Optional impact direction (unit vector). When non-zero, gore
+    /// spawns as a forward cone along this vector. Zero = omni-
+    /// directional burst (enemy deaths, wall breaks).
+    #[serde(default)]
+    pub dir_x: f32,
+    #[serde(default)]
+    pub dir_y: f32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -124,6 +159,11 @@ pub struct Snapshot {
     /// 0=Breathe, 1=Vote, 2=Stock, 3=Warning, u8::MAX=no intermission.
     pub intermission_phase: u8,
     pub phase_timer: f32,
+    /// Authoritative countdown for the "force-advance if stragglers
+    /// survive" timer. 0 means not in the Clearing state. Clients
+    /// render this as the next-wave timer strip.
+    #[serde(default)]
+    pub clear_timer: f32,
     pub corruption: f32,
     pub marked_player_id: u32, // 0 == no mark
     pub yellow_signs: Vec<SignSnap>,
@@ -166,8 +206,9 @@ pub struct PickupSnap {
     pub id: u32,
     pub x: f32,
     pub y: f32,
-    pub rarity: Rarity,
-    pub primitives: Vec<Primitive>,
+    /// Full pickup kind — covers weapons, consumables, turret kits,
+    /// whatever future content adds.
+    pub kind: crate::pickup::PickupKind,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -182,6 +223,8 @@ pub struct WeaponSnap {
 pub struct WeaponLoadout {
     pub rarity: Rarity,
     pub primitives: Vec<Primitive>,
+    #[serde(default)]
+    pub mode: FireMode,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -216,6 +259,15 @@ pub struct CorpseSnap {
 pub struct ProjSnap {
     pub x: f32,
     pub y: f32,
+    /// Motion direction — clients use this for rocket trail
+    /// orientation so the smoke / flame reads the right way.
+    #[serde(default)]
+    pub vx: f32,
+    #[serde(default)]
+    pub vy: f32,
+    /// Projectile kind byte (0=Pulse, 1=Rocket, extensible).
+    #[serde(default)]
+    pub kind: u8,
 }
 
 pub fn encode<T: Serialize>(msg: &T) -> Vec<u8> {

@@ -1,0 +1,24 @@
+# Serious Sam — Endless Horde. Dozens on screen, headless screamers,
+# swarms of fast cheap enemies. Play like a wide circle saw.
+
+id = "serious_sam"
+name = "Serious Sam — Endless Horde"
+description = "Dozens at once. Circular strafing or death."
+
+spawn_pool = ["rusher", "zergling", "swarmling", "charger", "howler", "sapper"]
+miniboss = "miniboss"
+
+# Strafe-king flavor → Slide locks you into a committed movement arc
+# which is exactly how Sam plays. Perks keep the circle saw spinning:
+# Adrenaline off every body slamming into you, Rampage stacking with
+# every explosion, QuickHands so the minigun never dies.
+signature_traversal = "slide"
+signature_perks = ["adrenaline", "rampage", "quick_hands"]
+
+[spawn_weights]
+rusher = 5
+zergling = 6
+swarmling = 4
+charger = 2
+howler = 1
+sapper = 1

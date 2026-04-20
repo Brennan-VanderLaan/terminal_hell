@@ -1,0 +1,28 @@
+# Deep Rock Galactic — Hollow Bough. Glyphid swarm from every
+# direction, praetorian (heavy) slams, Menace-style leaping bugs.
+# Claustrophobic brand — feels like tunnels.
+
+id = "deep_rock"
+name = "Deep Rock — Glyphid Tunnels"
+description = "Bugs from every tunnel mouth. Close quarters, teeth-first."
+
+spawn_pool = ["zergling", "swarmling", "charger", "leaper", "breacher", "sapper"]
+miniboss = "miniboss"
+
+# Scout grapple is in the DNA → grapple verb. Perks lean into long
+# runs between cave rooms: Survivor for plate-armor, IronWill to
+# regen sanity under pressure, CorpsePulse to keep topped up as the
+# swarm bleeds you.
+signature_traversal = "grapple"
+signature_perks = ["survivor", "iron_will", "corpse_pulse"]
+
+[spawn_weights]
+zergling = 5
+swarmling = 4
+# Praetorian slam.
+charger = 2
+leaper = 2
+# Breacher — glyphids chewing through walls.
+breacher = 2
+# Exploder (Menace) suicide bug.
+sapper = 1

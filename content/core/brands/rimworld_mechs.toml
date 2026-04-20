@@ -1,0 +1,26 @@
+# Rimworld — Mechanoid Raid. Cold clean firing lines, centipedes
+# tanking + laying down hitscan suppression, scythers closing fast.
+# The "structural threat" brand — Juggernaut + Sentinel do the bulk
+# work, Breacher teardowns open your killbox from the wrong side.
+
+id = "rimworld_mechs"
+name = "Rimworld — Mechanoid Raid"
+description = "Clinical mech attackers. Suppressive fire + plate armor."
+
+spawn_pool = ["sentinel", "juggernaut", "marksman", "breacher", "rocketeer"]
+miniboss = "miniboss"
+
+# Teleport-psycast flavor → Blink. Perks are the RimWorld raid-prep
+# loadout: Survivor armor vest, Butcher because every corpse is a
+# loot shelf, QuickHands for the sustained shootout.
+signature_traversal = "blink"
+signature_perks = ["survivor", "butcher", "quick_hands"]
+
+[spawn_weights]
+sentinel = 3
+juggernaut = 2
+# Scyther-style marksmen.
+marksman = 3
+# Breacher — mechanoid diabolus breaching wall.
+breacher = 2
+rocketeer = 1

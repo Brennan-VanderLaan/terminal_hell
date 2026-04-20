@@ -1,0 +1,23 @@
+# Zerg Tide — StarCraft homage. Pure biomass swarm. Zerglings by the
+# literal dozens, Swarmlings filling any gap, the occasional Splitter
+# cascading into more. Rhythm: wave doesn't ramp, wave drowns.
+
+id = "zerg_tide"
+name = "Zerg Tide"
+description = "Zergling rush, biomass density, nothing survives alone."
+
+spawn_pool = ["zergling", "swarmling", "splitter", "leaper"]
+miniboss = "miniboss"
+
+# Marine stim → Slide. Perks are the bunkered-up outpost kit:
+# Adrenaline so every scratch gives you the gap to reposition,
+# Rampage kills stacking with the tide, CorpsePulse so the tsunami
+# keeps topping you off.
+signature_traversal = "slide"
+signature_perks = ["adrenaline", "rampage", "corpse_pulse"]
+
+[spawn_weights]
+zergling = 8
+swarmling = 4
+splitter = 3
+leaper = 2

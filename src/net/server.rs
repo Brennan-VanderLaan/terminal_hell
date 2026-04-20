@@ -330,6 +330,8 @@ pub fn run_serve(port: u16) -> Result<()> {
                 match proto::decode::<ClientMsg>(&msg) {
                     Some(ClientMsg::Interact) => game.try_interact(pid),
                     Some(ClientMsg::CycleWeapon) => game.try_cycle_weapon(pid),
+                    Some(ClientMsg::DeployTurret) => game.try_deploy_turret(pid),
+                    Some(ClientMsg::ActivateTraversal) => game.try_activate_traversal(pid),
                     _ => {}
                 }
             }
@@ -351,6 +353,18 @@ pub fn run_serve(port: u16) -> Result<()> {
                     if let KeyCode::Char('`') = k.code {
                         if press && !matches!(k.kind, KeyEventKind::Repeat) {
                             game.console.toggle();
+                        }
+                        continue;
+                    }
+                    if let KeyCode::F(3) = k.code {
+                        if press && !matches!(k.kind, KeyEventKind::Repeat) {
+                            game.perf_overlay.toggle();
+                        }
+                        continue;
+                    }
+                    if let KeyCode::Tab = k.code {
+                        if press && !matches!(k.kind, KeyEventKind::Repeat) {
+                            game.inventory_open = !game.inventory_open;
                         }
                         continue;
                     }
@@ -412,6 +426,16 @@ pub fn run_serve(port: u16) -> Result<()> {
                         KeyCode::Char('q') if press => {
                             if !matches!(k.kind, KeyEventKind::Repeat) {
                                 game.try_cycle_weapon(local_id);
+                            }
+                        }
+                        KeyCode::Char('t') | KeyCode::Char('T') if press => {
+                            if !matches!(k.kind, KeyEventKind::Repeat) {
+                                game.try_deploy_turret(local_id);
+                            }
+                        }
+                        KeyCode::Char('f') | KeyCode::Char('F') if press => {
+                            if !matches!(k.kind, KeyEventKind::Repeat) {
+                                game.try_activate_traversal(local_id);
                             }
                         }
                         code if press => input.key_event(code, true),
@@ -476,10 +500,10 @@ pub fn run_serve(port: u16) -> Result<()> {
                     proto::encode(&ServerMsg::SubstancePaint { x, y, substance_id, state }),
                 );
             }
-            for &(id, seed) in &game.tick_corpse_hits {
+            for &(id, seed, dir_x, dir_y) in &game.tick_corpse_hits {
                 server.broadcast_message(
                     DefaultChannel::ReliableOrdered,
-                    proto::encode(&ServerMsg::CorpseHit { id, seed }),
+                    proto::encode(&ServerMsg::CorpseHit { id, seed, dir_x, dir_y }),
                 );
             }
             for (name, x, y, seed) in &game.tick_body_reactions {
@@ -493,6 +517,32 @@ pub fn run_serve(port: u16) -> Result<()> {
                     }),
                 );
             }
+            // Toast events — route each to its owning client so the
+            // HUD's pickup notifications are per-player. Host's own
+            // player toasts are already pushed directly to
+            // `game.toasts` in `consume_pickup`; skip those here.
+            for (player_id, text, color) in &game.tick_toast_events {
+                let host_pid = game.local_id;
+                if host_pid == Some(*player_id) {
+                    continue;
+                }
+                let Some(&cid) = client_to_player
+                    .iter()
+                    .find(|(_, pid)| **pid == *player_id)
+                    .map(|(cid, _)| cid)
+                else {
+                    continue;
+                };
+                server.send_message(
+                    cid,
+                    DefaultChannel::ReliableOrdered,
+                    proto::encode(&ServerMsg::PickupToast {
+                        player_id: *player_id,
+                        text: text.clone(),
+                        color: [color.r, color.g, color.b],
+                    }),
+                );
+            }
             for b in &game.tick_blasts {
                 let blast = Blast {
                     x: b.x,
@@ -500,6 +550,9 @@ pub fn run_serve(port: u16) -> Result<()> {
                     color: b.color_rgb,
                     seed: b.seed,
                     intensity: b.intensity,
+                    gore_tier: b.gore_tier,
+                    dir_x: b.dir_x,
+                    dir_y: b.dir_y,
                 };
                 server.broadcast_message(
                     DefaultChannel::Unreliable,
@@ -549,14 +602,33 @@ pub fn run_serve(port: u16) -> Result<()> {
             hud::draw_loadout(&mut out, &loadout)?;
         }
         hud::draw_intermission(&mut out, &game)?;
+        hud::draw_active_brands(&mut out, &game.active_brands)?;
+        if let Some(p) = game.local_player() {
+            hud::draw_perks(&mut out, &p.perks)?;
+        }
         hud::draw_kiosk_labels(&mut out, &game)?;
         let (tc, tr) = crossterm::terminal::size()?;
         hud::draw_zoom_indicator(&mut out, tc, game.camera.zoom)?;
         hud::draw_wave_banner(
             &mut out, tc, tr, game.director.wave, game.director.banner_ttl,
         )?;
+        hud::draw_clear_countdown(&mut out, tc, game.director.clear_timer)?;
+        hud::draw_pickup_labels(&mut out, &game)?;
+        hud::draw_pickup_toasts(&mut out, tc, &game.toasts)?;
         if game.paused {
             hud::draw_paused_banner(&mut out, tc, tr, game.is_authoritative)?;
+        }
+        if game.alive
+            && game.local_player().map(|p| p.hp <= 0).unwrap_or(false)
+        {
+            hud::draw_dead_banner(&mut out, tc, tr)?;
+        }
+        game.perf_overlay.render(&mut out, tc, tr, &game.perf)?;
+        if game.inventory_open {
+            if let Some(p) = game.local_player() {
+                let loadout = game.local_loadout();
+                hud::draw_inventory(&mut out, tc, tr, p, loadout.as_ref())?;
+            }
         }
         game.console.render(&mut out, tc, tr)?;
         game.menu.render(&mut out, tc, tr, game.is_authoritative, game.paused)?;
@@ -641,7 +713,13 @@ fn build_snapshot(game: &Game) -> Snapshot {
         projectiles: game
             .projectiles
             .iter()
-            .map(|p| ProjSnap { x: p.x, y: p.y })
+            .map(|p| ProjSnap {
+                x: p.x,
+                y: p.y,
+                vx: p.vx,
+                vy: p.vy,
+                kind: p.kind.to_byte(),
+            })
             .collect(),
         pickups: game
             .pickups
@@ -650,8 +728,7 @@ fn build_snapshot(game: &Game) -> Snapshot {
                 id: pk.id,
                 x: pk.x,
                 y: pk.y,
-                rarity: pk.rarity,
-                primitives: pk.primitives.clone(),
+                kind: pk.kind.clone(),
             })
             .collect(),
         weapons: game
@@ -664,10 +741,12 @@ fn build_snapshot(game: &Game) -> Snapshot {
                 slot0: rt.weapons[0].as_ref().map(|w| WeaponLoadout {
                     rarity: w.rarity,
                     primitives: w.slots.clone(),
+                    mode: w.mode,
                 }),
                 slot1: rt.weapons[1].as_ref().map(|w| WeaponLoadout {
                     rarity: w.rarity,
                     primitives: w.slots.clone(),
+                    mode: w.mode,
                 }),
             })
             .collect(),
@@ -704,6 +783,7 @@ fn build_snapshot(game: &Game) -> Snapshot {
             None => u8::MAX,
         },
         phase_timer: game.director.phase_timer,
+        clear_timer: game.director.clear_timer,
         corruption: game.corruption,
         marked_player_id: game.marked_player_id.unwrap_or(0),
         yellow_signs: game

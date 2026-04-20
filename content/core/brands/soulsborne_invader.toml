@@ -1,0 +1,30 @@
+# Soulsborne brand: Dark Souls / Elden Ring / Bloodborne invaders.
+# Rare but lethal. One wanders in and shifts the fight. Killa is the
+# definitional invader — heavy, armed to the teeth, aggressive
+# closure; used as the brand's miniboss. Marksman + Pmc fill the
+# "entourage" of lesser duelists. Juggernaut is the slow plate-armor
+# arbiter that demands respect. Low volume, high threat per spawn.
+
+id = "soulsborne_invader"
+name = "Invader"
+description = "Rare but lethal duelists. One is already enough to worry about."
+
+spawn_pool = ["marksman", "pmc", "juggernaut", "killa"]
+# Killa IS the miniboss — boss-tier invader archetype.
+miniboss = "killa"
+
+# Grapple hook → hookshot-style pull matches Bloodborne's rally + the
+# DS grappling iron-finger vibe. Perks are duelist survival: LastStand
+# for the clutch health-chug frame, GloomShroud to resist the zone's
+# ambient drain, Adrenaline for the post-parry commit window.
+signature_traversal = "grapple"
+signature_perks = ["last_stand", "gloom_shroud", "adrenaline"]
+
+[spawn_weights]
+# Marksmen + PMCs fill the standard invader roles.
+marksman = 3
+pmc = 3
+# Juggernaut is the rare heavy — terrifying but predictable.
+juggernaut = 2
+# Killa as a regular spawn is the "oh no" moment.
+killa = 1

@@ -1,0 +1,29 @@
+# Factorio — Biter Wave. Pollution brought them. Small biters first,
+# big biters + spitters behind. Chewing through the walls, painting
+# your base in green gore. Wall-breakers heavy.
+
+id = "factorio_biters"
+name = "Factorio — Biter Wave"
+description = "Bug swarm chewing through the perimeter."
+
+spawn_pool = ["zergling", "swarmling", "breacher", "sapper", "charger", "rocketeer"]
+miniboss = "miniboss"
+
+# Engineer-kit flavor → Dash for that exoskeleton-leg burst. Perks
+# are all efficiency / throughput: Survivor armor, QuickHands for
+# the fire-rate curve, IronWill so the pollution tide doesn't drop
+# your sanity into red.
+signature_traversal = "dash"
+signature_perks = ["survivor", "quick_hands", "iron_will"]
+
+[spawn_weights]
+# Small biters.
+zergling = 5
+swarmling = 3
+# Medium/Big biters breaching.
+breacher = 3
+# Behemoth spitters — arcing AoE attacks.
+rocketeer = 1
+sapper = 1
+# Charger-class big biter.
+charger = 2

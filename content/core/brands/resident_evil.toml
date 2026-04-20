@@ -1,0 +1,28 @@
+# Resident Evil — Villa Outbreak. Shambling infected (rushers) with
+# occasional mutations — leapers from second-floor cover, pinkies
+# that tank shotgun blasts, sapper-style regenerators that explode
+# into sub-forms.
+
+id = "resident_evil"
+name = "Resident Evil — Villa Outbreak"
+description = "Slow infected, mutations, body-horror surprises."
+
+spawn_pool = ["rusher", "pinkie", "leaper", "splitter", "sapper", "floodling"]
+miniboss = "miniboss"
+
+# Survival-horror flavor → Phase: duck into the adjacent hallway
+# before the lickers reach you. Perks lean conservation: IronWill
+# for sanity under Carcosa pressure, Survivor armor pad, LastStand
+# clutch when the herb pouch runs empty.
+signature_traversal = "phase"
+signature_perks = ["iron_will", "survivor", "last_stand"]
+
+[spawn_weights]
+rusher = 4
+pinkie = 2
+leaper = 2
+# Splitter = Regenerator bursting into sub-forms.
+splitter = 2
+sapper = 1
+# Las Plagas / parasite head.
+floodling = 1

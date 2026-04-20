@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 pub mod arena;
 pub mod art;
+pub mod behavior;
 pub mod body_effect;
 pub mod camera;
 pub mod carcosa;
@@ -14,6 +15,7 @@ pub mod corpse;
 pub mod enemy;
 pub mod fb;
 pub mod game;
+pub mod gore;
 pub mod hud;
 pub mod input;
 pub mod interaction;
@@ -24,6 +26,9 @@ pub mod menu;
 pub mod mouse;
 pub mod net;
 pub mod particle;
+pub mod pathfind;
+pub mod perf_overlay;
+pub mod perk;
 pub mod pickup;
 pub mod player;
 pub mod primitive;
@@ -33,7 +38,9 @@ pub mod sprite;
 pub mod stun;
 pub mod substance;
 pub mod tag;
+pub mod telemetry;
 pub mod terminal;
+pub mod traversal;
 pub mod upnp;
 pub mod vote;
 pub mod waves;
@@ -112,6 +119,18 @@ pub fn run_solo() -> Result<()> {
                         }
                         continue;
                     }
+                    if let KeyCode::F(3) = k.code {
+                        if press && !matches!(k.kind, KeyEventKind::Repeat) {
+                            game.perf_overlay.toggle();
+                        }
+                        continue;
+                    }
+                    if let KeyCode::Tab = k.code {
+                        if press && !matches!(k.kind, KeyEventKind::Repeat) {
+                            game.inventory_open = !game.inventory_open;
+                        }
+                        continue;
+                    }
                     if k.code == KeyCode::Char('c')
                         && press
                         && k.modifiers.contains(KeyModifiers::CONTROL)
@@ -170,6 +189,17 @@ pub fn run_solo() -> Result<()> {
                         KeyCode::Char('q') if press => {
                             if !matches!(k.kind, KeyEventKind::Repeat) {
                                 game.try_cycle_weapon(local_id);
+                            }
+                        }
+                        KeyCode::Char('t') | KeyCode::Char('T') if press => {
+                            if !matches!(k.kind, KeyEventKind::Repeat) {
+                                game.try_deploy_turret(local_id);
+                            }
+                        }
+                        KeyCode::Char('f') | KeyCode::Char('F') if press => {
+                            // F for "flash" / traversal verb.
+                            if !matches!(k.kind, KeyEventKind::Repeat) {
+                                game.try_activate_traversal(local_id);
                             }
                         }
                         code if press => input.key_event(code, true),
@@ -247,13 +277,30 @@ pub fn run_solo() -> Result<()> {
             hud::draw_loadout(&mut stdout, &loadout)?;
         }
         hud::draw_intermission(&mut stdout, &game)?;
+        hud::draw_active_brands(&mut stdout, &game.active_brands)?;
+        if let Some(p) = game.local_player() {
+            hud::draw_perks(&mut stdout, &p.perks)?;
+        }
         hud::draw_kiosk_labels(&mut stdout, &game)?;
         let (tc_z, tr_z) = crossterm::terminal::size()?;
         hud::draw_zoom_indicator(&mut stdout, tc_z, game.camera.zoom)?;
         if game.paused {
             hud::draw_paused_banner(&mut stdout, tc_z, tr_z, game.is_authoritative)?;
         }
+        // Dead banner: local player is down but the team plays on.
+        if game.alive
+            && game.local_player().map(|p| p.hp <= 0).unwrap_or(false)
+        {
+            hud::draw_dead_banner(&mut stdout, tc_z, tr_z)?;
+        }
         // Console renders below the menu so the menu stays modal on top.
+        game.perf_overlay.render(&mut stdout, tc_z, tr_z, &game.perf)?;
+        if game.inventory_open {
+            if let Some(p) = game.local_player() {
+                let loadout = game.local_loadout();
+                hud::draw_inventory(&mut stdout, tc_z, tr_z, p, loadout.as_ref())?;
+            }
+        }
         game.console.render(&mut stdout, tc_z, tr_z)?;
         game.menu.render(&mut stdout, tc_z, tr_z, game.is_authoritative, game.paused)?;
         let (tc, tr) = crossterm::terminal::size()?;
@@ -264,6 +311,9 @@ pub fn run_solo() -> Result<()> {
             game.director.wave,
             game.director.banner_ttl,
         )?;
+        hud::draw_clear_countdown(&mut stdout, tc, game.director.clear_timer)?;
+        hud::draw_pickup_labels(&mut stdout, &game)?;
+        hud::draw_pickup_toasts(&mut stdout, tc, &game.toasts)?;
 
         if !game.alive {
             let (cols, rows) = crossterm::terminal::size()?;

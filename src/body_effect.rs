@@ -113,6 +113,22 @@ impl ReactionRegistry {
             Reaction::Custom { handler: Tag::new("raise_eater") },
         );
 
+        // Splitter fragmentation: on death, spawn several Swarmlings
+        // at the corpse location. Chains nicely with other Splitters
+        // if their swarmlings land near another split-ready target.
+        r.register(
+            "spawn_swarmlings",
+            Reaction::Custom { handler: Tag::new("spawn_swarmlings") },
+        );
+
+        // FloodCarrier death — a cloud of Floodlings vents out of the
+        // bursting sac. Amplifies the Flood faction via chain
+        // conversions.
+        r.register(
+            "burst_floodlings",
+            Reaction::Custom { handler: Tag::new("burst_floodlings") },
+        );
+
         r
     }
 }

@@ -1,0 +1,32 @@
+# Dead Space — Ishimura Necromorph. Limb-specific body horror,
+# bursting hosts, floating shapes. Splitters are the signature here
+# — every kill multiplies the threat unless you aim for the right
+# limbs.
+
+id = "dead_space"
+name = "Dead Space — Ishimura Necromorph"
+description = "Body-horror mutation. Every kill makes it worse."
+
+spawn_pool = ["leaper", "splitter", "pinkie", "orb", "howler", "floodling"]
+miniboss = "miniboss"
+
+# Claustrophobic corridors + mutation dread → Phase so survivors can
+# slip into a vent one tile deep. Perks lean into the horror loop:
+# LastStand to survive ambushes, Butcher for the loot-hunt flow,
+# GloomShroud to tolerate the Carcosa bleed.
+signature_traversal = "phase"
+signature_perks = ["last_stand", "butcher", "gloom_shroud"]
+
+[spawn_weights]
+# Slashers + Leapers dominate.
+leaper = 3
+# Pregnants + Guardians.
+splitter = 3
+# Brutes.
+pinkie = 2
+# Floating Lurkers.
+orb = 2
+# Divider shriek.
+howler = 1
+# Infector parasites.
+floodling = 2

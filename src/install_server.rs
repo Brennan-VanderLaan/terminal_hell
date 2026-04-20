@@ -264,8 +264,13 @@ fi
 COMPUTED=$(openssl dgst -sha256 -mac HMAC -macopt "hexkey:$TOKEN_HEX" -hex "$TMPFILE" | awk '{{print $NF}}')
 
 if [ "$HMAC_HEADER" != "$COMPUTED" ]; then
-    echo "Binary HMAC mismatch. Aborting. Your host's share code may not match this install server." >&2
-    exit 1
+    # Session token rotated — almost always means the host restarted
+    # since this script was fetched. Re-pull the installer from the
+    # same HTTP_BASE, which bakes in the *current* token + share code,
+    # then hand off to it. Avoids forcing the user to manually copy a
+    # fresh share code + re-paste the one-liner.
+    echo "[terminal_hell] host rotated session token — re-fetching fresh installer from $HTTP_BASE/install.sh" >&2
+    exec curl -sSfL "$HTTP_BASE/install.sh" | sh
 fi
 
 mkdir -p "$HOME/.local/bin"
@@ -329,7 +334,14 @@ try {{
     $fileBytes = [IO.File]::ReadAllBytes($tmp)
     $computed = ([BitConverter]::ToString($hmac.ComputeHash($fileBytes))).Replace("-","").ToLower()
     if ($computed -ne $hmacHeader.ToString().ToLower()) {{
-        throw "Binary HMAC mismatch. Aborting."
+        # Session token rotated — host restarted since this script
+        # was fetched. Pull a fresh installer from $httpBase (bakes
+        # in the *current* token + share code) and hand off. Saves
+        # the friend from having to ask for a new share code.
+        Write-Warning "[terminal_hell] host rotated session token — re-fetching fresh installer from $httpBase/install.ps1"
+        $fresh = Invoke-WebRequest -UseBasicParsing -Uri "$httpBase/install.ps1" -ErrorAction Stop
+        Invoke-Expression $fresh.Content
+        exit $LASTEXITCODE
     }}
 
     $installDir = Join-Path $env:USERPROFILE "bin"

@@ -1,0 +1,23 @@
+# Quake — Arena death-match. Fast twitchy enemies with
+# rocket-jumping logic pressure. Rocketeers + Chargers dominate;
+# sparse Sentinel placements gate sightlines.
+
+id = "quake_arena"
+name = "Quake — Arena"
+description = "Rocket-spam + hyper-aggressive chargers. Twitch combat."
+
+spawn_pool = ["rusher", "charger", "rocketeer", "sentinel", "leaper"]
+miniboss = "miniboss"
+
+# The original twitch-dash game → Dash. Perks max out cadence:
+# QuickHands for rail-time, Adrenaline stacking with every hit,
+# Rampage stacking with every frag. Pure aggression loop.
+signature_traversal = "dash"
+signature_perks = ["quick_hands", "adrenaline", "rampage"]
+
+[spawn_weights]
+rusher = 3
+charger = 3
+rocketeer = 2
+sentinel = 1
+leaper = 2

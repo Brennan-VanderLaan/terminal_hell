@@ -1,0 +1,26 @@
+# Doom — Hell Inferno. Imps, pinkies, revenants, cacodemons.
+# Fast chase + rocket-launcher skeletons + charging pinkies. The
+# "boot up the shotgun" brand.
+
+id = "doom_inferno"
+name = "Doom — Hell Inferno"
+description = "Imps, pinkies, revenants. Fast aggressive demons."
+
+spawn_pool = ["rusher", "pinkie", "charger", "revenant", "leaper", "sapper", "rocketeer"]
+miniboss = "miniboss"
+
+# Rip-and-tear → dash verb. Perks lean aggressive: Rampage stacks,
+# Adrenaline on hit, QuickHands to pump more SSG shells per minute.
+signature_traversal = "dash"
+signature_perks = ["rampage", "adrenaline", "quick_hands"]
+
+[spawn_weights]
+rusher = 4
+pinkie = 2
+charger = 2
+revenant = 2
+leaper = 1
+sapper = 1
+# Rocketeers let revenant drops + breach primitive actually show up
+# from the archetype that signs them.
+rocketeer = 1

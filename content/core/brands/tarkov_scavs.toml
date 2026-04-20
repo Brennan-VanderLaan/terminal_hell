@@ -1,0 +1,28 @@
+# Tarkov — Scavs + PMCs. Patient riflemen, armored operators,
+# occasional Killa boss encounters. The "loud shots, loot the mag"
+# brand.
+
+id = "tarkov_scavs"
+name = "Tarkov — Scavs + Operators"
+description = "Patient scav fire teams. Rare Killa sightings mean run."
+
+spawn_pool = ["rusher", "marksman", "pmc", "sentinel", "killa", "sapper"]
+miniboss = "killa"
+
+# Grounded mil-sim movement → slide. Perk pool biases toward
+# survivability + sustained trigger discipline: more armor, flanks
+# that punch past low-HP moments, QuickHands to win the cross-map
+# trade.
+signature_traversal = "slide"
+signature_perks = ["survivor", "last_stand", "quick_hands"]
+
+[spawn_weights]
+# Plenty of fodder scavs.
+rusher = 3
+marksman = 4
+pmc = 3
+sentinel = 1
+# Killa rolls into the pool late-wave.
+killa = 1
+# Scav with a pipe-bomb.
+sapper = 1

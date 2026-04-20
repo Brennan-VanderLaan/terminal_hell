@@ -26,6 +26,22 @@ pub enum Primitive {
     Pierce,
     /// First shot fired after a kill deals bonus damage.
     Overdrive,
+    /// Enemy hit leaves an acid pool on the ground that ticks DoT.
+    Acid,
+    /// Enemy hit slows target. Stacking Cryo stacks the slow; 3
+    /// stacks shatter for a big crit.
+    Cryo,
+    /// On-hit status effects (burn, slow) spread to adjacent enemies.
+    Contagion,
+    /// Hit point briefly pulls nearby enemies in — soft crowd
+    /// control for flanker control.
+    GravityWell,
+    /// On-kill restores a chunk of sanity — rewards clean kills in
+    /// the Carcosa spiral.
+    Siphon,
+    /// Ignores armored/shielded tags, dealing bonus damage to
+    /// armored enemies.
+    ShieldBreak,
 }
 
 impl Primitive {
@@ -37,7 +53,33 @@ impl Primitive {
             Primitive::Chain => 'C',
             Primitive::Pierce => 'P',
             Primitive::Overdrive => 'O',
+            Primitive::Acid => 'A',
+            Primitive::Cryo => 'F', // Freeze
+            Primitive::Contagion => 'T', // Transmit
+            Primitive::GravityWell => 'V', // Vortex
+            Primitive::Siphon => 'S',
+            Primitive::ShieldBreak => 'X',
         }
+    }
+
+    /// Snake-case content-id → enum. Used by TOML parsing of
+    /// `signature_primitives` lists on archetypes.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "ignite" => Primitive::Ignite,
+            "breach" => Primitive::Breach,
+            "ricochet" => Primitive::Ricochet,
+            "chain" => Primitive::Chain,
+            "pierce" => Primitive::Pierce,
+            "overdrive" => Primitive::Overdrive,
+            "acid" => Primitive::Acid,
+            "cryo" => Primitive::Cryo,
+            "contagion" => Primitive::Contagion,
+            "gravity_well" => Primitive::GravityWell,
+            "siphon" => Primitive::Siphon,
+            "shield_break" => Primitive::ShieldBreak,
+            _ => return None,
+        })
     }
 
     /// Tint color used for pickup halos and in-world visual cues.
@@ -49,8 +91,22 @@ impl Primitive {
             Primitive::Chain => Pixel::rgb(180, 140, 255),
             Primitive::Pierce => Pixel::rgb(230, 230, 230),
             Primitive::Overdrive => Pixel::rgb(255, 80, 200),
+            Primitive::Acid => Pixel::rgb(120, 255, 100),
+            Primitive::Cryo => Pixel::rgb(140, 220, 255),
+            Primitive::Contagion => Pixel::rgb(200, 255, 120),
+            Primitive::GravityWell => Pixel::rgb(80, 60, 180),
+            Primitive::Siphon => Pixel::rgb(255, 200, 220),
+            Primitive::ShieldBreak => Pixel::rgb(255, 100, 80),
         }
     }
+}
+
+/// Cryo slow status applied by the Cryo primitive. Each stack slows
+/// the enemy by a further 15% (cap 3 stacks = fully frozen).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FrostStatus {
+    pub stacks: u8,
+    pub ttl: f32,
 }
 
 /// Drop-rarity tier. Controls the number of primitive slots a weapon rolls

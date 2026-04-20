@@ -1,0 +1,30 @@
+# Helldivers — Managed Democracy. Bug waves (Terminids) + Automaton
+# assault. Zergling-class bugs rushing in numbers, Rocketeer Automaton
+# devastators, Sentinel tower turrets. Brand that always feels
+# OUTSIDE of cover.
+
+id = "helldivers"
+name = "Helldivers — Bug Breach"
+description = "Bug stampedes + Automaton devastators. Never out of the fight."
+
+spawn_pool = ["zergling", "swarmling", "rocketeer", "sentinel", "sapper", "charger"]
+miniboss = "miniboss"
+
+# Stim-injector slide → Slide verb matches Helldivers 2 diving for
+# cover. Perks are front-line democracy: Survivor armor, Rampage to
+# stack kills under pressure, QuickHands for the cross-open-ground
+# firefights that define this brand.
+signature_traversal = "slide"
+signature_perks = ["survivor", "rampage", "quick_hands"]
+
+[spawn_weights]
+# Bug horde.
+zergling = 5
+swarmling = 3
+# Automaton fire support.
+rocketeer = 2
+sentinel = 2
+# Bile titans / Hive Guards — ground-pound.
+charger = 2
+# Suicide spore-spewers.
+sapper = 1

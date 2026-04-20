@@ -173,6 +173,10 @@ impl Arena {
         let area = w.max(1) * h.max(1);
         let blob_count = (area / 4000).clamp(14, 600);
         let breaker_count = (area / 20000).clamp(3, 120);
+        // Building count reduced since each building is 10× the
+        // footprint of the old versions — ~1000 tiles avg instead of
+        // ~100. Total coverage stays near 5-8% of the arena.
+        let building_count = (area / 35000).clamp(4, 24);
 
         let margin = 5;
         for _ in 0..blob_count {
@@ -219,6 +223,78 @@ impl Arena {
                     continue;
                 }
                 place_block(&mut a, x, y, 2, len);
+            }
+        }
+
+        // Buildings: real-size structures so players can actually
+        // hide inside. Player sprite is ~8x11; a building needs to
+        // be dozens of tiles across to read as "a building I enter"
+        // instead of "a blob I stand next to." Size classes:
+        //   small shack: 18-26 × 14-20 (single room, one door)
+        //   mid room:    28-44 × 22-34 (one divider)
+        //   compound:    55-80 × 40-65 (multi-room with 3+ dividers)
+        for _ in 0..building_count {
+            let roll: u8 = rng.gen_range(0..100);
+            let (bw, bh) = match roll {
+                0..=49 => {
+                    let bw = rng.gen_range(18..=26) as i32;
+                    let bh = rng.gen_range(14..=20) as i32;
+                    (bw, bh)
+                }
+                50..=84 => {
+                    let bw = rng.gen_range(28..=44) as i32;
+                    let bh = rng.gen_range(22..=34) as i32;
+                    (bw, bh)
+                }
+                _ => {
+                    // Compound.
+                    let bw = rng.gen_range(55..=80) as i32;
+                    let bh = rng.gen_range(40..=65) as i32;
+                    (bw, bh)
+                }
+            };
+            if w <= margin * 2 + bw + 2 || h <= margin * 2 + bh + 2 {
+                continue;
+            }
+            let x = rng.gen_range(margin + 1..w - margin - bw - 1);
+            let y = rng.gen_range(margin + 1..h - margin - bh - 1);
+            let dx = x + bw / 2 - cx;
+            let dy = y + bh / 2 - cy;
+            if dx * dx + dy * dy < core_r2 {
+                continue;
+            }
+            let mut clear = true;
+            for yy in (y + 1)..(y + bh - 1) {
+                for xx in (x + 1)..(x + bw - 1) {
+                    if a.is_wall(xx, yy) {
+                        clear = false;
+                        break;
+                    }
+                }
+                if !clear {
+                    break;
+                }
+            }
+            if !clear {
+                continue;
+            }
+            // Interior richness scales with size. Mid rooms get 1
+            // divider; compounds get 3-5 dividers creating a
+            // multi-room layout, plus extra exterior doorways.
+            let divider_count = if bw * bh > 2500 {
+                rng.gen_range(3..=5) as u8 // compound
+            } else if bw * bh > 700 {
+                1 // mid
+            } else {
+                0 // shack
+            };
+            let extra_doors = if divider_count > 1 { 2 } else { 0 };
+            place_building(&mut a, &mut rng, x, y, bw, bh);
+            for _ in 0..divider_count {
+                add_building_interior(&mut a, &mut rng, x, y, bw, bh);
+            }
+            for _ in 0..extra_doors {
+                add_exterior_doorway(&mut a, &mut rng, x, y, bw, bh);
             }
         }
 
@@ -331,10 +407,16 @@ impl Arena {
     /// low cover, any non-Doorway structure. False for Doorways and
     /// open tiles.
     pub fn blocks_los(&self, x: i32, y: i32) -> bool {
-        match self.stack(x, y).structure {
-            Some(s) => s.blocks_los(),
-            None => false,
+        let s = self.stack(x, y);
+        if let Some(st) = s.structure {
+            if st.blocks_los() {
+                return true;
+            }
         }
+        // Object-layer debris piles also block LoS — this is what
+        // makes flying-debris chunks act as actual cover. Corpses
+        // still don't (they're too short + flat).
+        matches!(s.object, Some(Object::DebrisPile { .. }))
     }
 
     /// Amanatides–Woo grid traversal from `from` to `to` in world-pixel
@@ -445,6 +527,31 @@ impl Arena {
     /// True if no LoS blocker stands between `from` and `to`.
     pub fn has_line_of_sight(&self, from: (f32, f32), to: (f32, f32)) -> bool {
         self.raycast_los(from, to).is_none()
+    }
+
+    /// Does (x, y) stop a bullet? Like `blocks_los`, but broken
+    /// cover (rubble piles) lets projectiles through. Matches the
+    /// "I can walk through the rubble, I should be able to shoot
+    /// through it too" mental model — debris piles still block
+    /// *sight* (enemies behind them can't spot you), but once you
+    /// spot them a round punches through the pile fine.
+    pub fn blocks_projectile(&self, x: i32, y: i32) -> bool {
+        let s = self.stack(x, y);
+        if let Some(st) = s.structure {
+            if st.blocks_los() {
+                return true;
+            }
+        }
+        // DebrisPile intentionally NOT included here (unlike
+        // `blocks_los`) — rubble is walk-through-AND-shoot-through.
+        false
+    }
+
+    /// Convenience: first projectile-blocker along the segment.
+    /// Used by the projectile raycast — structural walls block
+    /// rounds; loose rubble does not.
+    pub fn raycast_projectile(&self, from: (f32, f32), to: (f32, f32)) -> Option<RayHit> {
+        self.raycast(from, to, |a, x, y| a.blocks_projectile(x, y))
     }
 
     /// True if a player or projectile can move/pass through. Movement and
@@ -807,6 +914,122 @@ fn place_block(a: &mut Arena, x: i32, y: i32, w: i32, h: i32) {
         for xx in x..(x + w) {
             a.set_wall(xx, yy, Material::Concrete, WALL_HP);
         }
+    }
+}
+
+/// Add an interior divider wall + doorway. For bigger buildings the
+/// divider lands at a random fraction across the structure (not just
+/// the middle) so multiple dividers chain into irregular room
+/// layouts, not a symmetric cross.
+fn add_building_interior(a: &mut Arena, rng: &mut SmallRng, x: i32, y: i32, bw: i32, bh: i32) {
+    let horizontal = rng.gen_bool(0.5);
+    if horizontal {
+        // Divider at 25-75% of height.
+        let frac: f32 = rng.gen_range(0.25..0.75);
+        let sy = y + (bh as f32 * frac) as i32;
+        if sy <= y + 2 || sy >= y + bh - 2 {
+            return;
+        }
+        for xx in (x + 1)..(x + bw - 1) {
+            // Only overwrite if not already a doorway/wall (chain
+            // dividers may cross other dividers).
+            if !a.is_wall(xx, sy) {
+                a.set_wall(xx, sy, Material::Concrete, WALL_HP);
+            }
+        }
+        // 2-3 tile doorway in a random spot.
+        let door_w = rng.gen_range(2..=3);
+        let door_x = rng.gen_range((x + 2)..(x + bw - door_w - 2));
+        for xx in door_x..door_x + door_w {
+            if let Some(i) = a.idx(xx, sy) {
+                a.stacks[i].structure = Some(Structure::Doorway);
+            }
+        }
+    } else {
+        let frac: f32 = rng.gen_range(0.25..0.75);
+        let sx = x + (bw as f32 * frac) as i32;
+        if sx <= x + 2 || sx >= x + bw - 2 {
+            return;
+        }
+        for yy in (y + 1)..(y + bh - 1) {
+            if !a.is_wall(sx, yy) {
+                a.set_wall(sx, yy, Material::Concrete, WALL_HP);
+            }
+        }
+        let door_h = rng.gen_range(2..=3);
+        let door_y = rng.gen_range((y + 2)..(y + bh - door_h - 2));
+        for yy in door_y..door_y + door_h {
+            if let Some(i) = a.idx(sx, yy) {
+                a.stacks[i].structure = Some(Structure::Doorway);
+            }
+        }
+    }
+}
+
+/// Drop an extra 2-tile doorway on a random exterior wall — used by
+/// big compounds so they have multiple approach vectors instead of
+/// one chokepoint.
+fn add_exterior_doorway(a: &mut Arena, rng: &mut SmallRng, x: i32, y: i32, bw: i32, bh: i32) {
+    let side = rng.gen_range(0..4u8);
+    let (dx, dy, run_axis_x) = match side {
+        0 => (rng.gen_range(x + 2..x + bw - 3), y, true),
+        1 => (rng.gen_range(x + 2..x + bw - 3), y + bh - 1, true),
+        2 => (x, rng.gen_range(y + 2..y + bh - 3), false),
+        _ => (x + bw - 1, rng.gen_range(y + 2..y + bh - 3), false),
+    };
+    for step in 0..2 {
+        let (ex, ey) = if run_axis_x { (dx + step, dy) } else { (dx, dy + step) };
+        if let Some(i) = a.idx(ex, ey) {
+            a.stacks[i].structure = Some(Structure::Doorway);
+        }
+    }
+}
+
+/// Build a rectangular room with a doorway gap on one of the four
+/// walls. The interior is left as Floor so players can walk inside;
+/// the doorway tile is marked as `Structure::Doorway` (walkable,
+/// non-blocking) so movement + LoS pass through cleanly.
+fn place_building(a: &mut Arena, rng: &mut SmallRng, x: i32, y: i32, w: i32, h: i32) {
+    // Perimeter walls.
+    for xx in x..(x + w) {
+        a.set_wall(xx, y, Material::Concrete, WALL_HP);
+        a.set_wall(xx, y + h - 1, Material::Concrete, WALL_HP);
+    }
+    for yy in y..(y + h) {
+        a.set_wall(x, yy, Material::Concrete, WALL_HP);
+        a.set_wall(x + w - 1, yy, Material::Concrete, WALL_HP);
+    }
+
+    // Doorway on a random edge, 2 tiles wide.
+    let side = rng.gen_range(0..4u8);
+    let (dx, dy) = match side {
+        0 => {
+            let px = rng.gen_range((x + 2)..(x + w - 2));
+            (px, y)
+        }
+        1 => {
+            let px = rng.gen_range((x + 2)..(x + w - 2));
+            (px, y + h - 1)
+        }
+        2 => {
+            let py = rng.gen_range((y + 2)..(y + h - 2));
+            (x, py)
+        }
+        _ => {
+            let py = rng.gen_range((y + 2)..(y + h - 2));
+            (x + w - 1, py)
+        }
+    };
+    // 2-tile doorway.
+    if let Some(i) = a.idx(dx, dy) {
+        a.stacks[i].structure = Some(Structure::Doorway);
+    }
+    let (dx2, dy2) = match side {
+        0 | 1 => (dx + 1, dy),
+        _ => (dx, dy + 1),
+    };
+    if let Some(i) = a.idx(dx2, dy2) {
+        a.stacks[i].structure = Some(Structure::Doorway);
     }
 }
 

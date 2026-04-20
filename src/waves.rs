@@ -19,9 +19,20 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
-const WAVE_BUDGET_BASE: u32 = 6;
-const WAVE_BUDGET_RAMP: u32 = 2;
-const PER_EXTRA_BRAND_BONUS: u32 = 2;
+const WAVE_BUDGET_BASE: u32 = 12;
+const WAVE_BUDGET_RAMP: u32 = 4;
+const PER_EXTRA_BRAND_BONUS: u32 = 4;
+
+/// Soft clearing deadline. If the team hasn't killed every hostile
+/// within this many seconds of the last spawn, the director advances
+/// anyway so a single straggler can't stall the run.
+const CLEAR_TIMEOUT_BASE: f32 = 50.0;
+/// Per-wave shrinkage so late-run stragglers don't get to coast for
+/// almost a minute apiece.
+const CLEAR_TIMEOUT_PER_WAVE: f32 = 0.5;
+/// Floor for the auto-advance deadline so late waves still give
+/// survivors *some* time to mop up the last shape on screen.
+const CLEAR_TIMEOUT_MIN: f32 = 25.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IntermissionPhase {
@@ -34,10 +45,13 @@ pub enum IntermissionPhase {
 impl IntermissionPhase {
     pub fn duration(self) -> f32 {
         match self {
-            Self::Breathe => 5.0,
-            Self::Vote => 12.0,
-            Self::Stock => 8.0,
-            Self::Warning => 5.0,
+            // Breathe kept tight (3s). Vote gets the extra time so
+            // the team has room to read kiosks + coordinate choice
+            // of brand-bleed. Stock + Warning stay short.
+            Self::Breathe => 3.0,
+            Self::Vote => 13.0,
+            Self::Stock => 4.0,
+            Self::Warning => 3.0,
         }
     }
     pub fn label(self) -> &'static str {
@@ -78,6 +92,10 @@ pub struct WaveDirector {
     pub spawn_timer: f32,
     pub phase_timer: f32,
     pub banner_ttl: f32,
+    /// Countdown during the `Clearing` state. Reaches zero → the
+    /// director advances to the intermission even if hostiles remain.
+    /// Left at zero while not in `Clearing`.
+    pub clear_timer: f32,
     weighted_pool: Vec<(Archetype, u32)>,
     rng: SmallRng,
 }
@@ -93,9 +111,17 @@ impl WaveDirector {
             spawn_timer: 0.0,
             phase_timer: IntermissionPhase::Breathe.duration(),
             banner_ttl: 0.0,
+            clear_timer: 0.0,
             weighted_pool: Vec::new(),
             rng: SmallRng::seed_from_u64(seed),
         }
+    }
+
+    /// Per-wave clearing deadline: how long the team gets to kill
+    /// the last stragglers before the director force-advances.
+    fn clear_timeout_for(&self) -> f32 {
+        let shrink = (self.wave as f32) * CLEAR_TIMEOUT_PER_WAVE;
+        (CLEAR_TIMEOUT_BASE - shrink).max(CLEAR_TIMEOUT_MIN)
     }
 
     pub fn current_phase(&self) -> Option<IntermissionPhase> {
@@ -126,21 +152,80 @@ impl WaveDirector {
                 self.spawn_timer -= dt;
                 while self.wave_budget > 0 && self.spawn_timer <= 0.0 {
                     let archetype = self.next_archetype();
+                    // Swarm archetypes fire multiple clusters at once
+                    // across the perimeter instead of a single spawn.
+                    // Zerg rush: dense melee biomass.
+                    // Flood tide: parasites that convert anything they
+                    // touch — terrifying in volume because each one
+                    // can turn the horde against itself.
+                    if let Some(params) = swarm_params(archetype) {
+                        let cluster_count =
+                            self.rng.gen_range(params.clusters.0..=params.clusters.1);
+                        for _ in 0..cluster_count {
+                            let Some((cx, cy)) =
+                                pick_spawn(&mut self.rng, arena, player_anchors)
+                            else {
+                                continue;
+                            };
+                            let cluster_size = self
+                                .rng
+                                .gen_range(params.cluster_size.0..=params.cluster_size.1);
+                            for _ in 0..cluster_size {
+                                let ox: f32 =
+                                    self.rng.gen_range(-params.spread..params.spread);
+                                let oy: f32 =
+                                    self.rng.gen_range(-params.spread..params.spread);
+                                let stats = content.stats(archetype);
+                                enemies.push(Enemy::spawn(
+                                    archetype,
+                                    stats,
+                                    cx + ox,
+                                    cy + oy,
+                                ));
+                            }
+                        }
+                        self.wave_budget =
+                            self.wave_budget.saturating_sub(params.budget_cost);
+                        self.spawn_timer += params.cadence_pause;
+                        continue;
+                    }
+
                     if let Some((sx, sy)) = pick_spawn(&mut self.rng, arena, player_anchors) {
                         let stats = content.stats(archetype);
                         enemies.push(Enemy::spawn(archetype, stats, sx, sy));
                     }
                     self.wave_budget -= 1;
-                    self.spawn_timer += 0.55;
+                    // Faster spawn cadence so bigger budgets actually
+                    // ramp the threat, not drip across 30 seconds.
+                    // Late-wave bursts arrive in ~0.25s chunks.
+                    self.spawn_timer += 0.28;
                 }
                 if self.wave_budget == 0 {
                     self.state = WaveState::Clearing;
+                    // Start the auto-advance countdown — once spawns
+                    // are done, survivors have this long to finish
+                    // the last stragglers before the director forces
+                    // the next intermission.
+                    self.clear_timer = self.clear_timeout_for();
                 }
             }
             WaveState::Clearing => {
-                if enemies.is_empty() {
+                // Count only HOSTILE enemies toward wave clear —
+                // player turrets and any other survivor-team
+                // entities don't block wave progression. Same for
+                // future friendly spawns.
+                let survivor_tag = crate::tag::Tag::new(crate::enemy::TEAM_SURVIVOR);
+                let hostile_alive = enemies
+                    .iter()
+                    .any(|e| e.hp > 0 && e.team != survivor_tag);
+                self.clear_timer = (self.clear_timer - dt).max(0.0);
+                // Either condition advances: every hostile is dead,
+                // OR the deadline ran out so one camping straggler
+                // can't stall the whole run.
+                if !hostile_alive || self.clear_timer <= 0.0 {
                     self.state = WaveState::Intermission(IntermissionPhase::Breathe);
                     self.phase_timer = IntermissionPhase::Breathe.duration();
+                    self.clear_timer = 0.0;
                 }
             }
             WaveState::Intermission(phase) => {
@@ -241,23 +326,61 @@ fn first_miniboss(content: &ContentDb, active_brands: &[String]) -> Option<Arche
 }
 
 fn archetype_from_name(name: &str) -> Result<Archetype, ()> {
-    match name {
-        "rusher" => Ok(Archetype::Rusher),
-        "pinkie" => Ok(Archetype::Pinkie),
-        "charger" => Ok(Archetype::Charger),
-        "revenant" => Ok(Archetype::Revenant),
-        "marksman" => Ok(Archetype::Marksman),
-        "pmc" => Ok(Archetype::Pmc),
-        "swarmling" => Ok(Archetype::Swarmling),
-        "orb" => Ok(Archetype::Orb),
-        "miniboss" => Ok(Archetype::Miniboss),
-        _ => Err(()),
+    // Delegate to the central lookup so every new archetype
+    // (Breacher, Rocketeer, Leaper, Sapper, Juggernaut, Howler,
+    // Sentinel, Splitter, and future adds) flows through here
+    // automatically. This function used to carry its own hardcoded
+    // list which silently dropped all the post-v0.6 archetypes from
+    // the spawn pool — huge content bug.
+    Archetype::from_name(name).ok_or(())
+}
+
+/// Swarm parameters for archetypes that spawn in mass clusters rather
+/// than as single units. Returning Some here triggers the multi-
+/// cluster path in the director; None falls through to the normal
+/// one-per-pick spawn.
+struct SwarmParams {
+    /// (min, max) number of separate clusters laid down per trigger.
+    clusters: (i32, i32),
+    /// (min, max) size of each cluster.
+    cluster_size: (i32, i32),
+    /// Half-width of the per-enemy position scatter around the
+    /// cluster center.
+    spread: f32,
+    /// Budget slots consumed by one swarm trigger.
+    budget_cost: u32,
+    /// Extra spawn-cadence pause after the burst.
+    cadence_pause: f32,
+}
+
+fn swarm_params(arch: Archetype) -> Option<SwarmParams> {
+    match arch {
+        // Zerg rush — melee biomass, 4-7 clusters of 8-12.
+        Archetype::Zergling => Some(SwarmParams {
+            clusters: (4, 7),
+            cluster_size: (8, 12),
+            spread: 2.5,
+            budget_cost: 2,
+            cadence_pause: 0.9,
+        }),
+        // Flood tide — parasites in dense groups. Slightly more
+        // clusters than zerglings because each one threatens to
+        // convert the horde it's next to.
+        Archetype::Floodling => Some(SwarmParams {
+            clusters: (4, 6),
+            cluster_size: (10, 15),
+            spread: 2.8,
+            budget_cost: 2,
+            cadence_pause: 1.0,
+        }),
+        _ => None,
     }
 }
 
-/// Pick a spawn tile near one of the player anchors (offscreen-ish but
-/// reachable in a few seconds) rather than at the distant arena edge.
-/// Falls back to an edge-spawn if the anchor list is empty (no players).
+/// Pick a spawn tile along the arena perimeter, far from every player,
+/// in free (passable) space. "Outside-in" vibe — enemies should feel
+/// like they're coming from *over there*, not materializing next to
+/// the survivors.
 fn pick_spawn(
     rng: &mut SmallRng,
     arena: &Arena,
@@ -265,32 +388,66 @@ fn pick_spawn(
 ) -> Option<(f32, f32)> {
     let w = arena.width as i32;
     let h = arena.height as i32;
-    let margin = 6;
+    let margin = 8;
     if w < margin * 3 || h < margin * 3 {
         return None;
     }
 
-    // Preferred: pick near a random player anchor at 45–95 world pixels
-    // (well beyond zoom=1 viewport, close enough to path to the player in
-    // a few seconds).
-    if !player_anchors.is_empty() {
-        for _ in 0..192 {
-            let anchor = player_anchors[rng.gen_range(0..player_anchors.len())];
-            let angle: f32 = rng.r#gen::<f32>() * std::f32::consts::TAU;
-            let dist: f32 = rng.gen_range(45.0..=95.0);
-            let tx = (anchor.0 + angle.cos() * dist).round() as i32;
-            let ty = (anchor.1 + angle.sin() * dist).round() as i32;
-            if tx < margin || ty < margin || tx >= w - margin || ty >= h - margin {
-                continue;
-            }
-            if arena.is_passable(tx, ty) && arena.is_passable(tx, ty + 1) {
-                return Some((tx as f32 + 0.5, ty as f32 + 0.5));
-            }
+    // Band width: spawns land in the outer `band` tiles of the arena.
+    let band = 24i32;
+    // Minimum Euclidean distance to any player. If no players exist,
+    // accept any edge tile.
+    let min_dist: f32 = 50.0;
+    let min_dist2 = min_dist * min_dist;
+
+    for _ in 0..256 {
+        // Pick one of the 4 edge bands, then a tile inside that band.
+        let edge = rng.gen_range(0..4u8);
+        let (tx, ty) = match edge {
+            // Top band.
+            0 => (
+                rng.gen_range(margin..w - margin),
+                rng.gen_range(margin..margin + band).min(h - margin - 1),
+            ),
+            // Bottom band.
+            1 => (
+                rng.gen_range(margin..w - margin),
+                rng.gen_range((h - margin - band).max(margin)..h - margin),
+            ),
+            // Left band.
+            2 => (
+                rng.gen_range(margin..margin + band).min(w - margin - 1),
+                rng.gen_range(margin..h - margin),
+            ),
+            // Right band.
+            _ => (
+                rng.gen_range((w - margin - band).max(margin)..w - margin),
+                rng.gen_range(margin..h - margin),
+            ),
+        };
+
+        // Must be free floor — not inside a wall, not inside an object.
+        if !arena.is_passable(tx, ty) || !arena.is_passable(tx, ty + 1) {
+            continue;
         }
+
+        // Must be far from every player so enemies don't pop at a
+        // survivor's elbow when someone's holding the perimeter.
+        let too_close = player_anchors.iter().any(|&(px, py)| {
+            let dx = tx as f32 + 0.5 - px;
+            let dy = ty as f32 + 0.5 - py;
+            dx * dx + dy * dy < min_dist2
+        });
+        if too_close {
+            continue;
+        }
+
+        return Some((tx as f32 + 0.5, ty as f32 + 0.5));
     }
 
-    // Fallback: edge spawn (matches old behavior).
-    for _ in 0..128 {
+    // Last-ditch fallback for small arenas / degenerate layouts —
+    // ignore the player-distance constraint. Still edge-biased.
+    for _ in 0..64 {
         let edge = rng.gen_range(0..4u8);
         let (tx, ty) = match edge {
             0 => (rng.gen_range(margin..w - margin), margin),

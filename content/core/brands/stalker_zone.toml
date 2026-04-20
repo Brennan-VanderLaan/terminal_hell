@@ -1,0 +1,30 @@
+# STALKER — The Zone. Bloodsuckers pouncing from cover, anomalies +
+# mutants, paranoid hiding mercs. Sneak + Leaper heavy — every shape
+# on your screen is either predator or prey.
+
+id = "stalker_zone"
+name = "STALKER — The Zone"
+description = "Cover-hugging mercs, pouncing mutants, radiation paranoia."
+
+spawn_pool = ["marksman", "leaper", "pinkie", "pmc", "howler", "orb"]
+miniboss = "miniboss"
+
+# Anomaly-walking flavor → Phase (slip through one radiation wall
+# before it melts you). Perks lean into the Zone's attrition loop:
+# GloomShroud because the Zone LEAKS, IronWill for sanity regen
+# during the night walks, Bloodhound to heal off the blood trails
+# you leave behind.
+signature_traversal = "phase"
+signature_perks = ["gloom_shroud", "iron_will", "bloodhound"]
+
+[spawn_weights]
+marksman = 3
+# Leapers = bloodsucker / Controller pounce.
+leaper = 3
+# Pinkie-class mutants.
+pinkie = 2
+pmc = 2
+# Howlers = distant anomaly shrieks that draw the swarm.
+howler = 1
+# Orbs = floating anomalies.
+orb = 1

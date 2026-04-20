@@ -1,0 +1,27 @@
+# Risk of Rain — Escalating density. Starts calm, ramps to chaos.
+# Fast Lemurians (rushers), Greater Wisps (orbs), Jellyfish
+# (floating orbs), Elder Lemurians (chargers).
+
+id = "risk_of_rain"
+name = "Risk of Rain — Escalating Chaos"
+description = "Slow boil. Each wave is messier than the last."
+
+spawn_pool = ["rusher", "charger", "orb", "swarmling", "leaper", "rocketeer"]
+miniboss = "miniboss"
+
+# Item-stacking roguelike → Dash (the character kit feel). Perks are
+# stack-harder-faster: Rampage because kill chains ARE Risk of Rain,
+# Bloodhound to bleed the map for regen, Butcher to multiply the
+# chest density.
+signature_traversal = "dash"
+signature_perks = ["rampage", "bloodhound", "butcher"]
+
+[spawn_weights]
+rusher = 3
+charger = 2
+# Floating orb elites.
+orb = 2
+swarmling = 3
+leaper = 1
+# Magma worm rocketeers.
+rocketeer = 1

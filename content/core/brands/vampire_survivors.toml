@@ -1,0 +1,26 @@
+# Vampire Survivors — auto-battler swarm. Walls of enemies closing
+# the arena. The brand where you WILL be surrounded; your only job
+# is to carve a hole wide enough to breathe.
+
+id = "vampire_survivors"
+name = "Vampire Survivors — Closing Walls"
+description = "Walls of hostile bats. You are always about to be surrounded."
+
+spawn_pool = ["swarmling", "zergling", "splitter", "leaper", "howler"]
+miniboss = "miniboss"
+
+# Nothing but a punch-through-the-wall feel → Dash. Perks are the
+# stat-stacking curve: Butcher to fatten the loot ticks, Rampage
+# because every frame is a chain-kill, CorpsePulse for the constant
+# drip HP from wave-clear.
+signature_traversal = "dash"
+signature_perks = ["butcher", "rampage", "corpse_pulse"]
+
+[spawn_weights]
+# Raw numbers. The point.
+swarmling = 8
+zergling = 6
+# Splitters multiply the wall.
+splitter = 3
+leaper = 1
+howler = 1

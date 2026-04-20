@@ -83,20 +83,52 @@ impl Console {
             out.flush()?;
             return Ok(());
         }
-        let lines = log.recent(body_rows as usize);
+        // Wrap long log lines onto multiple terminal rows so they
+        // don't vanish off the right side. Each source line yields
+        // 1+ display rows; we then take the last `body_rows` display
+        // rows so the most-recent wrapped chunks stay visible.
         let cw = cols as usize;
-        for (i, line) in lines.iter().enumerate() {
-            let row = y0 + 1 + i as u16;
+        let content_w = cw.saturating_sub(2).max(8);
+        let raw_lines = log.recent(body_rows as usize * 4);
+        let mut wrapped: Vec<(String, Color)> = Vec::with_capacity(raw_lines.len() * 2);
+        for line in &raw_lines {
             let color = level_color(line, err_fg, warn_fg, info_fg, debug_fg);
-            // Truncate to viewport width.
-            let clipped: String = line.chars().take(cw.saturating_sub(2)).collect();
-            let padded =
-                format!(" {clipped}{}", " ".repeat(cw.saturating_sub(clipped.chars().count() + 1)));
+            // Chunk the line into content_w-wide segments. Indented
+            // continuation segments get a '  …' prefix so wrapped
+            // continuations read as "same log line."
+            let chars: Vec<char> = line.chars().collect();
+            if chars.is_empty() {
+                wrapped.push((String::new(), color));
+                continue;
+            }
+            let mut i = 0;
+            let mut first = true;
+            while i < chars.len() {
+                let chunk_end = (i + content_w).min(chars.len());
+                let chunk: String = chars[i..chunk_end].iter().collect();
+                if first {
+                    wrapped.push((chunk, color));
+                    first = false;
+                } else {
+                    wrapped.push((format!(" … {chunk}"), color));
+                }
+                i = chunk_end;
+            }
+        }
+        // Take the tail so the newest lines (possibly multi-row)
+        // land at the bottom.
+        let start = wrapped.len().saturating_sub(body_rows as usize);
+        for (i, (text, color)) in wrapped[start..].iter().enumerate() {
+            let row = y0 + 1 + i as u16;
+            let padded = format!(
+                " {text}{}",
+                " ".repeat(cw.saturating_sub(text.chars().count() + 1))
+            );
             queue!(
                 out,
                 MoveTo(0, row),
                 SetBackgroundColor(bg),
-                SetForegroundColor(color),
+                SetForegroundColor(*color),
                 Print(padded),
             )?;
         }

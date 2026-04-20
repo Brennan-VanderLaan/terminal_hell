@@ -118,6 +118,18 @@ pub fn run_connect(addr: String) -> Result<()> {
                         }
                         continue;
                     }
+                    if let KeyCode::F(3) = k.code {
+                        if press && !matches!(k.kind, KeyEventKind::Repeat) {
+                            game.perf_overlay.toggle();
+                        }
+                        continue;
+                    }
+                    if let KeyCode::Tab = k.code {
+                        if press && !matches!(k.kind, KeyEventKind::Repeat) {
+                            game.inventory_open = !game.inventory_open;
+                        }
+                        continue;
+                    }
                     if k.code == KeyCode::Char('c')
                         && press
                         && k.modifiers.contains(KeyModifiers::CONTROL)
@@ -181,6 +193,22 @@ pub fn run_connect(addr: String) -> Result<()> {
                                 client.send_message(
                                     DefaultChannel::ReliableOrdered,
                                     proto::encode(&ClientMsg::CycleWeapon),
+                                );
+                            }
+                        }
+                        KeyCode::Char('t') | KeyCode::Char('T') if press => {
+                            if !matches!(k.kind, KeyEventKind::Repeat) {
+                                client.send_message(
+                                    DefaultChannel::ReliableOrdered,
+                                    proto::encode(&ClientMsg::DeployTurret),
+                                );
+                            }
+                        }
+                        KeyCode::Char('f') | KeyCode::Char('F') if press => {
+                            if !matches!(k.kind, KeyEventKind::Repeat) {
+                                client.send_message(
+                                    DefaultChannel::ReliableOrdered,
+                                    proto::encode(&ClientMsg::ActivateTraversal),
                                 );
                             }
                         }
@@ -261,14 +289,33 @@ pub fn run_connect(addr: String) -> Result<()> {
                 hud::draw_loadout(&mut out, &loadout)?;
             }
             hud::draw_intermission(&mut out, &game)?;
+            hud::draw_active_brands(&mut out, &game.active_brands)?;
+            if let Some(p) = game.local_player() {
+                hud::draw_perks(&mut out, &p.perks)?;
+            }
             hud::draw_kiosk_labels(&mut out, &game)?;
             let (tc, tr) = crossterm::terminal::size()?;
             hud::draw_zoom_indicator(&mut out, tc, game.camera.zoom)?;
             hud::draw_wave_banner(
                 &mut out, tc, tr, game.director.wave, game.director.banner_ttl,
             )?;
+            hud::draw_clear_countdown(&mut out, tc, game.director.clear_timer)?;
+            hud::draw_pickup_labels(&mut out, &game)?;
+            hud::draw_pickup_toasts(&mut out, tc, &game.toasts)?;
             if game.paused {
                 hud::draw_paused_banner(&mut out, tc, tr, game.is_authoritative)?;
+            }
+            if game.alive
+                && game.local_player().map(|p| p.hp <= 0).unwrap_or(false)
+            {
+                hud::draw_dead_banner(&mut out, tc, tr)?;
+            }
+            game.perf_overlay.render(&mut out, tc, tr, &game.perf)?;
+            if game.inventory_open {
+                if let Some(p) = game.local_player() {
+                    let loadout = game.local_loadout();
+                    hud::draw_inventory(&mut out, tc, tr, p, loadout.as_ref())?;
+                }
             }
             game.console.render(&mut out, tc, tr)?;
             game.menu.render(&mut out, tc, tr, game.is_authoritative, game.paused)?;
@@ -323,8 +370,8 @@ fn handle_reliable(
                 game.apply_substance_paint(d.x as i32, d.y as i32, d.substance_id, d.state);
             }
         }
-        ServerMsg::CorpseHit { id, seed } => {
-            game.apply_corpse_hit(id, seed);
+        ServerMsg::CorpseHit { id, seed, dir_x, dir_y } => {
+            game.apply_corpse_hit(id, seed, dir_x, dir_y);
         }
         ServerMsg::BodyReaction { name: _, x: _, y: _, seed: _ } => {
             // Body reactions are host-only today — their effects flow
@@ -337,6 +384,16 @@ fn handle_reliable(
         }
         ServerMsg::RunEnded { wave, kills, elapsed_secs } => {
             *run_ended_summary = Some((wave, kills, elapsed_secs as u64));
+        }
+        ServerMsg::PickupToast { player_id, text, color } => {
+            // Only surface the toast when it's for *this* client's
+            // local player — other survivors' grabs aren't ours.
+            if game.local_id == Some(player_id) {
+                game.push_toast(
+                    text,
+                    crate::fb::Pixel::rgb(color[0], color[1], color[2]),
+                );
+            }
         }
         _ => {}
     }
@@ -398,19 +455,22 @@ fn handle_unreliable(msg: ServerMsg, game: &mut Game) {
                 game.projectiles.push(Projectile {
                     x: ps.x,
                     y: ps.y,
-                    vx: 0.0,
-                    vy: 0.0,
+                    vx: ps.vx,
+                    vy: ps.vy,
                     ttl: 0.1,
                     damage: 0,
                     owner_id: 0,
                     primitives: Vec::new(),
                     bounces_left: 0,
                     pierces_left: 0,
+                    kind: crate::projectile::ProjectileKind::from_byte(ps.kind),
+                    from_ai: false,
+                    trail_phase: 0.0,
                 });
             }
             game.pickups.clear();
             for ps in s.pickups {
-                game.pickups.push(Pickup::new(ps.id, ps.x, ps.y, ps.rarity, ps.primitives));
+                game.pickups.push(Pickup::new_kind(ps.id, ps.x, ps.y, ps.kind));
             }
             game.hitscans.clear();
             for hs in s.hitscans {
@@ -432,6 +492,9 @@ fn handle_unreliable(msg: ServerMsg, game: &mut Game) {
             game.active_brands = s.active_brands;
             game.client_phase = decode_phase(s.intermission_phase);
             game.client_phase_timer = s.phase_timer;
+            // Mirror the authoritative clearing countdown so the
+            // "next wave in Xs" strip renders identically on clients.
+            game.director.clear_timer = s.clear_timer;
             game.corruption = s.corruption;
             game.remote_weapons = s.weapons;
         }
@@ -442,6 +505,9 @@ fn handle_unreliable(msg: ServerMsg, game: &mut Game) {
                 color_rgb: b.color,
                 seed: b.seed,
                 intensity: b.intensity,
+                gore_tier: b.gore_tier,
+                dir_x: b.dir_x,
+                dir_y: b.dir_y,
             };
             game.apply_blast(&blast);
         }

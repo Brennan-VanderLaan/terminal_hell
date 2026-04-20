@@ -1,0 +1,30 @@
+# Left 4 Dead — Parish Infected. Horde + Specials. Common infected
+# rush in packs; Specials (Charger, Smoker-style Leaper, Boomer-style
+# Howler + Sapper detonator) punish a broken squad.
+
+id = "left_4_dead"
+name = "Left 4 Dead — Infected Parish"
+description = "Horde of common infected + Specials that hunt stragglers."
+
+spawn_pool = ["rusher", "swarmling", "charger", "howler", "sapper", "leaper"]
+miniboss = "miniboss"
+
+# Smoker tongue → Grapple. Perks lean into the "move as a pack,
+# revive your bro" loop: Bloodhound regen from the constant blood
+# trails, Butcher for pills + adrenaline shots, CorpsePulse so
+# killing the horde passively tops you off between specials.
+signature_traversal = "grapple"
+signature_perks = ["bloodhound", "butcher", "corpse_pulse"]
+
+[spawn_weights]
+# The horde.
+rusher = 5
+swarmling = 3
+# Charger special.
+charger = 2
+# Howler = Witch scream calling the horde.
+howler = 1
+# Sapper = Boomer explosion.
+sapper = 1
+# Leaper = Hunter pounce.
+leaper = 2

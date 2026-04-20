@@ -24,7 +24,75 @@ pub enum Archetype {
     /// Walks corpse-to-corpse consuming them, grows thicker + angrier,
     /// eventually rampages toward the nearest player.
     Eater,
+    /// Wall-smasher: A*-paths toward the nearest player and attacks
+    /// any wall that blocks its path. Creates new entrances into
+    /// bunkered-up positions.
+    Breacher,
+    /// Rocket launcher: stays at standoff range, fires explosive
+    /// projectiles that fly through the world and detonate on impact.
+    Rocketeer,
+    /// Pouncer: prowls slowly, telegraphs a wind-up, then dashes in
+    /// a straight line at 4× speed. Exposed cooldown after landing.
+    Leaper,
+    /// Walking bomb: runs at the nearest wall or player, lights a
+    /// fuse on proximity, detonates in a breach-style explosion.
+    /// New wall-breaker variant — louder + wider than the Breacher's
+    /// targeted smash.
+    Sapper,
+    /// Slow tank that smashes any wall it bumps. Slower + hardier
+    /// than the Breacher; no A* — it just plows forward and punches
+    /// whatever's in the way.
+    Juggernaut,
+    /// Support archetype: never attacks, never approaches. Emits
+    /// noise events on a cadence to call the rest of the horde
+    /// toward wherever it's shrieking from. Weak. Prioritize killing.
+    Howler,
+    /// Stationary turret: spawns in place, fires a long-range
+    /// hitscan shot on a cooldown. Doesn't move. Tank-y until dead.
+    Sentinel,
+    /// Fragile body — on death, spawns several Swarmlings where it
+    /// fell. Pressure-multiplier enemy.
+    Splitter,
+    /// Tarkov-homage heavy. Armored LMG operator with a 60-round mag,
+    /// forced reloads, periodic grenade lobs, aggressive closure.
+    /// Boss-tier spawn that pushes survivors out of bunkered cover.
+    Killa,
+    /// StarCraft-homage swarm unit. Paper-thin HP, sprint-class speed,
+    /// spawns in bursts so players feel the wave. Easy kill 1v1, a
+    /// problem at dozens.
+    Zergling,
+    /// Halo-homage parasite. Fast, low HP — on contact with a living
+    /// enemy, converts that enemy to Flood faction. On contact with
+    /// a player, deals damage and dies.
+    Floodling,
+    /// Converted host. Faction::Flood — attacks every non-Flood
+    /// entity (players AND regular enemies). Spawned by Floodling
+    /// conversion; doesn't appear in normal spawn pools.
+    Flood,
+    /// Halo Flood-lore carrier form: slow bloated walking sac. On
+    /// death explodes and vents 4-5 Floodlings. Faction::Flood.
+    FloodCarrier,
+    /// Player-deployed turret. Team = "survivor", hostiles =
+    /// ["horde", "flood"]. Stationary hitscan — shoots enemies,
+    /// enemies shoot back, dies like any other entity.
+    PlayerTurret,
 }
+
+/// Generic team + hostility system. Instead of a hardcoded Faction
+/// enum, every enemy carries:
+///   * `team` — a Tag naming which camp it belongs to (e.g. "horde",
+///     "flood", "marines", "civvies", future content).
+///   * `hostiles` — the Tags it considers targets. Survivor-hunters
+///     set this to `["survivor"]`; Flood-style factions add `["horde",
+///     "survivor"]`; future feuding factions slot their own in.
+///
+/// Target selection picks the nearest living entity whose team is
+/// in this enemy's hostile set, *or* the nearest living survivor if
+/// "survivor" is in the hostile set. No Faction enum — content packs
+/// can author new camps without touching Rust.
+pub const TEAM_HORDE: &str = "horde";
+pub const TEAM_FLOOD: &str = "flood";
+pub const TEAM_SURVIVOR: &str = "survivor";
 
 impl Archetype {
     pub fn from_kind(kind: u8) -> Self {
@@ -38,6 +106,20 @@ impl Archetype {
             7 => Archetype::Swarmling,
             8 => Archetype::Orb,
             9 => Archetype::Eater,
+            10 => Archetype::Breacher,
+            11 => Archetype::Rocketeer,
+            12 => Archetype::Leaper,
+            13 => Archetype::Sapper,
+            14 => Archetype::Juggernaut,
+            15 => Archetype::Howler,
+            16 => Archetype::Sentinel,
+            17 => Archetype::Splitter,
+            18 => Archetype::Killa,
+            19 => Archetype::Zergling,
+            20 => Archetype::Floodling,
+            21 => Archetype::Flood,
+            22 => Archetype::FloodCarrier,
+            23 => Archetype::PlayerTurret,
             _ => Archetype::Rusher,
         }
     }
@@ -53,6 +135,20 @@ impl Archetype {
             Archetype::Swarmling => 7,
             Archetype::Orb => 8,
             Archetype::Eater => 9,
+            Archetype::Breacher => 10,
+            Archetype::Rocketeer => 11,
+            Archetype::Leaper => 12,
+            Archetype::Sapper => 13,
+            Archetype::Juggernaut => 14,
+            Archetype::Howler => 15,
+            Archetype::Sentinel => 16,
+            Archetype::Splitter => 17,
+            Archetype::Killa => 18,
+            Archetype::Zergling => 19,
+            Archetype::Floodling => 20,
+            Archetype::Flood => 21,
+            Archetype::FloodCarrier => 22,
+            Archetype::PlayerTurret => 23,
         }
     }
 
@@ -70,6 +166,20 @@ impl Archetype {
             "orb" => Archetype::Orb,
             "miniboss" => Archetype::Miniboss,
             "eater" => Archetype::Eater,
+            "breacher" => Archetype::Breacher,
+            "rocketeer" => Archetype::Rocketeer,
+            "leaper" => Archetype::Leaper,
+            "sapper" => Archetype::Sapper,
+            "juggernaut" => Archetype::Juggernaut,
+            "howler" => Archetype::Howler,
+            "sentinel" => Archetype::Sentinel,
+            "splitter" => Archetype::Splitter,
+            "killa" => Archetype::Killa,
+            "zergling" => Archetype::Zergling,
+            "floodling" => Archetype::Floodling,
+            "flood" => Archetype::Flood,
+            "flood_carrier" => Archetype::FloodCarrier,
+            "player_turret" => Archetype::PlayerTurret,
             _ => return None,
         })
     }
@@ -91,14 +201,65 @@ pub struct Enemy {
     ranged_damage: i32,
     touch_cooldown: f32,
     pub burn: Option<BurnStatus>,
+    /// Cryo slow stacks. Each stack = -15% move speed; 3 stacks
+    /// means "frozen, shatter-ready." Decays to zero over `ttl`.
+    pub frost: Option<crate::primitive::FrostStatus>,
     pub hit_flash: f32,
     pub attack_cooldown: f32,
     pub tell_timer: f32,
-    tell_target: (f32, f32),
+    pub tell_target: (f32, f32),
     /// Eater-specific: number of corpses consumed. Drives sprite scale
     /// (visually thiccer per consumed) + aggro flip (→ players after N).
     /// Zero on every other archetype.
     pub consumed: u8,
+    /// Current A* path in tile coordinates. Populated for Mover::AStar
+    /// archetypes (Breacher); empty vec means "no path or direct
+    /// chase." Cleared + recomputed on `path_timer` tick.
+    pub path: Vec<(i32, i32)>,
+    pub path_timer: f32,
+    /// Sprint timer for Mover::Charge (Charger). When > 0, the enemy
+    /// moves at a speed multiplier toward `tell_target` regardless
+    /// of normal targeting. Set by the charge trigger; ticks down
+    /// each frame. Used only by archetypes with the Charge mover.
+    pub sprint_timer: f32,
+    pub sprint_cooldown: f32,
+    /// Leaper state: 0 prowl, 1 winding up, 2 leaping, 3 recovering.
+    /// Drives the dash-pounce AI in Game's enemy loop.
+    pub leap_state: u8,
+    pub leap_timer: f32,
+    pub leap_vec: (f32, f32),
+    /// Client-pushed noise target — set by Game when this enemy
+    /// noticed a nearby loud event. Enemies without LoS to a player
+    /// path toward this point until it expires.
+    pub noise_target: Option<(f32, f32)>,
+    pub noise_ttl: f32,
+    /// Anti-stuck tracking. Counts ticks where the enemy had a
+    /// movement intent but didn't actually move (blocked in a corner,
+    /// tangled with another enemy's body, etc). When the counter
+    /// passes a threshold, `unstick_timer` activates a short
+    /// perpendicular wiggle to slide around the obstacle.
+    pub stuck_ticks: u16,
+    pub unstick_timer: f32,
+    pub unstick_dir: (f32, f32),
+    /// Camp this enemy belongs to. Defaults to `"horde"`; Flood-style
+    /// archetypes switch to `"flood"`. Generic — content can add new
+    /// teams (`"syndicate"`, `"marines"`, etc) without touching Rust.
+    pub team: crate::tag::Tag,
+    /// Tags this enemy considers targets. `"survivor"` means players;
+    /// `"horde"` means the default enemy camp, etc. Emergent faction
+    /// war is just "my hostiles include their team."
+    pub hostiles: crate::tag::TagSet,
+    /// Killa-specific: rounds left in the current LMG mag. When zero,
+    /// a forced reload locks firing for `reload_timer`.
+    pub mag: u16,
+    pub reload_timer: f32,
+    /// Killa-specific: cooldown before the next grenade lob. Not used
+    /// by other archetypes.
+    pub grenade_cooldown: f32,
+    /// Scripted / Director command overriding this enemy's intrinsic
+    /// targeting. `None` today; scaffolding for the RTS-style control
+    /// path (see src/behavior.rs::DirectorOverride).
+    pub director_override: Option<crate::behavior::DirectorOverride>,
 }
 
 impl Enemy {
@@ -116,15 +277,89 @@ impl Enemy {
             ranged_damage: stats.ranged_damage.unwrap_or(0),
             touch_cooldown: 0.0,
             burn: None,
+            frost: None,
             hit_flash: 0.0,
             attack_cooldown: initial_attack_cooldown(archetype),
             tell_timer: 0.0,
             tell_target: (0.0, 0.0),
             consumed: 0,
+            path: Vec::new(),
+            path_timer: 0.0,
+            sprint_timer: 0.0,
+            sprint_cooldown: 0.0,
+            leap_state: 0,
+            leap_timer: 0.0,
+            leap_vec: (0.0, 0.0),
+            noise_target: None,
+            noise_ttl: 0.0,
+            stuck_ticks: 0,
+            unstick_timer: 0.0,
+            unstick_dir: (0.0, 0.0),
+            // Flood-lineage archetypes carry the "flood" team and
+            // hostile to both "horde" and "survivor" — that's the
+            // faction-war behavior. Everyone else is "horde" and
+            // targets "survivor" only. Content packs can author new
+            // teams by seeding different defaults via TOML (future).
+            team: if matches!(archetype, Archetype::Flood | Archetype::FloodCarrier) {
+                crate::tag::Tag::new(TEAM_FLOOD)
+            } else if matches!(archetype, Archetype::PlayerTurret) {
+                crate::tag::Tag::new(TEAM_SURVIVOR)
+            } else {
+                crate::tag::Tag::new(TEAM_HORDE)
+            },
+            hostiles: if matches!(archetype, Archetype::Flood | Archetype::FloodCarrier) {
+                crate::tag::TagSet::from_strs(&[TEAM_SURVIVOR, TEAM_HORDE])
+            } else if matches!(archetype, Archetype::PlayerTurret) {
+                crate::tag::TagSet::from_strs(&[TEAM_HORDE, TEAM_FLOOD])
+            } else {
+                crate::tag::TagSet::from_strs(&[TEAM_SURVIVOR])
+            },
+            mag: if matches!(archetype, Archetype::Killa) { 60 } else { 0 },
+            reload_timer: 0.0,
+            grenade_cooldown: if matches!(archetype, Archetype::Killa) { 4.0 } else { 0.0 },
+            director_override: None,
         }
     }
 
     pub fn speed(&self) -> f32 {
+        self.current_speed()
+    }
+
+    /// Effective move speed this tick, including sprint / leap
+    /// modifiers. Chargers get 2.5× while their sprint_timer is
+    /// positive; Leapers get 4× while leaping. Cryo stacks slow
+    /// linearly down to 0 speed at 3 stacks (fully frozen).
+    pub fn current_speed(&self) -> f32 {
+        let mut s = self.speed;
+        if self.sprint_timer > 0.0 {
+            s *= 2.5;
+        }
+        if self.leap_state == 2 {
+            s *= 4.0;
+        }
+        if let Some(f) = &self.frost {
+            // 1 stack → 85%, 2 → 70%, 3+ → 30% (functionally frozen).
+            let mul = match f.stacks {
+                0 => 1.0,
+                1 => 0.85,
+                2 => 0.70,
+                _ => 0.30,
+            };
+            s *= mul;
+        }
+        s
+    }
+
+    /// Apply a Cryo stack. 3+ stacks = frozen/shatter-ready.
+    pub fn apply_frost(&mut self, ttl: f32) {
+        let f = self.frost.get_or_insert_with(|| {
+            crate::primitive::FrostStatus { stacks: 0, ttl: 0.0 }
+        });
+        f.stacks = f.stacks.saturating_add(1).min(3);
+        f.ttl = f.ttl.max(ttl);
+    }
+
+    pub fn base_speed(&self) -> f32 {
         self.speed
     }
 
@@ -148,6 +383,20 @@ impl Enemy {
             Archetype::Orb => Pixel::rgb(200, 120, 255),
             Archetype::Miniboss => Pixel::rgb(255, 190, 60),
             Archetype::Eater => Pixel::rgb(140, 30, 180),
+            Archetype::Breacher => Pixel::rgb(160, 80, 40),
+            Archetype::Rocketeer => Pixel::rgb(110, 160, 200),
+            Archetype::Leaper => Pixel::rgb(180, 60, 100),
+            Archetype::Sapper => Pixel::rgb(255, 120, 30),
+            Archetype::Juggernaut => Pixel::rgb(120, 120, 140),
+            Archetype::Howler => Pixel::rgb(240, 180, 220),
+            Archetype::Sentinel => Pixel::rgb(80, 200, 180),
+            Archetype::Splitter => Pixel::rgb(170, 120, 60),
+            Archetype::Killa => Pixel::rgb(90, 130, 100),
+            Archetype::Zergling => Pixel::rgb(160, 80, 200),
+            Archetype::Floodling => Pixel::rgb(180, 220, 120),
+            Archetype::Flood => Pixel::rgb(120, 255, 140),
+            Archetype::FloodCarrier => Pixel::rgb(200, 240, 150),
+            Archetype::PlayerTurret => Pixel::rgb(80, 220, 255),
         }
     }
 
@@ -163,6 +412,20 @@ impl Enemy {
             Archetype::Orb => Pixel::rgb(140, 70, 200),
             Archetype::Miniboss => Pixel::rgb(200, 120, 40),
             Archetype::Eater => Pixel::rgb(100, 20, 140),
+            Archetype::Breacher => Pixel::rgb(110, 50, 24),
+            Archetype::Rocketeer => Pixel::rgb(70, 100, 140),
+            Archetype::Leaper => Pixel::rgb(120, 40, 70),
+            Archetype::Sapper => Pixel::rgb(180, 80, 20),
+            Archetype::Juggernaut => Pixel::rgb(80, 80, 95),
+            Archetype::Howler => Pixel::rgb(170, 120, 150),
+            Archetype::Sentinel => Pixel::rgb(40, 120, 110),
+            Archetype::Splitter => Pixel::rgb(120, 80, 40),
+            Archetype::Killa => Pixel::rgb(60, 90, 70),
+            Archetype::Zergling => Pixel::rgb(100, 50, 130),
+            Archetype::Floodling => Pixel::rgb(120, 160, 80),
+            Archetype::Flood => Pixel::rgb(80, 180, 100),
+            Archetype::FloodCarrier => Pixel::rgb(140, 200, 110),
+            Archetype::PlayerTurret => Pixel::rgb(30, 120, 160),
         }
     }
 
@@ -177,11 +440,31 @@ impl Enemy {
         if self.tell_timer > 0.0 {
             self.tell_timer = (self.tell_timer - dt).max(0.0);
         }
+        if self.sprint_timer > 0.0 {
+            self.sprint_timer = (self.sprint_timer - dt).max(0.0);
+        }
+        if self.sprint_cooldown > 0.0 {
+            self.sprint_cooldown = (self.sprint_cooldown - dt).max(0.0);
+        }
+        if self.leap_timer > 0.0 {
+            self.leap_timer = (self.leap_timer - dt).max(0.0);
+        }
+        if self.noise_ttl > 0.0 {
+            self.noise_ttl = (self.noise_ttl - dt).max(0.0);
+            if self.noise_ttl <= 0.0 {
+                self.noise_target = None;
+            }
+        }
+
+        if self.unstick_timer > 0.0 {
+            self.unstick_timer = (self.unstick_timer - dt).max(0.0);
+        }
 
         let dx = target.0 - self.x;
         let dy = target.1 - self.y;
         let dist2 = dx * dx + dy * dy;
         if dist2 < 1e-4 {
+            self.stuck_ticks = 0;
             return;
         }
         let dist = dist2.sqrt();
@@ -191,7 +474,7 @@ impl Enemy {
         // closer than preferred * 0.7 and advance when further than
         // preferred * 1.2. Melee units always close.
         let pref = self.preferred_distance();
-        let (dir_x, dir_y) = if pref > 0.0 && dist < pref * 0.7 {
+        let (mut dir_x, mut dir_y) = if pref > 0.0 && dist < pref * 0.7 {
             (-dx * inv, -dy * inv)
         } else if pref > 0.0 && dist <= pref * 1.2 {
             (0.0, 0.0)
@@ -199,8 +482,20 @@ impl Enemy {
             (dx * inv, dy * inv)
         };
 
+        // Unstick override: if we've been stuck, use a perpendicular
+        // escape direction for the wiggle duration. Keeps enemies
+        // moving without teleporting — they slide sideways out of
+        // corners while the timer runs, then resume chasing.
+        if self.unstick_timer > 0.0 {
+            dir_x = self.unstick_dir.0;
+            dir_y = self.unstick_dir.1;
+        }
+
+        let want_motion = dir_x.abs() > 0.001 || dir_y.abs() > 0.001;
         let step_x = dir_x * self.speed() * dt;
         let step_y = dir_y * self.speed() * dt;
+        let pre_x = self.x;
+        let pre_y = self.y;
 
         let nx = self.x + step_x;
         if !collides(arena, nx, self.y) {
@@ -209,6 +504,33 @@ impl Enemy {
         let ny = self.y + step_y;
         if !collides(arena, self.x, ny) {
             self.y = ny;
+        }
+
+        // Stuck detection + anti-stuck wiggle. If the enemy wanted to
+        // move but barely budged (pure wall collision on both axes),
+        // count it. After ~20 ticks (~0.67s at 30Hz) pick a random
+        // perpendicular slide direction and commit for 0.7s. No
+        // teleports — just a brief sidestep to escape the corner.
+        let moved = (self.x - pre_x).abs() + (self.y - pre_y).abs();
+        if want_motion && moved < 0.02 && self.unstick_timer <= 0.0 {
+            self.stuck_ticks = self.stuck_ticks.saturating_add(1);
+            if self.stuck_ticks >= 20 {
+                // Perpendicular to the desired direction — flip 90°
+                // left or right based on a cheap pseudo-random bit
+                // from the enemy's own position.
+                let bit = ((self.x.to_bits() ^ self.y.to_bits()) & 1) != 0;
+                let (perp_x, perp_y) = if bit {
+                    (-dir_y, dir_x)
+                } else {
+                    (dir_y, -dir_x)
+                };
+                self.unstick_dir = (perp_x, perp_y);
+                self.unstick_timer = 0.7;
+                self.stuck_ticks = 0;
+            }
+        } else if moved > 0.05 {
+            // Actually moving again — reset.
+            self.stuck_ticks = 0;
         }
     }
 
@@ -222,7 +544,12 @@ impl Enemy {
         let dx = player.0 - self.x;
         let dy = player.1 - self.y;
         let dist2 = dx * dx + dy * dy;
-        if dist2 > 40.0 * 40.0 || dist2 < 4.0 * 4.0 {
+        // Max engagement range scales with the archetype's
+        // preferred_distance — Marksman/Sentinel/Killa shoot far;
+        // other ranged units stay mid-range.
+        let pref = self.preferred_distance.max(30.0);
+        let max_range = pref * 1.9;
+        if dist2 > max_range * max_range || dist2 < 4.0 * 4.0 {
             return None;
         }
         if !arena.has_line_of_sight((self.x, self.y), player) {
@@ -258,7 +585,14 @@ impl Enemy {
     }
 
     pub fn is_ranged(&self) -> bool {
-        matches!(self.archetype, Archetype::Revenant | Archetype::Marksman)
+        matches!(
+            self.archetype,
+            Archetype::Revenant
+                | Archetype::Marksman
+                | Archetype::Sentinel
+                | Archetype::Killa
+                | Archetype::PlayerTurret
+        )
     }
 
     pub fn is_telegraphing(&self) -> bool {
@@ -299,7 +633,25 @@ impl Enemy {
                 self.burn = None;
             }
         }
+        if let Some(frost) = &mut self.frost {
+            frost.ttl -= dt;
+            if frost.ttl <= 0.0 {
+                self.frost = None;
+            }
+        }
         damage
+    }
+
+    /// True if this enemy carries an "armored" tag in its content
+    /// definition. Used by the ShieldBreak primitive for bonus
+    /// damage vs plated targets.
+    pub fn is_armored(&self, content: &crate::content::ContentDb) -> bool {
+        content
+            .archetypes
+            .get(&self.archetype)
+            .and_then(|s| s.tags.as_ref())
+            .map(|tags| tags.iter().any(|t| t == "armored" || t == "heavy"))
+            .unwrap_or(false)
     }
 
     pub fn touch_player(&mut self, px: f32, py: f32) -> i32 {

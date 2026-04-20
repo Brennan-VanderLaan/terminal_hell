@@ -1,0 +1,41 @@
+# Flood outbreak brand: Halo Flood / general parasitic-horror lineage.
+# Floodlings convert anything they touch into Flood combat forms;
+# Flood Carriers explode into more Floodlings. Zerglings + Splitters
+# round out the disposable-biomass roster — every death is another
+# conversion vector. The "emergent faction war" brand — watch the
+# Flood team (team=flood) attack regular horde + survivors alike.
+
+id = "halo_flood"
+name = "Flood Outbreak"
+description = "Parasitic conversion, factional chaos, every death spawning more death."
+
+spawn_pool = [
+    "floodling",
+    "flood",
+    "flood_carrier",
+    "zergling",
+    "splitter",
+    "swarmling",
+]
+miniboss = "miniboss"
+
+# Conversion-dread flavor → Blink: phase past the advancing wave of
+# infected instead of fighting through it. Perks lean into the
+# horror loop: GloomShroud resists the Flood miasma, LastStand for
+# the inevitable bad frames, CorpsePulse so the infinite-kill flow
+# keeps refilling your HP.
+signature_traversal = "blink"
+signature_perks = ["gloom_shroud", "last_stand", "corpse_pulse"]
+
+[spawn_weights]
+# Floodlings drive conversions — the conversion engine.
+floodling = 5
+# Flood combat forms spawned directly (not just via conversion).
+flood = 2
+# Carriers are the walking grenades. Rare to keep the bang special.
+flood_carrier = 1
+# Zerglings give Floodlings fodder to convert — swarm chain reaction.
+zergling = 3
+# Splitters cascade into swarmlings that Floodlings then convert.
+splitter = 2
+swarmling = 2

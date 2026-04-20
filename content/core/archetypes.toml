@@ -8,6 +8,15 @@
 # - reach:         melee reach in pixels (falls back to hit_radius + 0 if absent)
 # - preferred_distance: ranged stand-off distance; 0 means close aggressively
 # - ranged_damage: hitscan damage for ranged units (0 = non-ranged)
+#
+# Drop signatures (optional, but every archetype in this file defines
+# both so miniboss + regular-kill weapon drops feel like loot from
+# that specific enemy — a Sentinel drops rail+pierce, a Rocketeer
+# drops pump+breach, etc):
+# - signature_primitives: list of snake_case Primitive ids — pool the
+#   per-slot roll samples (with replacement). Missing = global pool.
+# - signature_fire_mode:  one of pulse / auto / burst / pump / rail.
+#   Missing = random per drop.
 
 [rusher]
 hp = 60
@@ -18,6 +27,9 @@ reach = 2.2
 art = "rusher.art"
 tags = ["biological", "flesh"]
 body_on_death = "spawn_blood"
+gore_profile = "standard"
+signature_primitives = ["ignite"]
+signature_fire_mode = "auto"
 
 [rusher.palette]
 H = "#c82828"
@@ -33,6 +45,11 @@ hit_radius = 4.0
 reach = 3.2
 tags = ["biological", "flesh", "heavy"]
 body_on_death = "spawn_big_blood"
+# A fat Pinkie dying should redecorate the room.
+gore_profile = "extreme"
+# Close-range bruiser → pump-shotgun drops that shred the next one.
+signature_primitives = ["breach", "shield_break"]
+signature_fire_mode = "pump"
 
 [charger]
 hp = 75
@@ -40,6 +57,11 @@ speed = 28.0
 touch_damage = 14
 hit_radius = 3.0
 reach = 2.8
+tags = ["biological", "fast", "heavy"]
+gore_profile = "heavy"
+# Bullrushers → wall-breach shotguns.
+signature_primitives = ["breach", "ricochet"]
+signature_fire_mode = "pump"
 
 [revenant]
 hp = 55
@@ -49,6 +71,10 @@ hit_radius = 2.6
 reach = 2.4
 preferred_distance = 22.0
 ranged_damage = 14
+tags = ["undead", "ranged"]
+# Skeletal long-range caster — drops pierce-rails.
+signature_primitives = ["pierce", "chain"]
+signature_fire_mode = "rail"
 
 [marksman]
 hp = 45
@@ -56,8 +82,14 @@ speed = 10.0
 touch_damage = 6
 hit_radius = 2.4
 reach = 2.0
-preferred_distance = 32.0
+# Bumped: tarkov lineage scavs shoot FAR. Max engagement range scales
+# off this via 1.9× in Enemy::try_ranged_attack.
+preferred_distance = 45.0
 ranged_damage = 22
+tags = ["biological", "ranged"]
+# The definitional rail-drop archetype (per spec).
+signature_primitives = ["pierce", "shield_break"]
+signature_fire_mode = "rail"
 
 [pmc]
 hp = 210
@@ -65,6 +97,11 @@ speed = 11.0
 touch_damage = 22
 hit_radius = 4.5
 reach = 3.4
+tags = ["biological", "armored", "heavy"]
+gore_profile = "heavy"
+# Armored operator — drops anti-armor autos.
+signature_primitives = ["shield_break", "pierce"]
+signature_fire_mode = "auto"
 
 [swarmling]
 hp = 18
@@ -74,6 +111,10 @@ hit_radius = 1.6
 reach = 1.6
 tags = ["biological", "small", "flammable"]
 body_on_death = "ignite_aura"
+gore_profile = "standard"
+# Fire-bug — drops ignite + contagion autos that cascade through the swarm.
+signature_primitives = ["ignite", "contagion"]
+signature_fire_mode = "auto"
 
 [orb]
 hp = 90
@@ -83,6 +124,11 @@ hit_radius = 3.2
 reach = 3.0
 tags = ["arcane", "floating", "volatile"]
 body_on_death = "explode_small"
+# Orbs pop with a violet meat storm that doesn't match their silhouette.
+gore_profile = "heavy"
+# Arcane floater → chain + gravity well pulse weapons.
+signature_primitives = ["chain", "gravity_well"]
+signature_fire_mode = "pulse"
 
 [miniboss]
 hp = 550
@@ -92,6 +138,244 @@ hit_radius = 6.5
 reach = 5.0
 tags = ["biological", "heavy", "necromantic"]
 body_on_death = "explode_big"
+# Miniboss death = screen-filling meat rain + wall splatter in every direction.
+gore_profile = "extreme"
+# Generic miniboss drops burst-fire kits with overdrive + chain so
+# the reward feels like a step up from trash-mob drops.
+signature_primitives = ["overdrive", "chain", "ricochet"]
+signature_fire_mode = "burst"
+
+# Breacher: smashes walls to reach you. A* pathfinding finds a route;
+# if the shortest path runs through a wall, the Breacher attacks the
+# wall with a telegraphed wind-up and opens a new corridor. Creates
+# dynamic chokepoints that survivors didn't plan for.
+[breacher]
+hp = 180
+speed = 10.0
+touch_damage = 24
+hit_radius = 3.2
+reach = 3.0
+tags = ["biological", "heavy", "breacher"]
+body_on_death = "spawn_big_blood"
+gore_profile = "heavy"
+# Wall-wrecker flavor → breach/ricochet pump drops.
+signature_primitives = ["breach", "ricochet"]
+signature_fire_mode = "pump"
+
+# Rocketeer: stays at standoff range, fires explosive projectiles that
+# fly through the world and detonate. Rockets carry the primitive
+# framework (ignite / breach / chain / pierce modifiers apply to the
+# explosion radius + follow-on effects).
+[rocketeer]
+hp = 70
+speed = 9.0
+touch_damage = 4
+hit_radius = 2.6
+reach = 2.4
+preferred_distance = 38.0
+ranged_damage = 0
+tags = ["tactical", "rocketeer"]
+body_on_death = "spawn_blood"
+gore_profile = "heavy"
+# Spec callout: rocketeers drop breach + ignite pulse weapons.
+signature_primitives = ["breach", "ignite"]
+signature_fire_mode = "pulse"
+
+# Killa: Tarkov-homage boss. Heavy armor, LMG, grenade lobs, aggressive
+# pushes on survivors. 60-round mag with forced reloads — the reload
+# windows are the "fall back and breathe" moments. Should feel like
+# a menacing mid-range pressure source.
+[killa]
+hp = 900
+speed = 14.0
+touch_damage = 28
+hit_radius = 5.0
+reach = 3.0
+# Aggressive push-range LMG — mid-30s preferred but still shoots far.
+preferred_distance = 30.0
+ranged_damage = 14
+tags = ["biological", "armored", "heavy", "boss"]
+body_on_death = "spawn_big_blood"
+gore_profile = "extreme"
+# Boss LMG → overdrive + shield-break + breach auto kits.
+signature_primitives = ["overdrive", "shield_break", "breach"]
+signature_fire_mode = "auto"
+
+# Zergling: StarCraft-homage swarm. Tiny, fast, fragile. Spawns in
+# bursts via the director burst-spawn multiplier so when you see one,
+# you see a dozen a second later.
+[zergling]
+hp = 14
+speed = 36.0
+touch_damage = 5
+hit_radius = 1.5
+reach = 1.5
+tags = ["biological", "swarm", "agile"]
+gore_profile = "standard"
+signature_primitives = ["ignite", "chain"]
+signature_fire_mode = "auto"
+
+# Floodling: Halo-homage parasite. Small, fast, low HP. On melee
+# contact with a Horde enemy, converts that enemy to the Flood
+# faction and dies itself. Contact with a player deals small damage
+# and kills the Floodling.
+[floodling]
+hp = 18
+speed = 28.0
+touch_damage = 4
+hit_radius = 1.8
+reach = 1.8
+tags = ["parasite", "infectious"]
+gore_profile = "standard"
+# Parasite → contagion + acid pulse drops (DoT spreaders).
+signature_primitives = ["contagion", "acid"]
+signature_fire_mode = "pulse"
+
+# Flood: converted host — faction flipped, attacks every non-Flood
+# thing (players AND regular enemies). Doesn't spawn directly;
+# only appears via Floodling conversion.
+[flood]
+hp = 85
+speed = 18.0
+touch_damage = 22
+hit_radius = 2.8
+reach = 2.4
+tags = ["flood", "infected", "feral"]
+body_on_death = "spawn_blood"
+gore_profile = "heavy"
+signature_primitives = ["contagion", "acid"]
+signature_fire_mode = "auto"
+
+# Flood carrier form — slow bloated walking sac. On death vents a
+# burst of Floodlings (Halo lore). Adds a kamikaze-caster option to
+# the Flood faction besides direct combat.
+[flood_carrier]
+hp = 60
+speed = 8.0
+touch_damage = 10
+hit_radius = 3.4
+reach = 3.0
+tags = ["flood", "carrier", "volatile"]
+body_on_death = "burst_floodlings"
+gore_profile = "heavy"
+# Walking biomass bomb → contagion + breach pump drops.
+signature_primitives = ["contagion", "breach"]
+signature_fire_mode = "pump"
+
+# Sapper: walking bomb. Runs at walls or players; when adjacent it
+# telegraphs a fuse and detonates in a breach-style explosion. Another
+# wall-breaker variant — louder and wider than the Breacher's smash.
+[sapper]
+hp = 35
+speed = 18.0
+touch_damage = 0
+hit_radius = 2.2
+reach = 2.0
+tags = ["biological", "volatile", "breacher"]
+body_on_death = "explode_big"
+gore_profile = "heavy"
+# Suicide bomber → breach + ignite pulse drops.
+signature_primitives = ["breach", "ignite"]
+signature_fire_mode = "pulse"
+
+# Juggernaut: slow armored hulk. No pathfinding — just plows forward,
+# smashing any wall in its way. The third wall-breaker flavor: low
+# skill ceiling but inevitable.
+[juggernaut]
+hp = 480
+speed = 6.5
+touch_damage = 34
+hit_radius = 5.8
+reach = 4.2
+tags = ["mechanical", "heavy", "armored", "breacher"]
+gore_profile = "heavy"
+# Armored hulk → pierce + overdrive auto drops (anti-armor).
+signature_primitives = ["pierce", "overdrive"]
+signature_fire_mode = "auto"
+
+# Howler: support / noise-caller. Stays away from combat, shrieks on a
+# cadence. Each shriek spawns a big noise event that draws nearby
+# enemies toward its position — the horde coordinator.
+[howler]
+hp = 40
+speed = 9.0
+touch_damage = 0
+hit_radius = 2.2
+reach = 2.0
+tags = ["cultist", "support", "noisy"]
+body_on_death = "spawn_blood"
+gore_profile = "standard"
+# Cultist caster → contagion + gravity-well pulse drops.
+signature_primitives = ["contagion", "gravity_well"]
+signature_fire_mode = "pulse"
+
+# Sentinel: stationary hitscan turret. Long range, telegraphed shots,
+# doesn't move. Can be flanked and demolished.
+[sentinel]
+hp = 160
+speed = 0.0
+touch_damage = 0
+hit_radius = 3.0
+reach = 0.0
+# Fixed turret — shoots the farthest of any unit.
+preferred_distance = 55.0
+ranged_damage = 18
+tags = ["mechanical", "turret"]
+gore_profile = "standard"
+# Long-range turret → pierce + shield-break rail drops.
+signature_primitives = ["pierce", "shield_break"]
+signature_fire_mode = "rail"
+
+# Splitter: low HP, dies fast — but when killed, spawns 3 Swarmlings
+# at the corpse. A pressure-multiplier. Can chain-cascade if the
+# swarmlings happen to land near other Splitters.
+[splitter]
+hp = 45
+speed = 13.0
+touch_damage = 8
+hit_radius = 2.6
+reach = 2.2
+tags = ["biological", "fragmenting"]
+body_on_death = "spawn_swarmlings"
+gore_profile = "heavy"
+# Fragmenter → contagion + chain burst drops.
+signature_primitives = ["contagion", "chain"]
+signature_fire_mode = "burst"
+
+# Leaper: prowls slowly, telegraphs a wind-up, then sprints in a
+# straight line at 4× speed before crashing into recovery. Ambush
+# predator — Bloodsuckers, Smokers, Slashers, Pouncers all fit.
+[leaper]
+hp = 58
+speed = 14.0
+touch_damage = 16
+hit_radius = 2.4
+reach = 2.2
+tags = ["biological", "agile", "ambusher"]
+body_on_death = "spawn_blood"
+gore_profile = "heavy"
+# Pouncer → siphon + ricochet pulse drops (high-mobility loop).
+signature_primitives = ["siphon", "ricochet"]
+signature_fire_mode = "pulse"
+
+# Player-deployable turret. Spawns from consuming a TurretKit pickup
+# with the T key. Team = "survivor", hostiles = ["horde", "flood"]
+# so it fires at enemies and enemies fire back. Doesn't appear in
+# regular brand spawn pools.
+[player_turret]
+hp = 140
+speed = 0.0
+touch_damage = 0
+hit_radius = 3.2
+reach = 0.0
+preferred_distance = 28.0
+ranged_damage = 18
+tags = ["mechanical", "ally", "turret"]
+gore_profile = "standard"
+# Player turrets don't normally drop loot — but if future content
+# wants them to, auto pierce rails fit the aesthetic.
+signature_primitives = ["pierce"]
+signature_fire_mode = "auto"
 
 # Emergent boss: the Corpse-Eater. Spawns only from a rare interaction
 # (necromantic body dying near corpses) — never from regular waves.
@@ -105,3 +389,8 @@ reach = 4.5
 tags = ["abomination", "necromantic", "hungry"]
 # No body_on_death — dying Eaters just drop blood like anything else
 # doesn't, because the raise logic triggers off necromantic+corpse.
+# But when it DOES die, it dumps everything it's eaten.
+gore_profile = "extreme"
+# Corpse-feeder boss → siphon + overdrive + chain burst drops.
+signature_primitives = ["siphon", "overdrive", "chain"]
+signature_fire_mode = "burst"
