@@ -645,15 +645,38 @@ impl Game {
             return;
         }
         let (px, py) = (self.players[pi].x, self.players[pi].y);
-        // Spawn 2 tiles in front of the player so it doesn't block
-        // their movement. Aim direction is the deploy direction.
         let aim_x = self.players[pi].aim_x;
         let aim_y = self.players[pi].aim_y;
-        let sx = px + aim_x * 3.0;
-        let sy = py + aim_y * 3.0;
-        if !self.arena.is_passable(sx as i32, sy as i32) {
-            return;
+
+        // Try a ladder of spawn candidates so the deploy never
+        // silently fails because the ideal spot is a wall or
+        // out-of-bounds. First try: 3 tiles forward along aim; then
+        // 1.5 tiles forward; then the player's own tile; then the
+        // four cardinal neighbors. We ONLY decrement the kit when
+        // one of these lands in a passable tile — otherwise the
+        // player keeps their kit + gets visible feedback (no
+        // silent eat).
+        const CANDIDATES: &[(f32, f32, f32)] = &[
+            (3.0, 3.0, 0.0),   // (aim_mul_x, aim_mul_y, perp_mul)
+            (1.5, 1.5, 0.0),
+            (0.0, 0.0, 0.0),
+            (0.0, 0.0, 1.5),
+            (0.0, 0.0, -1.5),
+        ];
+        let mut chosen: Option<(f32, f32)> = None;
+        for &(ax, ay, perp) in CANDIDATES {
+            let sx = px + aim_x * ax + (-aim_y) * perp;
+            let sy = py + aim_y * ay + aim_x * perp;
+            if self.arena.is_passable(sx as i32, sy as i32) {
+                chosen = Some((sx, sy));
+                break;
+            }
         }
+        let Some((sx, sy)) = chosen else {
+            tracing::info!(player = player_id, "turret deploy blocked — no passable neighbor");
+            return;
+        };
+
         self.players[pi].turret_kits -= 1;
         let stats = self.content.stats(Archetype::PlayerTurret).clone();
         self.enemies.push(Enemy::spawn(
