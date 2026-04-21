@@ -268,6 +268,7 @@ terminal_hell is **not affiliated** with any of the games you recognize
 in the brand list. It is a terminal-drawn parody that uses brand names
 as design shorthand — no art, audio, or logos from those properties are
 in this repo. Every sprite is Unicode glyphs + hex palette codes; every
-sound is self-recorded. Full IP note in
-[`Spec.md` §25](Spec.md#25-legal--ip-note). If you own a referenced
-property and want the name changed, open a GitHub issue and it will be.
+sound is self-recorded. Full IP note in [Spec.md §25](Spec.md#25-legal--ip-note).
+If you own a referenced property and want the name changed,
+[open a GitHub issue](https://github.com/Brennan-VanderLaan/terminal_hell/issues/new)
+and it will be.
