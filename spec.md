@@ -1,4 +1,4 @@
-# Terminal Hell — Design & Technical Specification (v2, reflects v0.7 shipped state)
+# Terminal Hell — Design & Technical Specification (v2, reflects v0.8 shipped state)
 
 > *"You opened a terminal. You shouldn't have read that log."*
 
@@ -579,6 +579,41 @@ actively hostile. Corpses remain and are lootable by the living.
   run-end screen together. Leaderboard, achievements, Corruption peak,
   wave reached, seed displayed.
 
+**v0.8 shipped — Death cinematic** (fires when all players drop):
+
+A four-phase state machine replaces the old "any-key dismisses
+`YOU DIED` banner" path so buffered input can't skip the moment:
+
+1. **Dying** (3.0s) — heavy gore burst + `Pmc`-archetype corpse
+   spawned at the body position. Sim keeps running; dead-player
+   positions stay in the enemy target list so the horde keeps
+   attacking the corpse. Run-clock (`elapsed_secs`) freezes the
+   instant this phase begins so time-survived on the report
+   reflects the moment of death.
+2. **PraiseHastur** (3.5s) — enemy movement + attacks + projectile
+   step all short-circuit; the horde freezes in place. ~1% of
+   enemies per tick emit gold + pale sparkle puffs curling upward.
+3. **Goldening** (2.2s) — world tint overrides `corruption_tint` to
+   ramp from current amber to saturated gold (255,215,0, 0.85
+   amount). Enemies stay frozen, sparkles continue. Report panel
+   starts rendering mid-fade.
+4. **Report** — full-screen gold-on-near-black panel with per-
+   player run stats: killed-by (archetype + lifetime damage to you),
+   wave reached, team kills, time survived, damage dealt, damage
+   taken, blood lost. Input gated — `death_report_accepts_input()`
+   only returns true after 1.2s in Report phase via a dedicated
+   `death_report_elapsed` clock (since `elapsed_secs` is frozen).
+
+`Player` gained `damage_dealt`, `damage_taken`, `blood_lost`,
+`killer_archetype`, `damage_by_source: HashMap<Archetype, u32>`.
+`take_damage_from(raw, Option<Archetype>)` is the attributed entry
+point; melee touch paths wire the source archetype. Damage dealt
+credited from the enemy_hits loop using the projectile's owner_id.
+
+Multiplayer sync of the cinematic + per-player stats is deferred —
+solo works end-to-end, multiplayer shows the local player's view
+only for now.
+
 ---
 
 ## 8. Carcosa — the King in Yellow system
@@ -1042,6 +1077,97 @@ Documented per primitive; examples:
   counter XOR'd with tile coords on the host). Late-joiner tile-delta
   replay is planned.
 
+### 11.6 Substance world — ground interactions
+
+Shipped in v0.8. The ground layer (substances painted by body-on-
+death reactions, Ignite/Acid primitives, Carcosa spawns) now has
+three first-class gameplay systems attached to it instead of being
+decorative paint.
+
+**Substance registry** — `SubstanceDef` carries a `SubstanceBehavior`
+populated at content load:
+
+```rust
+pub struct SubstanceBehavior {
+    pub damage_per_sec: f32,
+    pub sanity_drain_per_sec: f32,
+    pub emit_rate: f32,            // particles/sec/tile
+    pub emit_palette: [Pixel; 3],
+    pub emit_palette_len: u8,
+    pub emit_drift_x: f32,          // horizontal particle drift
+    pub emit_drift_y: f32,          // negative = rising
+    pub emit_ttl_min: f32,
+    pub emit_ttl_max: f32,
+    pub emit_size: u8,
+    pub ignites_neighbors: bool,
+    pub flammable: bool,
+    pub ttl_secs: Option<f32>,
+    pub applies_burn: Option<(f32, f32)>,
+}
+```
+
+**Behaviors authored per substance** (Rust-coded table in
+`substance.rs::apply_default_behaviors` — TOML migration deferred
+until the schema settles):
+
+| Substance | DPS | Sanity | Emit/s | Flammable | TTL |
+|-----------|----:|-------:|-------:|:---------:|:---:|
+| scorch | — | — | 0.45 | — | — |
+| blood_pool | — | — | 0.12 | ✓ | — |
+| acid_pool | **7** | — | 3.2 | — | — |
+| uranium_slag | **4** | 3 | 1.1 | — | — |
+| oil_pool | — | — | 0.22 | ✓ | — |
+| flood_ichor | — | — | 1.4 | ✓ | — |
+| ember_scatter | — | — | 3.0 | ✓ | — |
+| psychic_residue | — | 1.5 | 0.8 | — | — |
+| **fire** (new) | **10** + burn | — | 6.5 | ignites neighbors | 3.5s |
+
+**Three tick passes** in `tick_authoritative`, wrapped under a
+`substance_world` perf scope:
+
+1. **`tick_substance_ambient`** — iterates tiles within camera
+   viewport (+4-tile pad), rolls probabilistic emission at `rate *
+   dt` per substance tile. Particles inherit the substance's
+   palette / drift / ttl / size. Budget-capped at 800 particles
+   so combat gore always gets room. ~33µs/frame at idle-stress.
+
+2. **`tick_substance_hazards`** — every player + living non-
+   survivor-team enemy checks their current tile; substances with
+   `damage_per_sec` apply DoT, fire stamps burn status, psychic
+   residue drains sanity. Applies to enemies too, which is the
+   whole point of fire — mobs burn in their own ally Rocketeer's
+   ignition.
+
+3. **`tick_fire_propagation`** — every 0.1s (10Hz): iterates every
+   fire tile, bumps its state toward 255 (tile reverts to Floor at
+   ≥250), and rolls a 70%-per-tick chance to ignite each 4-adjacent
+   flammable neighbor. Cascades create grease fires: a single
+   Ignite projectile hitting an oil pool lights the whole pool
+   within 1–2 seconds.
+
+**Ignite + Acid primitives now paint ground**, not just apply
+status. Ignite stamps a 3-radius fire disk on enemy hit; Acid
+stamps a 2.5-radius acid disk. Multiple hits overlap into proper
+corrosive lakes / spreading fires.
+
+**Body-on-death reactions** (v0.7's faction gore) output
+appropriately-sized pools — `spawn_blood` r=3.5, `spawn_big_blood`
+r=6.0, `spawn_oil` r=5.0, `spawn_big_ichor` r=7.0 — sized to the
+dying body's sprite footprint plus a splatter ring, so adjacent
+kills overlap into wet-room territory without a single kill
+looking absurd.
+
+**Faction visual tells emergent from pool + emit color:**
+- Flood horde → floor reads bright GREEN (ichor + wisps)
+- Mech wave → dark oil slicks with violet sheen
+- Orb/Phaser → violet psychic-residue pools with warp bloom
+- Uranium / radioactive → pale green motes (sparse emitter)
+- Fire cascade → full wall-of-flame orange, strong bloom
+
+**Perf scope**: worst case `full_stack_chaos` (28s multi-wave
+spectacle w/ 500+ kills + staged ignitions) hits 268µs/frame
+substance_world — ~1.6% of a 16ms budget.
+
 ---
 
 ## 12. Arena
@@ -1101,18 +1227,54 @@ is deferred.)*
 
 ## 13. Audio — pillar, not polish
 
-*v0.6 status: **not shipped.** No audio engine wired; `rodio`/`cpal` are
-not in the crate stack. This section remains the design target for M9.*
+*v0.7 status: **pipeline shipped end to end; real samples pending.***
+`rodio` + `cpal` + `hound` + `notify` + `arc-swap` + `eframe` now in
+the crate stack. Engine, audit tool, filesystem-watched hot-reload,
+F5 in-game overlay, CV parameter registry scaffold, and a standalone
+`th_record` recorder GUI all land in v0.7. Emit sites fire on every
+unit spawn / death / attack / fire / rocket_fire / wall_hit /
+charge_windup / leap_windup / leap_land / howl and on player weapon
+fire. **Full architecture + recorder workflow live in
+[`audio-spec.md`](audio-spec.md); this section is the design pillar
+summary.**
 
 The audio system is load-bearing gameplay, not flavor.
 
 ### 13.1 Architecture
 
-- Engine: `rodio` over `cpal`. Independent mixers for music / SFX / vox /
-  ambient / Carcosa-overlay.
-- 2D spatial: stereo pan + distance attenuation from the player camera
-  listener.
-- Format: OGG Vorbis (preferred); WAV for short SFX.
+- **Engine (shipped):** `rodio` over `cpal`, on a dedicated worker
+  thread so the rodio `OutputStream` stays pinned off the sim hot
+  path. `audio::emit(unit, event, pos)` is a send-safe free function
+  that round-robin-picks a path from the matching sample pool and
+  ships a play command over an mpsc channel.
+- **Sample pools (shipped):** `ArcSwap<Vec<PathBuf>>` per
+  `<unit>.<event>` key; filesystem watcher (`notify`) rebuilds pools
+  on file change with debounced 200ms settle. In-flight voices
+  finish on the old pool; new triggers see the new one. Zero
+  restart required between record + hear-in-context.
+- **Audit tool (shipped):** `terminal_hell audio audit` walks every
+  entity category (units / weapons / primitives / UI / carcosa) plus
+  motifs; reports coverage by slot (baseline / p25 / p50 / p75 /
+  p100 / phantom) with priority grouping (Blocker / Thin / Variant /
+  Healthy). Markdown export via `--write`.
+- **Parameter registry (shipped, scaffold):** atomic-f32 store
+  keyed by name, tier-tagged (`ClientOnly` / `Authoritative`) for the
+  CV pipeline. CV envelope schema defined on music stems. Playback +
+  smoothing land with the music scheduler post-M9.
+- **Recorder GUI (shipped):** sibling binary `th_record` — eframe +
+  egui, multichannel cpal capture, waveform + trim handles with time
+  ruler + play cursor, SFX / Music+CV / CV-only session types,
+  per-channel destination picker, audition / promote / two-click
+  trash, clip detection, keyboard shortcuts, F1 help overlay,
+  session log. Writes WAVs to the exact paths the engine watches —
+  save → hear in the next bench loop.
+- **Planned (scheduler pass):** bus-graph effect chains (EQ,
+  compression, reverb send), 2D spatial pan + distance attenuation,
+  bar-aligned music scheduler, reactions (live FX modulation),
+  bus-preview monitor, King's Voice.
+- **Format:** WAV during capture + engine ingest (pure-Rust hound,
+  zero encoder surprises). OGG Vorbis compression deferred to a
+  post-M10 batch re-encode pass.
 
 ### 13.2 Music — dual-stem dynamic mixing
 
@@ -1145,13 +1307,29 @@ The audio system is load-bearing gameplay, not flavor.
 
 ### 13.4 Audio production pipeline
 
-- `content/*/audio/` directories hold OGGs referenced by symbolic name.
-- Dev mode: hot-reload on file change (behind a feature flag).
-- Authors can ship a full `audio_bundle.toml` that declares the
-  relationship between events and sound refs, so swapping in new samples
-  is a one-TOML edit.
-- Placeholder CC0 samples ship with core pack for M1 feel; real samples
-  produced externally and committed against content packs.
+*Shipped in v0.7. See [`audio-spec.md`](audio-spec.md) §14 for the
+full recorder spec.*
+
+- `content/<pack>/audio/` subtrees hold TOML briefs + WAV samples
+  keyed by pool path `<category>/<id>/<event>_<variant>[_<take>].wav`.
+  Variants: baseline (required) / p25 / p50 / p75 / p100 (Carcosa
+  corruption thresholds) / phantom (sanity hallucination).
+- `th_record` GUI records live, splits multichannel captures into
+  per-destination WAVs, writes straight to the pool-resolved path.
+- Filesystem watcher rebuilds the affected pool on save; running
+  `bench --loop --audition mix` hears the new sample on the next
+  scenario cycle.
+- `--audition off|mix|only` flag on `solo` + `bench` — off is
+  locked-only (release behavior), mix adds `_audition/` candidates to
+  the pool, only plays audition exclusively. Must be explicit so
+  release sessions never silently play in-progress takes.
+- Briefs carry motif inheritance (one motif TOML, many units),
+  sonic_palette, per-event filter_hint. `audio audit` surfaces
+  motif-grouped session suggestions so one Eurorack patch covers
+  multiple events per sit-down.
+- CC0 placeholder set + real user-recorded samples live under
+  separate content packs; core ships briefs, samples ride on disk
+  beside the binary.
 
 ### 13.5 Carcosa audio
 
@@ -1352,6 +1530,21 @@ Bevy ECS is overkill and pulls deps.
   isn't in any horde enemy's hostile set. This replaced an earlier
   flat-Vec scan that was O(N²) per tick (100M team-checks at 10k
   enemies). See §17.14 for the benchmark data that caught it.
+- ✅ **Projectile-dodge pass (v0.7):** agile archetypes (Leaper,
+  Phaser, Marksman, Rocketeer, Charger, Killa, Revenant) scan
+  in-flight projectiles each frame and sidestep threats that will
+  pass within `hit_radius + 1.4` in the next 450ms. Dodge vector is
+  perpendicular to the projectile heading, biased away from the
+  enemy's current cross-offset. Owner-agnostic — dodges apply to
+  ally-fired projectiles too, which produces emergent
+  "horde-clears-a-lane-for-the-Rocketeer" behavior without any
+  explicit coordination. 220ms commit + 0.9s cooldown keeps combat
+  winnable.
+- ✅ **Substance world passes (v0.8):** three tick passes wrapped
+  under `substance_world` perf scope — ambient particle emission
+  per substance tile, standing-on-substance damage/sanity, fire
+  propagation + auto-decay. See §11.6 for the full substance
+  behavior model.
 - planned — Client-side input prediction for movement. Today clients
   snap to server state each snapshot @ 20Hz, which is fine on LAN.
 - planned — 100ms interpolation buffer. Today: hard snap.
@@ -1527,13 +1720,25 @@ design target.*
 
 ### 17.8 Build & distribution
 
-- ✅ `cargo build --release` → single binary (`terminal_hell[.exe]`).
-- ✅ Core content embedded via `include_dir!`.
-- **CLI (v0.6 actual):**
-  - `terminal_hell solo`
-  - `terminal_hell serve [--port P]` (default port 4646, HTTP on port+1)
-  - `terminal_hell connect <addr>` — accepts either `ip:port` OR a
+- ✅ `cargo build --release` → two binaries:
+  - `terminal_hell[.exe]` — the game (default-run).
+  - `th_record[.exe]` — sibling GUI recorder (eframe + cpal + hound);
+    dev tool, never shipped to players.
+- ✅ Core content embedded via `include_dir!`; audio samples load
+  from disk at `content/<pack>/audio/samples/` and hot-reload via
+  `notify` so recorder saves land without restart.
+- **CLI (v0.7 actual):**
+  - `terminal_hell solo [--audition off|mix|only]`
+  - `terminal_hell serve [--port P]` (default 4646, HTTP on port+1)
+  - `terminal_hell connect <addr>` — accepts either `ip:port` or a
     `TH01…` share code (§17.9).
+  - `terminal_hell bench [--scenario NAME] [--playlist csv]
+    [--headless] [--watch] [--loop] [--audition off|mix|only]
+    [--debug-grid] [--output results.json]` (§17.14).
+  - `terminal_hell audio audit [--write AUDIO_STATUS.md]` — walks
+    `content/<pack>/audio/`, reports coverage by entity category
+    (units / weapons / primitives / UI / carcosa) + motif
+    inheritance. Drives the recorder's priority queue.
 - **Planned CLI:**
   - `--pack NAME` (multi-pack load)
   - `--list-packs`
@@ -1660,9 +1865,23 @@ ANSI writes:
   Backtick (`` ` ``) toggles. Unlike the menu, the console is
   **passive** — it doesn't trap input. Players can keep moving /
   shooting / voting while watching logs scroll.
+- **Perf overlay** (F3, `src/perf_overlay.rs`): bottom-right panel
+  showing the rolling 1-second `FrameProfile` window — top subsystem
+  timings + frame counters. Color-coded by cost (cool/warm/hot).
+- **Spatial-grid debug** (F4): flag on `Game`; renders the broad-
+  phase bucketing overlay so hot separation-pass regions are
+  visible. Useful during bench scenarios with large swarms.
+- **Audio debug overlay** (F5, `src/audio/overlay.rs`): top-right
+  panel. Shows: engine state (audition mode, total plays, plays/s),
+  declared bus gains from `buses.toml` (chain summary per bus),
+  loaded sample pools with take counts (red/amber/green by
+  population), recent emit events (last 8 with age + resolution
+  status + world position), and live CV parameter values from
+  `audio::params` with defaults + tier. Sits opposite F3 so both
+  can stay open for a full system view.
 
-Rendering order: arena → HUD → console → menu. Menu sits on top of
-the console when both are open.
+Rendering order: arena → HUD → console → perf/audio overlays →
+menu. Menu sits on top of everything when open.
 
 ### 17.13 Pause semantics
 
@@ -1720,24 +1939,35 @@ skips the remainder of the batch.
 
 #### 17.14.3 Scenario authoring
 
-Rust-native for v0.7 — scenarios live in `src/bench/scenarios.rs` as
-plain structs, one function per scenario. TOML authoring is planned
-once the schema has settled.
+Rust-native — scenarios live in `src/bench/scenarios.rs` as plain
+structs, one function per scenario. TOML authoring is planned once
+the schema has settled. Schema extended in v0.8 with substance
+paints + optional HP override:
 
 ```rust
 pub struct Scenario {
     pub name: &'static str,
     pub summary: &'static str,
-    pub arena: (u16, u16),           // can differ per scenario
-    pub arena_seed: u64,             // fixed for reproducibility
+    pub arena: (u16, u16),
+    pub arena_seed: u64,
     pub players: Vec<ScriptedPlayer>,
-    pub spawns: Vec<ScenarioSpawn>,  // time-gated dispatch
+    pub spawns: Vec<ScenarioSpawn>,           // time-gated
     pub duration: Duration,
-    pub stop_when_clear: bool,       // early-out on full clear
+    pub stop_when_clear: bool,
+    pub paints: Vec<ScenarioSubstancePaint>,  // v0.8: time-gated too
+}
+
+pub struct ScriptedPlayer {
+    pub pos: (f32, f32),
+    pub turret_kits: u8,
+    pub script: PlayerScript,
+    pub hp_override: Option<i32>,             // v0.8: spectacle scenarios
 }
 ```
 
-Each `ScriptedPlayer` carries a `pos`, optional `turret_kits`, and a
+Each `ScriptedPlayer` carries a `pos`, optional `turret_kits`,
+optional `hp_override` (None → standard 100 HP; Some(N) lets
+spectacle scenarios outlast the swarm without dying mid-show), and a
 `PlayerScript` enum driving per-tick input:
 
 - `Stationary` — no input. Canonical idle baseline.
@@ -1751,29 +1981,51 @@ Each `ScriptedPlayer` carries a `pos`, optional `turret_kits`, and a
 Each `ScenarioSpawn` is a timed batch — at `at_secs`, place `count`
 instances of `archetype` using a `SpawnLayout`:
 
-- `Point(x, y)` — all at one spot with a small deterministic jitter
-  (golden-ratio stir so the tie-break is stable).
+- `Point(x, y)` — all at one spot with a small deterministic jitter.
 - `Ring { center, radius }` — evenly distributed on a circle.
 - `Grid { center, spacing }` — square grid pattern.
 - `Edges` — biased along the outer rim, mirroring the wave director's
   "from every direction" flavor. This is what most scenarios use.
 
+**Substance paints** (v0.8) — each `ScenarioSubstancePaint` stamps
+ground at its `at_secs` mark via `SubstanceLayout`:
+
+- `Point(x, y)` — single tile.
+- `Rect { center, half_w, half_h }` — axis-aligned fill.
+- `Disk { center, radius }` — filled disk.
+- `Line { from, to }` — 1-tile-wide line segment.
+- `Scatter { center, half_w, half_h, count, seed }` — deterministic
+  random scatter for sparse-distribution tests.
+
+Staged paints let a scenario choreograph chaos: oil slick at t=0,
+first ignition at t=4, second ignition at t=7, cascade trigger at
+t=11, late ichor splash at t=15.
+
 #### 17.14.4 Starter catalogue
 
-Shipped in `src/bench/scenarios.rs`. Short durations (5–20s) so the
-full batch runs inside a CI minute; longer stress tests opt in.
+Shipped in `src/bench/scenarios.rs`. Short durations (5–28s);
+longer stress tests opt in explicitly. 20 scenarios total.
 
-| Scenario                 | Purpose                                      |
-|--------------------------|----------------------------------------------|
-| `baseline_empty`         | Solo player, no enemies — idle sim cost       |
-| `rusher_50`              | Combat baseline                              |
-| `rusher_500`             | Mid-swarm stress                             |
-| `rusher_2000`            | Big-swarm stress                             |
-| `zerg_tide_10k`          | Ten thousand zerglings — limit case          |
-| `turret_wall_vs_zerg`    | Player + 12 turret ring vs 10k zerglings     |
-| `map_scale_small/medium/large` | Same 500-enemy swarm across 3 arena sizes |
-| `breacher_wall_stress`   | 30 breachers A*-smashing walls               |
-| `sentinel_gauntlet`      | 20 sentinels around a strafing player        |
+| Scenario                 | Purpose                                                        |
+|--------------------------|----------------------------------------------------------------|
+| `baseline_empty`         | Solo player, no enemies — idle sim cost                        |
+| `rusher_50`              | Combat baseline                                                |
+| `rusher_500`             | Mid-swarm stress                                               |
+| `rusher_2000`            | Big-swarm stress                                               |
+| `zerg_tide_10k`          | Ten thousand zerglings — limit case                            |
+| `turret_wall_vs_zerg`    | Player + 12 turret ring vs 10k zerglings                       |
+| `map_scale_small/medium/large` | Same 500-enemy swarm across 3 arena sizes                |
+| `breacher_wall_stress`   | 30 breachers A*-smashing walls                                 |
+| `sentinel_gauntlet`      | 20 sentinels around a strafing player                          |
+| `ambient_floor_paint`    | 28k-tile scorch field — ambient emitter cost at scale          |
+| `acid_lake`              | 5k-tile acid lake, player strafing rim — DPS + emitter         |
+| `fire_sheet_2000`        | 2000-tile pre-painted fire sheet — propagation + decay         |
+| `oil_slick_inferno`      | 5k-tile oil + 3 staged fire seeds — cascade across flammable   |
+| `burning_swarm`          | 400 rushers cross a 5k-tile fire field — hazard pass × count   |
+| `uranium_field`          | Sparse uranium scatter — sparse-tile iterator + sanity/DPS     |
+| `flammable_blood_chain`  | 300-tile blood corridor + ignition — fire wavefront            |
+| `death_pool_cascade`     | 155 mixed-faction kills overlap — pool + ambient saturation    |
+| `full_stack_chaos`       | Multi-stage inferno spectacle (1500+ enemies, 7 paints)        |
 
 #### 17.14.5 Report format
 
@@ -2007,6 +2259,44 @@ instead of a tech demo. Covers:
   10k zerglings); team-bucket fix brought it to 0.994ms. Separation
   grid trimmed another 410ms → 30ms. Game runs 10k zerglings at
   ~30fps sustained now.
+
+**M7.7 — Substance world + death cinematic + presentation pass (new
+milestone, ✅ v0.8).** Another unplanned chunk — shipped because
+v0.7 made the game *playable* and v0.8 made it *feel alive*. Covers:
+- **Death cinematic** — 4-phase state machine (Dying → PraiseHastur
+  → Goldening → Report) with per-player stats panel. Input-gated
+  so buffered keys can't skip the moment. See §7.4.
+- **Substance world** — ambient emitters, standing-hazards, fire
+  propagation, faction-gore palettes. Fire is a new substance with
+  3.5s auto-decay that ignites flammable neighbors. See §11.6.
+- **Enemy projectile dodge** — agile archetypes sidestep incoming
+  projectiles. Emergent "horde clears the firing lane" bonus. See
+  §17.3.
+- **Phaser archetype** (+1 archetype, total 25) — telegraph +
+  teleport stalker. Slots into arcane/horror brand pools.
+- **Brand pool rebalance + thematic cleanup** — zergling no longer
+  bleeds into non-StarCraft brands; leaper/charger/marksman weights
+  bumped so signature behaviors register every wave.
+- **Seven new brands** (total 24): Killing Floor, Half-Life, 40K
+  Tyranids, Halo Covenant, Gears Locust, Borderlands, Aliens
+  Xenomorph. See §9.1 brand categories.
+- **Brand-override sprite system** — `(brand_id, archetype) →
+  Sprite` lookup. 115 authored ASCII-art sprites across 24 brand
+  subdirectories of `content/core/art/<brand>/` so a Doom rusher
+  renders as an imp while a Tarkov rusher renders as a scav.
+- **Pickup labels + toasts + auto-grab** — ground labels identify
+  drops at a glance; consumables pick up on collision; toast
+  column surfaces what the local player just grabbed.
+- **Enemy stat + behavior retunes** — sniper engagement ranges
+  (Marksman 45→90, Sentinel 55→120; 2.4× multiplier for snipers
+  vs 1.9× default), Leaper cadence doubled, Charger commitment
+  wider + faster recovery, Rocketeer standoff range widened.
+- **Bench mode: substance paints + HP overrides + timed paints**
+  (§17.14.3). 9 new substance-world bench scenarios. Total 20.
+- **HUD hygiene** — clip text to terminal width (no more wrap-
+  around), batch one flush per frame (no flicker).
+- **Misc** — rubble shoot-through, wave clearing timer, self-
+  healing install scripts, player bleed FX, pickup notifications.
 
 **M8 — Director mode (3 weeks).** *Not started.* Death-to-Director
 transition, Influence economy, possession / spawn / hazard / breach /
@@ -2371,8 +2661,196 @@ milestone (§M7.6):
 - `FrameProfile::take_totals()` — whole-scenario aggregate alongside
   the existing 1s rolling window.
 
+### 24.3 Shipped in v0.8 (as of this writing)
+
+Delta on top of v0.7 — the "substance world + presentation pass"
+milestone (§M7.7).
+
+**Run-end experience:**
+- **Death cinematic** — 4-phase state machine (Dying → PraiseHastur
+  → Goldening → Report), input-gated, per-player stats panel. See §7.4.
+- **Per-player run stats** — `damage_dealt`, `damage_taken`,
+  `blood_lost`, `killer_archetype`, `damage_by_source` on Player.
+  `take_damage_from(raw, Option<Archetype>)` is the attributed
+  entry point.
+- **Player bleed FX** — damage taken seeds a seconds-long blood
+  emission scaled by hit severity.
+
+**Substance world** (§11.6):
+- **`SubstanceBehavior`** registry on every substance: damage per
+  sec, sanity drain, ambient emit rate + palette + drift, flammable
+  flag, ignites_neighbors flag, TTL, applies-burn status.
+- **9 substances** total (added fire, flood_ichor, oil_pool,
+  bone_dust, ember_scatter, psychic_residue to blood_pool, scorch,
+  acid_pool, uranium_slag).
+- **Three tick passes** — ambient particle emission, standing-
+  hazard damage/sanity, fire propagation + auto-decay. Scoped under
+  `substance_world` in perf.
+- **Fire substance** — Ignite primitive now paints a fire disk,
+  fire spreads to flammable neighbors 10×/sec at 70% per neighbor,
+  decays to Floor after 3.5s.
+- **Body-on-death faction gore** — `spawn_ichor`, `spawn_oil`,
+  `spawn_bone_dust`, `spawn_embers`, `spawn_psychic_residue` added
+  (plus existing `spawn_blood` variants). Radii sized to body
+  footprint so adjacent kills overlap into wet-room territory
+  without single kills looking absurd. `shock_chain` reaction
+  wired to Orb deaths.
+
+**Enemies:**
+- **Projectile dodge** (§17.3) — agile archetypes (Leaper, Phaser,
+  Marksman, Rocketeer, Charger, Killa, Revenant) sidestep incoming
+  rounds. Owner-agnostic, so horde naturally clears firing lanes
+  for ally Rocketeers.
+- **Phaser archetype** — teleport-stalker. Shimmer telegraph +
+  snap 7.5 tiles toward the player, 1.4s cooldown. 25 archetypes
+  total.
+- **Enemy retunes** — sniper ranges bumped with a 2.4× engagement
+  multiplier for Marksman/Sentinel. Leaper cadence doubled,
+  Charger commitment + recovery rebalanced for aggression. Damage
+  values bumped across archetypes that felt weak.
+
+**Brands + sprites:**
+- **24 brands total** — seven new (Killing Floor, Half-Life, 40K
+  Tyranids, Halo Covenant, Gears Locust, Borderlands, Aliens
+  Xenomorph), all with authored `sprite_overrides` + `signature_*`.
+- **Brand-override sprite system** — 115 ASCII-art `.art` files
+  across `content/core/art/<brand>/` subdirectories. Render lookup
+  `(brand_id, archetype) → Sprite`, falls back to archetype art,
+  then hardcoded builder. Waves attribute each spawn to a
+  weighted-random contributing brand.
+- **Brand-pool thematic cleanup** — zergling only in zerg_tide;
+  other brands use faction-appropriate archetypes. Weights
+  rebalanced so leaper/charger/marksman hit every wave.
+
+**Pickups + HUD:**
+- **Ground labels** per pickup identify what's on the floor.
+- **Pickup toasts** stack on the right edge, fade over 3.5s,
+  per-player multiplayer-aware.
+- **Auto-grab** for consumables (medkit/sanity/armor/perk/
+  traversal). Weapons + turret kits still need E.
+- **Turret deploy fallback** — 5-candidate ladder so deploy never
+  silently fails when aiming at a wall.
+- **HUD clip + batched flush** — no text wrap-around past the
+  right edge; one stdout flush per frame instead of ~20 (flicker
+  gone).
+
+**Bench:**
+- **Substance paints** in scenario schema — Rect / Disk / Line /
+  Scatter / Point layouts, timed via `at_secs` for staged chaos.
+- **`hp_override`** on `ScriptedPlayer` so spectacle scenarios can
+  outlast the swarm.
+- **9 new bench scenarios** exercise the substance-world systems:
+  `ambient_floor_paint`, `acid_lake`, `fire_sheet_2000`,
+  `oil_slick_inferno`, `burning_swarm`, `uranium_field`,
+  `flammable_blood_chain`, `death_pool_cascade`, `full_stack_chaos`
+  (multi-stage inferno spectacle). 20 scenarios total.
+
+**Misc QoL:**
+- **Rubble shoot-through** — `blocks_projectile` predicate lets
+  projectiles pass broken walls the same way the player does.
+- **Wave clearing timer** — force-advance after a timeout so a
+  straggler can't stall the run.
+- **Self-healing install scripts** — stale HMAC re-fetches the
+  installer from the host.
+
 Sections 6–16 of this document remain the design target. Use §19
 Milestones to navigate what's done vs. ahead.
+
+### 24.4 Shipped in v0.9 — audio pipeline end-to-end
+
+Delta on top of v0.8. The "audio pillar minus real samples"
+milestone — every piece of infrastructure the recorder + engine need
+is live; what's pending is the actual studio output.
+
+**Audio engine** (§13.1 + [`audio-spec.md`](audio-spec.md)):
+- `rodio` + `cpal` worker thread, `hound` WAV ingest, `arc-swap`
+  hot-swappable sample pools, `notify`-backed filesystem watcher
+  with 200ms debounce.
+- `audio::emit(unit, event, pos)` free function; round-robin pool
+  picker; worker thread owns the output stream so sim never blocks
+  on audio.
+- `AuditionMode` (`off|mix|only`) — explicit flag on `solo` /
+  `bench`; default off so release play never loads audition candidates.
+- Parameter registry (`audio::params`) — atomic-f32 store,
+  tier-tagged (`ClientOnly` / `Authoritative`) for the CV pipeline.
+  8 cosmetic knobs seeded (particle density, screen shake, HUD
+  glitch, etc). Authoritative tier starts empty per casual-game
+  posture — broadcast music clock not wired until a knob needs it.
+- CV schema (`audio::cv::CvRoute`) attached to music stems — per-
+  param range, smooth_ms, files glob. Playback scheduler lands with
+  the music pass.
+
+**Audit + coverage** (§13.4):
+- `terminal_hell audio audit [--write FILE]` walks units / weapons /
+  primitives / UI / carcosa + motifs; coverage by
+  `<event>_<variant>` slot, priority-sorted (Blocker / Thin /
+  VariantMissing / Healthy), motif-grouped session suggestions.
+- **504 pool slots** across 25 unit briefs (all archetypes) + 5
+  weapon-mode briefs (pulse/auto/burst/pump/rail) + 6 motifs. Every
+  declared event has a live `audio::emit` call site behind it — no
+  speculative briefs remain in the repo.
+
+**Wired emit sites** — in addition to unit spawn + death already
+shipped:
+- `unit.<arch>.attack` — melee touch-damage resolution, gated by
+  touch_cooldown so it matches strike cadence not contact ticks.
+- `unit.<arch>.fire` — hitscan ranged attack (Marksman, Revenant,
+  Sentinel, PlayerTurret, Killa, Pmc-when-ranged).
+- `unit.rocketeer.rocket_fire` — Rocketeer launcher firing.
+- `unit.breacher.wall_hit`, `unit.juggernaut.wall_hit` — per-tile
+  wall smashes.
+- `unit.charger.charge_windup` — sprint tell kickoff.
+- `unit.leaper.leap_windup`, `unit.leaper.leap_land` — state
+  transitions.
+- `unit.howler.howl` — noise-event shriek.
+- `weapon.<mode>.fire` — player weapon firing via
+  `FireMode::label` → audio id.
+
+**F5 audio debug overlay** (§17.12):
+- Top-right panel, opposite F3 perf. Engine state, bus-gain readout
+  from `buses.toml`, loaded sample pools with take counts, recent
+  emit ring (last 8, with resolution status + world pos), live CV
+  parameter values.
+- Wired in solo mode + bench `--watch`. Headless skips render.
+
+**`th_record` recorder GUI** (new sibling bin):
+- eframe + egui + cpal multichannel input + hound WAV write.
+- Session types: SFX / Music+CV / CV-only.
+- Per-channel: waveform with time ruler, draggable trim handles,
+  play cursor during channel preview, clip indicator.
+- Destination picker per channel (slot / stereo L / stereo R / CV
+  param / discard); stereo pairing resolved at save time.
+- Audit-sourced queue panel (clickable, searchable, blockers-only
+  filter), brief panel (shows the focused unit's TOML + motif
+  inheritance), current-pool viewer with play / promote /
+  two-click-confirm trash.
+- Dark synthwave palette, keyboard shortcuts (Space / S / Enter /
+  Del / P / F1), F1 help overlay, session log tail, session stats.
+- Writes WAVs to the exact paths the engine's watcher monitors —
+  save → hear in context on the next `bench --loop` iteration.
+
+**Docs:**
+- New [`audio-spec.md`](audio-spec.md) — full 15-section design
+  doc. Covers storage layout, override resolution, unit/motif/bus/
+  reactions/music schemas, audit tool, recorder workflow, M9 + M10
+  implementation checklists.
+- README rewritten with quickstart for playing + quickstart for dev
+  work including Linux/Fedora/Arch system-dep package lists for
+  `cpal` + `eframe` + `arboard`.
+
+**Bench:**
+- `bench --loop` / `bench --playlist csv` — makes the bench a
+  screensaver soundstage for audio iteration; rescans audio
+  content between iterations so hot-reloaded samples land cleanly
+  at scenario start.
+- `default-run = "terminal_hell"` in Cargo.toml — `cargo run -- X`
+  invokes the game without needing `--bin`.
+
+**Still pending for M9 proper:** real CC0 placeholder samples,
+bus-graph effect chains (EQ / compressor / reverb send),
+spatial pan + distance attenuation, bar-aligned music scheduler,
+reactions (live FX modulation via game events), King's Voice,
+primitive + carcosa + UI emit sites (wait on those systems landing).
 
 ---
 
