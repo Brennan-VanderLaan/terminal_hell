@@ -2385,7 +2385,7 @@ before the spec fully lands.
 | Scope kills the project                             | High       | M1–M5 are each standalone-playable. Half-spec ships as a solo roguelike worth playing. |
 | Terminal rendering fragmentation                    | Low        | Min-size gate; generous reflow; probe at connect.          |
 | Yellow Sign fatigue                                 | Low        | Sign cadence is telegraphed and rare early; ramps late.    |
-| Legal: brand homage too close to brand fidelity     | Medium     | Core repo ships non-branded names + generic palettes. Third-party "brand-fidelity" packs live external to the repo per §25. |
+| Legal: brand homage too close to brand fidelity     | Low        | Core repo ships brand *names* as design shorthand only — zero copied assets (sprites are Unicode glyphs + hex palettes; audio is self-recorded). Full posture + rename-on-request policy in §25. Asset-fidelity packs stay external to the repo. |
 | Active MITM on install HTTP compromises clients     | Medium     | HTTP is plaintext today; HMAC defeats passive MITM only. Mitigation target: Ed25519 release-signed binaries with pinned public key in the install script. Tracked for post-v1. |
 | Host serving wrong-platform binary to a friend      | Low        | Script errors with "unsupported platform, install manually" rather than executing a broken binary. Multi-platform release bundle planned. |
 | UPnP refused + symmetric NAT + no Tailscale         | Medium     | Clear error telling the host to install Tailscale or forward manually. ~10% of home networks hit this; not solved by any infra we'd ship today. |
@@ -2856,17 +2856,50 @@ primitive + carcosa + UI emit sites (wait on those systems landing).
 
 ## 25. Legal & IP note
 
-This project is a homage and parody intended for private play. Core
-repository content uses original archetype names, silhouettes, and
-audio. Brand-adjacent "fidelity" theme packs (e.g., anything named
-explicitly after a trademarked property) live in user-authored content
-packs distributed **outside** the shipping repository, modeled on how
-the Doom/Quake modding and OpenRA communities operate.
+terminal_hell is a love letter, not a clone. It is written in Unicode,
+drawn in sextants, and played in a terminal window. If you squint at a
+2×3 cluster of `🬽` and see Doomguy, that is on you and your
+imagination — there is no Doomguy in this repo.
 
-The King in Yellow, Hastur, Carcosa, and the Yellow Sign derive from
-Robert W. Chambers' 1895 *The King in Yellow* and are public domain.
-They are ours to use freely; no legal concern.
+### What actually lives in this repository
+- **"Art":** hex colour codes (`H = "#f0d8a8"`) and single ASCII letters
+  keyed to them inside `.art` files. That is the entirety of the visual
+  asset set. No textures, no models, no logos, no screenshots, no traced
+  reference images.
+- **"Sound":** whatever Brennan recorded on his eurorack or banged out
+  in FL Studio. Every WAV under `content/core/audio/samples/` is
+  self-produced; nothing is sampled from a shipped game.
+- **"Names":** brand references like `tarkov_scavs`, `doom_inferno`,
+  `halo_covenant` appear as filenames, TOML IDs, and design comments.
+  They are shorthand for *"we are riffing on the fantasy of that
+  thing"* — the way a cover band's setlist reads "Zeppelin". They are
+  not claims of affiliation, endorsement, or licence.
 
-If this project ever goes public beyond friends, a legal review is
-required before distributing any brand-adjacent pack. References in
-this document are design vocabulary only.
+### What's going on, legally
+Parody and homage by nominative reference. We describe which established
+shooter fantasies inspired a given archetype's *feel*; we do not
+reproduce any protected element of those works. Every sprite is
+procedurally stamped out of sextants and braille dots. Every bullet
+sound is Brennan's modular.
+
+The King in Yellow, Hastur, Carcosa, and the Yellow Sign come from
+Robert W. Chambers' 1895 *The King in Yellow* — public domain, used
+freely.
+
+### This project is
+- **Free.** No money has ever or will ever change hands for it.
+- **Private.** Shared with friends over LAN or Tailscale.
+- **Source-available.** Every brand reference is right there in the
+  TOMLs for anyone to read and judge in context.
+
+### If you own a property referenced here and you don't love it
+Open a GitHub issue. The name will be renamed to something generic in
+the next commit. We would rather rename `doom_inferno` to `hell_inferno`
+than argue about it.
+
+Brand-fidelity packs — anything reaching beyond *name-level homage*
+toward *asset-level fidelity* — live in user-authored content packs
+distributed **outside** the shipping repository, modeled on how the
+Doom/Quake modding and OpenRA communities operate. If terminal_hell
+ever distributes beyond private play, those packs get a separate legal
+review before anything ships.
