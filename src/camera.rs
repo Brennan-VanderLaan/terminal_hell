@@ -58,10 +58,30 @@ impl MipLevel {
     }
 }
 
+/// How far the tactical-view hold pulls the camera out when held,
+/// multiplicative on top of `base_zoom`. 0.6 widens the visible
+/// arena enough to see incoming threats without pushing sprites past
+/// the Blob tier. Below 1.0 because this is a top-down shooter where
+/// "aim" means seeing the battlefield, not iron-sighting one target.
+pub const AIM_ZOOM_MULT: f32 = 0.6;
+/// Seconds from 0 → full tactical ease (and back) when the hold
+/// toggles. Short enough to feel responsive, long enough to avoid
+/// flickering mip tiers on borderline zoom values.
+pub const AIM_EASE_SECS: f32 = 0.14;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Camera {
     pub center: (f32, f32),
+    /// Effective zoom used for render. Equals `base_zoom` scaled by
+    /// the current aim-hold ease factor, clamped to [ZOOM_MIN, ZOOM_MAX].
     pub zoom: f32,
+    /// Persistent zoom the player has chosen via ZoomIn/ZoomOut (and
+    /// the mouse wheel). The AimZoom hold temporarily multiplies on
+    /// top of this but never modifies it, so releasing aim snaps back
+    /// to exactly the level the player set.
+    pub base_zoom: f32,
+    /// 0..1 ease factor for the aim-zoom hold. Driven by [`tick_zoom`].
+    pub aim_ease: f32,
     pub viewport_w: u16, // screen pixels (2 × terminal cols)
     pub viewport_h: u16, // screen pixels (3 × terminal rows)
 }
@@ -71,6 +91,8 @@ impl Camera {
         Self {
             center: (0.0, 0.0),
             zoom: 1.0,
+            base_zoom: 1.0,
+            aim_ease: 0.0,
             viewport_w: cols.saturating_mul(2),
             viewport_h: rows.saturating_mul(3),
         }
@@ -121,12 +143,42 @@ impl Camera {
         }
     }
 
+    /// Scale the persistent zoom. Mouse wheel + ZoomIn/ZoomOut
+    /// actions both flow through here, so aim-hold releases snap
+    /// back to whatever the player chose.
     pub fn adjust_zoom(&mut self, factor: f32) {
-        self.zoom = (self.zoom * factor).clamp(ZOOM_MIN, ZOOM_MAX);
+        self.base_zoom = (self.base_zoom * factor).clamp(ZOOM_MIN, ZOOM_MAX);
+        self.recompute_effective_zoom();
     }
 
     pub fn set_zoom(&mut self, zoom: f32) {
-        self.zoom = zoom.clamp(ZOOM_MIN, ZOOM_MAX);
+        self.base_zoom = zoom.clamp(ZOOM_MIN, ZOOM_MAX);
+        self.recompute_effective_zoom();
+    }
+
+    /// Ease the aim-zoom toward the target (1.0 while held, 0.0 while
+    /// released) and recompute the effective zoom. Call once per
+    /// render frame with the frame delta.
+    pub fn tick_zoom(&mut self, dt: f32, aim_held: bool) {
+        let target: f32 = if aim_held { 1.0 } else { 0.0 };
+        let step = if AIM_EASE_SECS > 0.0 {
+            dt / AIM_EASE_SECS
+        } else {
+            1.0
+        };
+        if (self.aim_ease - target).abs() <= step {
+            self.aim_ease = target;
+        } else if self.aim_ease < target {
+            self.aim_ease += step;
+        } else {
+            self.aim_ease -= step;
+        }
+        self.recompute_effective_zoom();
+    }
+
+    fn recompute_effective_zoom(&mut self) {
+        let mult = 1.0 + (AIM_ZOOM_MULT - 1.0) * self.aim_ease.clamp(0.0, 1.0);
+        self.zoom = (self.base_zoom * mult).clamp(ZOOM_MIN, ZOOM_MAX);
     }
 
     /// Recompute `center` so the camera tracks `target` with optional edge
@@ -136,7 +188,20 @@ impl Camera {
         let cy = self.viewport_h as f32 / 2.0;
         let fx = ((mouse_screen.0 - cx) / cx).clamp(-1.0, 1.0);
         let fy = ((mouse_screen.1 - cy) / cy).clamp(-1.0, 1.0);
+        self.apply_follow(target, fx, fy);
+    }
 
+    /// Gamepad-equivalent of [`follow`] driven by a unit-length aim
+    /// direction instead of a mouse cursor. Full-stick push nudges the
+    /// camera the same amount as mouse-at-screen-edge. Values outside
+    /// [-1, 1] are clamped.
+    pub fn follow_dir(&mut self, target: (f32, f32), aim_dir: (f32, f32)) {
+        let fx = aim_dir.0.clamp(-1.0, 1.0);
+        let fy = aim_dir.1.clamp(-1.0, 1.0);
+        self.apply_follow(target, fx, fy);
+    }
+
+    fn apply_follow(&mut self, target: (f32, f32), fx: f32, fy: f32) {
         let nudge_axis = |f: f32| -> f32 {
             let a = f.abs();
             if a > EDGE_NUDGE_ZONE {

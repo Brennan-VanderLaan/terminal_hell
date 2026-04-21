@@ -580,7 +580,11 @@ pub fn draw_pickup_labels<W: Write>(
         // Interact hint for equipment — only shown when the player
         // is close enough to press E on it.
         if near && pickup.kind.requires_interact() {
-            let hint = " [E]";
+            let hint = if game.input_mode == crate::game::InputMode::Gamepad {
+                " [Ⓐ]"
+            } else {
+                " [E]"
+            };
             let hint_col = (start_col + clipped.chars().count() as i32) as u16;
             let hint_clipped = clip_to_cols(hint, hint_col, total_cols);
             if !hint_clipped.is_empty() {
@@ -779,6 +783,37 @@ pub fn draw_connecting<W: Write>(out: &mut W) -> Result<()> {
         SetForegroundColor(Color::Rgb { r: 255, g: 240, b: 140 }),
         SetBackgroundColor(Color::Rgb { r: 20, g: 10, b: 30 }),
         Print(text),
+        ResetColor,
+    )?;
+    Ok(())
+}
+
+/// Bottom-of-screen "press X to restart / press Y to quit" footer
+/// rendered over the death-report cinematic. Glyph set swaps with
+/// input mode so controller players see controller prompts.
+pub fn draw_restart_prompt<W: Write>(
+    out: &mut W,
+    cols: u16,
+    rows: u16,
+    gamepad_hint: bool,
+) -> Result<()> {
+    let msg = if gamepad_hint {
+        "  Ⓐ / Start — new run      Ⓑ / Back — quit  "
+    } else {
+        "  [Space] new run     [Esc] quit  "
+    };
+    let len = msg.chars().count() as u16;
+    if cols < len || rows < 2 {
+        return Ok(());
+    }
+    let x = (cols - len) / 2;
+    let y = rows.saturating_sub(2);
+    queue!(
+        out,
+        MoveTo(x, y),
+        SetBackgroundColor(Color::Rgb { r: 30, g: 15, b: 35 }),
+        SetForegroundColor(Color::Rgb { r: 255, g: 220, b: 120 }),
+        Print(msg),
         ResetColor,
     )?;
     Ok(())

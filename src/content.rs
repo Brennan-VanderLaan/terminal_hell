@@ -306,12 +306,17 @@ impl ContentDb {
                     );
                     continue;
                 };
-                // Try the brand's subdirectory first
-                // (`<brand>/<file>`), then root `art/`.
-                let sub = format!("{brand_id}/{art_filename}");
+                // `include_dir`'s `get_entry` recurses but matches
+                // against each entry's FULL embed-root-relative path,
+                // so lookups must include the `art/` prefix even
+                // though we already have an `art_dir` handle — the
+                // handle is just a walk-starting-point, not a path
+                // rebase. Try the brand subdirectory first, then a
+                // loose filename at `art/<file>` as a fallback.
+                let sub = format!("art/{brand_id}/{art_filename}");
                 let file = dir
                     .get_file(&sub)
-                    .or_else(|| dir.get_file(art_filename));
+                    .or_else(|| dir.get_file(format!("art/{art_filename}")));
                 let Some(file) = file else {
                     tracing::warn!(
                         brand = %brand_id,

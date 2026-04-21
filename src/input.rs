@@ -1,8 +1,8 @@
 //! Held-key input state driven by crossterm press/release events. Windows
-//! Terminal reports both natively. Unix kitty keyboard enhancement flags are
-//! pushed in the terminal guard for modern terminals that support it;
-//! everywhere else, we fall back to "auto-repeat as held" using a short decay
-//! timer per key.
+//! Terminal reports both natively. On Unix, the terminal guard opts into the
+//! kitty keyboard protocol when the terminal supports it so we get real
+//! Press/Release/Repeat events; on legacy terminals that don't, we fall back
+//! to "auto-repeat as held" using a short decay timer per key.
 
 use std::time::{Duration, Instant};
 

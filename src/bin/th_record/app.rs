@@ -134,6 +134,10 @@ pub struct RecorderApp {
     take_samples: Option<Vec<Vec<f32>>>,
     take_rate: u32,
     peak_hold: Vec<(f32, Instant)>,
+    /// Smoothed per-channel RMS (0..1) for the device-meter strip.
+    /// Refreshed from `CaptureState::drain_rms` each UI frame then
+    /// lerp-smoothed so the meter doesn't flicker on short spikes.
+    live_rms: Vec<f32>,
 
     // session --------------------------------------------------------
     session_type: SessionType,
@@ -196,6 +200,7 @@ impl RecorderApp {
             take_samples: None,
             take_rate: 48_000,
             peak_hold: Vec::new(),
+            live_rms: Vec::new(),
             session_type: SessionType::Sfx,
             preview,
             selected_pool_entry: None,
@@ -215,6 +220,13 @@ impl RecorderApp {
         // immediately on launch.
         if let Some(first) = app.queue.first_recommendation().cloned() {
             app.focus_entry(&first);
+        }
+        // Auto-arm the input stream on startup so the per-channel
+        // meters come alive immediately — the user needs to *see*
+        // input is flowing before committing to a take, especially
+        // on Linux where ALSA device naming is a coin flip.
+        if app.selected_device.is_some() {
+            app.ensure_stream();
         }
         app.push_log("session opened");
         app
@@ -686,10 +698,11 @@ impl eframe::App for RecorderApp {
         // Decay live peak meters in shared state. Peak-hold ticks live
         // on App.
         let decay = PEAK_DECAY_PER_SECOND.powf(dt);
-        {
+        let fresh_rms = {
             let mut st = self.capture.lock().unwrap();
             st.decay_peaks(decay);
             let peaks = st.peak.clone();
+            let rms = st.drain_rms();
             drop(st);
             for (i, p) in peaks.iter().enumerate() {
                 if i >= self.peak_hold.len() {
@@ -701,6 +714,18 @@ impl eframe::App for RecorderApp {
                 {
                     self.peak_hold[i] = (*p, Instant::now());
                 }
+            }
+            rms
+        };
+        // Smooth RMS with an exponential follower so the bar slides
+        // rather than twitches. Attack is snappier than release so
+        // signal onset still reads as "live".
+        if self.live_rms.len() != fresh_rms.len() {
+            self.live_rms = fresh_rms.clone();
+        } else {
+            for (slot, &target) in self.live_rms.iter_mut().zip(fresh_rms.iter()) {
+                let alpha = if target > *slot { 0.6 } else { 0.15 };
+                *slot = *slot * (1.0 - alpha) + target * alpha;
             }
         }
 
@@ -736,6 +761,12 @@ impl eframe::App for RecorderApp {
         egui::TopBottomPanel::top("top_bar")
             .frame(Frame::default().fill(BG_BASE).inner_margin(Margin::symmetric(10.0, 8.0)))
             .show(ctx, |ui| self.show_top_bar(ui));
+        // Device-level meter strip lives just below the top bar so it's
+        // always visible — the #1 question the user asks when picking a
+        // device is "is this one actually getting signal?"
+        egui::TopBottomPanel::top("device_meters")
+            .frame(Frame::default().fill(BG_BASE).inner_margin(Margin::symmetric(10.0, 4.0)))
+            .show(ctx, |ui| self.show_device_meters(ui));
         egui::SidePanel::right("queue_panel")
             .default_width(280.0)
             .resizable(true)
@@ -803,6 +834,10 @@ impl RecorderApp {
                 if self.selected_device.as_deref() != Some(&name) {
                     self.stop_stream();
                     self.selected_device = Some(name);
+                    // Auto-arm so meters go live the instant the user
+                    // picks a device — no need to hit REC to find out
+                    // whether this ALSA name is actually hooked up.
+                    self.ensure_stream();
                 }
             }
             if ui.small_button("↻").on_hover_text("Refresh device list").clicked() {
@@ -1200,6 +1235,82 @@ impl RecorderApp {
                 }
                 ui.add_space(8.0);
                 self.show_pool_panel(ui);
+            });
+    }
+
+    /// Prominent always-on per-channel level meter strip that sits
+    /// directly under the device picker. Shows the user, at a glance,
+    /// whether the selected input device is actually delivering audio
+    /// — so they don't have to commit to a take just to find out that
+    /// `hw:CARD=ES8` was silent.
+    ///
+    /// Renders:
+    /// - Channel index label
+    /// - Horizontal RMS bar with peak-hold tick
+    /// - dBFS readout
+    /// - Green < -12 dBFS, yellow -12..-3 dBFS, red >= -3 dBFS
+    ///
+    /// Uses the live capture stream's RMS + peak (auto-armed on device
+    /// selection) so it updates every frame without the user hitting
+    /// REC first.
+    fn show_device_meters(&self, ui: &mut Ui) {
+        let stream_live = self.stream.is_some();
+        let rms = self.live_rms.clone();
+        let peaks = self
+            .capture
+            .lock()
+            .map(|s| s.peak.clone())
+            .unwrap_or_default();
+
+        Frame::none()
+            .fill(BG_CARD)
+            .stroke(Stroke::new(1.0, BORDER))
+            .rounding(Rounding::same(4.0))
+            .inner_margin(Margin::symmetric(10.0, 6.0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("INPUT")
+                            .color(ACCENT_MAGENTA)
+                            .small()
+                            .strong()
+                            .monospace(),
+                    );
+                    if !stream_live {
+                        ui.label(
+                            RichText::new("stream not armed — pick a device above")
+                                .color(FG_MUTE)
+                                .italics(),
+                        );
+                        return;
+                    }
+                    if peaks.is_empty() {
+                        ui.label(
+                            RichText::new("waiting for first sample…")
+                                .color(FG_MUTE)
+                                .italics(),
+                        );
+                        return;
+                    }
+                });
+                if !stream_live || peaks.is_empty() {
+                    return;
+                }
+                // One compact row per channel. `horizontal_wrapped`
+                // handles ES-8 (8 ch) gracefully when the window is
+                // narrow — meters flow to a new line instead of
+                // squishing off-screen.
+                ui.horizontal_wrapped(|ui| {
+                    for (i, peak) in peaks.iter().enumerate() {
+                        let r = rms.get(i).copied().unwrap_or(0.0);
+                        let hold = self
+                            .peak_hold
+                            .get(i)
+                            .map(|(p, _)| *p)
+                            .unwrap_or(0.0);
+                        device_channel_meter(ui, i, r, *peak, hold);
+                    }
+                });
             });
     }
 
@@ -1955,6 +2066,150 @@ fn meter_color(v: f32) -> Color32 {
     } else {
         FG_MUTE
     }
+}
+
+/// Clamp a linear amplitude to the displayable dBFS window used by
+/// the device meter (-60 .. 0 dBFS), returning a 0..1 fraction of the
+/// bar. Samples quieter than -60 dBFS read as zero so the meter isn't
+/// permanently waggling on noise floor.
+const METER_FLOOR_DB: f32 = -60.0;
+
+fn amp_to_bar(amp: f32) -> f32 {
+    if amp <= 1e-6 {
+        return 0.0;
+    }
+    let db = 20.0 * amp.log10();
+    ((db - METER_FLOOR_DB) / (0.0 - METER_FLOOR_DB)).clamp(0.0, 1.0)
+}
+
+/// Colour the bar based on dBFS zones rather than raw amplitude so
+/// the green/yellow/red thresholds stay perceptually meaningful.
+/// - green      below -12 dBFS
+/// - yellow     -12 .. -3 dBFS
+/// - red        -3 dBFS and above (clipping risk)
+fn dbfs_color(amp: f32) -> Color32 {
+    if amp <= 1e-6 {
+        return FG_MUTE;
+    }
+    let db = 20.0 * amp.log10();
+    if db >= -3.0 {
+        ACCENT_RED
+    } else if db >= -12.0 {
+        ACCENT_AMBER
+    } else {
+        ACCENT_GREEN
+    }
+}
+
+/// Device-strip meter: one row per channel, dBFS-scaled, green/yellow/
+/// red zones baked in. `rms` drives the solid fill, `peak` drives a
+/// lighter overlay, and `hold` draws a short tick that lingers after
+/// a transient so the user can see recent headroom. All in 0..1
+/// linear amplitude.
+fn device_channel_meter(ui: &mut Ui, index: usize, rms: f32, peak: f32, hold: f32) {
+    let width = 220.0;
+    let height = 20.0;
+    let (rect, _resp) =
+        ui.allocate_exact_size(Vec2::new(width, height), egui::Sense::hover());
+    let p = ui.painter();
+
+    // Channel label sits on a small strip at the left so the bar has
+    // a predictable width regardless of ch index.
+    let label_w = 32.0;
+    let label_rect = Rect::from_min_max(
+        rect.left_top(),
+        egui::Pos2::new(rect.left() + label_w, rect.bottom()),
+    );
+    p.text(
+        label_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        format!("ch{}", index + 1),
+        egui::FontId::monospace(11.0),
+        ACCENT_CYAN,
+    );
+
+    let bar = Rect::from_min_max(
+        egui::Pos2::new(rect.left() + label_w + 2.0, rect.top() + 2.0),
+        egui::Pos2::new(rect.right() - 58.0, rect.bottom() - 2.0),
+    );
+    p.rect_filled(bar, 3.0, Color32::from_rgb(20, 16, 28));
+    p.rect_stroke(bar, 3.0, Stroke::new(1.0, BORDER));
+
+    // Zone guides (-12 and -3 dBFS) so the user can read the bar
+    // without squinting at the dB number.
+    for db in [-12.0f32, -3.0] {
+        let f = ((db - METER_FLOOR_DB) / (0.0 - METER_FLOOR_DB)).clamp(0.0, 1.0);
+        let x = bar.left() + f * bar.width();
+        p.line_segment(
+            [
+                egui::Pos2::new(x, bar.top()),
+                egui::Pos2::new(x, bar.bottom()),
+            ],
+            Stroke::new(1.0, Color32::from_rgba_premultiplied(120, 120, 140, 40)),
+        );
+    }
+
+    // Peak — ghosted background layer behind the solid RMS fill so
+    // transients are still visible on quiet material.
+    let peak_w = amp_to_bar(peak) * bar.width();
+    if peak_w > 0.0 {
+        let peak_col = dbfs_color(peak);
+        let ghost = Color32::from_rgba_unmultiplied(
+            peak_col.r(),
+            peak_col.g(),
+            peak_col.b(),
+            90,
+        );
+        p.rect_filled(
+            Rect::from_min_max(
+                bar.left_top(),
+                egui::Pos2::new(bar.left() + peak_w, bar.bottom()),
+            ),
+            3.0,
+            ghost,
+        );
+    }
+
+    // RMS — solid fill, reads as "how loud is this actually".
+    let rms_w = amp_to_bar(rms) * bar.width();
+    if rms_w > 0.0 {
+        p.rect_filled(
+            Rect::from_min_max(
+                bar.left_top(),
+                egui::Pos2::new(bar.left() + rms_w, bar.bottom()),
+            ),
+            3.0,
+            dbfs_color(rms),
+        );
+    }
+
+    // Peak-hold tick.
+    if hold > 1e-6 {
+        let x = bar.left() + amp_to_bar(hold) * bar.width();
+        p.line_segment(
+            [
+                egui::Pos2::new(x, bar.top() + 1.0),
+                egui::Pos2::new(x, bar.bottom() - 1.0),
+            ],
+            Stroke::new(2.0, dbfs_color(hold)),
+        );
+    }
+
+    // dBFS readout — use the louder of rms/peak so a silent channel
+    // shows -∞ but an active one shows a useful number.
+    let level = peak.max(rms);
+    let db_text = if level <= 1e-6 {
+        "-∞ dB".to_string()
+    } else {
+        format!("{:+.0} dB", 20.0 * level.log10())
+    };
+    p.text(
+        egui::Pos2::new(rect.right() - 4.0, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        db_text,
+        egui::FontId::monospace(10.0),
+        FG_TEXT,
+    );
 }
 
 fn section_heading(ui: &mut Ui, text: &str) {

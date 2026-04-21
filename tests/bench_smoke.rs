@@ -105,6 +105,7 @@ fn bench_smoke_sentinel_ring() {
                 radius: 8.0,
                 rate: 1.0,
             },
+            hp_override: None,
         }],
         spawns: vec![ScenarioSpawn {
             archetype: Archetype::Sentinel,

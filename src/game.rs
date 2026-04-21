@@ -22,6 +22,15 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
 
+/// Last-used input device for the local player. Flips on any
+/// mouse/keyboard or gamepad activity. Drives UI glyph selection
+/// (menu footer, pickup hints) and the camera look-ahead source.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum InputMode {
+    MouseKeyboard,
+    Gamepad,
+}
+
 /// Per-player state the host tracks to drive sim from incoming inputs.
 pub struct PlayerInput {
     pub move_x: f32,
@@ -255,6 +264,15 @@ pub struct Game {
     /// host.
     pub paused: bool,
     pub local_id: Option<u32>,
+    /// Which input device was most-recently used by the local player.
+    /// Drives UI glyph selection and the camera look-ahead source
+    /// (mouse cursor vs. right-stick aim).
+    pub input_mode: InputMode,
+    /// Last-known gamepad aim direction (unit vector). Populated by
+    /// the solo loop each frame when `input_mode == Gamepad`; used by
+    /// the camera to nudge look-ahead and to set the player's aim
+    /// when the right stick is centered (coast).
+    pub gamepad_aim: Option<(f32, f32)>,
     seed_counter: u64,
     next_player_id: u32,
     next_pickup_id: u32,
@@ -364,6 +382,8 @@ impl Game {
             is_authoritative: true,
             paused: false,
             local_id: None,
+            input_mode: InputMode::MouseKeyboard,
+            gamepad_aim: None,
             seed_counter: 0x9E3779B97F4A7C15,
             next_player_id: 1,
             next_pickup_id: 1,
@@ -1601,6 +1621,11 @@ impl Game {
                 // `FireMode::label` returns the snake-case id
                 // ("pulse", "auto", etc) used as the audio pool key.
                 crate::audio::emit(weapon.mode.label(), "fire", Some(origin));
+                // Rumble only for the local player — other players'
+                // shots are audible but shouldn't shake the host's pad.
+                if Some(player.id) == self.local_id {
+                    crate::gamepad::rumble(crate::gamepad::Rumble::Fire);
+                }
             }
             new_projectiles.extend(salvo);
         }
@@ -4481,15 +4506,27 @@ impl Game {
         Some((dx * inv, dy * inv))
     }
 
-    /// Recompute camera center based on the local player + mouse look-ahead.
+    /// Recompute camera center based on the local player + whichever
+    /// input device is currently driving aim. Mouse mode uses the
+    /// cursor position for edge look-ahead; gamepad mode uses the
+    /// remembered aim direction so the camera nudges where the player
+    /// is looking, not where the (stale) cursor sits.
     /// Call once per render frame. No-op when there is no local player.
     pub fn update_camera_follow(&mut self) {
         let (px, py) = match self.local_player() {
             Some(p) => (p.x, p.y),
             None => return,
         };
-        let mouse_screen = self.mouse.screen_pos();
-        self.camera.follow((px, py), mouse_screen);
+        match self.input_mode {
+            InputMode::Gamepad => {
+                let aim = self.gamepad_aim.unwrap_or((0.0, 0.0));
+                self.camera.follow_dir((px, py), aim);
+            }
+            InputMode::MouseKeyboard => {
+                let mouse_screen = self.mouse.screen_pos();
+                self.camera.follow((px, py), mouse_screen);
+            }
+        }
     }
 
     #[allow(dead_code)]

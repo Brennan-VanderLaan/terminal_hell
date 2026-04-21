@@ -17,6 +17,8 @@ cpal = "0.15"
 crossterm = { version = "0.28", features = ["event-stream"] }
 ctrlc = "3"
 getrandom = "0.2"
+gilrs = "0.10"
+libc = "0.2"
 hmac = "0.12"
 hound = "3"
 igd = "0.12"

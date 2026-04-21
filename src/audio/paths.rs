@@ -3,14 +3,18 @@
 //! All audio lives under `<content-root>/audio/`. Sample files follow
 //! the filesystem-as-matrix convention from `audio-spec.md §6`:
 //!
-//!     samples/<category>/<id>/<event>_<variant>_<take>.<ext>
+//! ```text
+//! samples/<category>/<id>/<event>_<variant>_<take>.<ext>
+//! ```
 //!
 //! Variants: `baseline`, `p25`, `p50`, `p75`, `p100`, `phantom`.
 //!
 //! Audition candidates live in a sibling `_audition/` directory at
 //! the same level (spec §14.4), produced by the `th_record` tool:
 //!
-//!     samples/<category>/<id>/_audition/<event>_<variant>_<stamp>.<ext>
+//! ```text
+//! samples/<category>/<id>/_audition/<event>_<variant>_<stamp>.<ext>
+//! ```
 //!
 //! This module is the single source of truth for those paths so the
 //! game engine, audit tool, and recorder can never disagree.
@@ -155,5 +159,74 @@ mod tests {
             Some(("spawn".into(), "p50".into()))
         );
         assert_eq!(split_event_variant("garbage_ref", events), None);
+    }
+
+    /// Asserts the "samples/<category>/<id>/<event>_<variant>_<take>.<ext>"
+    /// layout documented at the top of this module. If someone tweaks
+    /// any of the helpers without updating the other, this test
+    /// screams — replacing the pseudo-code layout diagram the module
+    /// doc used to carry with a real runnable assertion.
+    #[test]
+    fn locked_sample_paths_follow_documented_layout() {
+        let root = Path::new("/tmp/pack");
+        let dir = sample_dir(root, Category::Unit, "rusher");
+        assert_eq!(dir, Path::new("/tmp/pack/audio/samples/units/rusher"));
+        let stem = locked_stem("spawn", "baseline", 3);
+        let full = dir.join(format!("{stem}.wav"));
+        assert_eq!(
+            full,
+            Path::new("/tmp/pack/audio/samples/units/rusher/spawn_baseline_03.wav")
+        );
+    }
+
+    /// Asserts the sibling "_audition/" directory layout (audio-spec
+    /// §14.4). Matching counterpart to the locked-pool test above.
+    #[test]
+    fn audition_paths_sit_beside_locked_pool() {
+        let root = Path::new("/tmp/pack");
+        let audition = audition_dir(root, Category::Weapon, "pulse");
+        assert_eq!(
+            audition,
+            Path::new("/tmp/pack/audio/samples/weapons/pulse/_audition")
+        );
+        let stem = audition_stem("fire", "p100", 1_714_000_000);
+        let full = audition.join(format!("{stem}.wav"));
+        assert_eq!(
+            full,
+            Path::new(
+                "/tmp/pack/audio/samples/weapons/pulse/_audition/fire_p100_1714000000.wav"
+            )
+        );
+    }
+
+    /// Round-trip: every documented `Category` variant has a unique
+    /// directory name, and the brief path is always
+    /// `audio/<category-dir>/<id>.toml`. Catches accidental duplication
+    /// in `Category::dir_name`.
+    #[test]
+    fn every_category_has_a_unique_directory() {
+        use std::collections::HashSet;
+        let cats = [
+            Category::Motif,
+            Category::Unit,
+            Category::Weapon,
+            Category::Primitive,
+            Category::Ui,
+            Category::Carcosa,
+            Category::Music,
+        ];
+        let mut seen: HashSet<&str> = HashSet::new();
+        for c in cats {
+            assert!(
+                seen.insert(c.dir_name()),
+                "duplicate dir_name {} for {c:?}",
+                c.dir_name()
+            );
+            let brief = brief_path(Path::new("/r"), c, "foo");
+            assert_eq!(
+                brief,
+                Path::new(&format!("/r/audio/{}/foo.toml", c.dir_name()))
+            );
+        }
     }
 }

@@ -191,6 +191,7 @@ Install the system deps before `cargo build`:
 ```bash
 sudo apt install build-essential pkg-config \
     libasound2-dev \
+    libudev-dev \
     libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
     libxkbcommon-dev libwayland-dev \
     libgl1-mesa-dev
@@ -201,6 +202,7 @@ sudo apt install build-essential pkg-config \
 ```bash
 sudo dnf install gcc pkgconf-pkg-config \
     alsa-lib-devel \
+    systemd-devel \
     libxcb-devel libxkbcommon-devel wayland-devel \
     mesa-libGL-devel
 ```
@@ -208,12 +210,17 @@ sudo dnf install gcc pkgconf-pkg-config \
 **Arch:**
 
 ```bash
-sudo pacman -S base-devel pkgconf alsa-lib libxcb libxkbcommon wayland mesa
+sudo pacman -S base-devel pkgconf alsa-lib systemd-libs libxcb libxkbcommon wayland mesa
 ```
 
 The #1 failure mode is a missing `libasound2-dev` / `alsa-lib-devel` —
 produces a cryptic linker error about `-lasound`. If you see that, it's
 ALSA.
+
+`libudev-dev` (Debian/Ubuntu) / `systemd-devel` (Fedora/RHEL) /
+`systemd-libs` (Arch) is required by `gilrs` for Xbox controller input +
+rumble. If it's missing, `libudev-sys` panics during the build with a
+pkg-config error pointing at `libudev.pc`.
 
 **Expected Linux quirks:**
 

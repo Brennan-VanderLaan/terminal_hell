@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
+use crossterm::event::{self, Event, KeyEventKind, MouseButton, MouseEventKind};
 use renet::{ConnectionConfig, DefaultChannel, RenetClient};
 use renet_netcode::{ClientAuthentication, NetcodeClientTransport};
 use std::io::stdout;
@@ -7,11 +7,17 @@ use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant, SystemTime};
 
 use crate::arena::Arena;
+use crate::audio;
+use crate::bindings;
+use crate::bindings::router::{
+    InputEvent, InputRouter, LastInput, dispatch_menu_nav, dispatch_overlay, resolve_frame_input,
+};
+use crate::bindings::wizard::{RebindWizard, WizardDevice, WizardOutcome};
 use crate::enemy::Enemy;
 use crate::fb::Framebuffer;
-use crate::game::{DestructionBlast, Game};
+use crate::game::{DestructionBlast, Game, InputMode};
+use crate::gamepad;
 use crate::hud;
-use crate::input::Input;
 use crate::menu;
 use crate::net::proto::{self, ClientInput, ClientMsg, ServerMsg};
 use crate::pickup::Pickup;
@@ -72,11 +78,27 @@ pub fn run_connect(addr: String) -> Result<()> {
         game.share_code = Some(code);
     }
 
-    let mut input = Input::default();
+    let loaded_bindings = bindings::Bindings::load().unwrap_or_else(|e| {
+        tracing::warn!(error = ?e, "failed to load bindings; using defaults");
+        bindings::Bindings::defaults()
+    });
+    let mut router = InputRouter::new(loaded_bindings);
+    let mut wizard: Option<RebindWizard> = None;
+    let mut audio_overlay = audio::AudioOverlay::default();
+    gamepad::ensure_init();
+    let mut last_pad_aim: Option<(f32, f32)> = None;
     let mut last_instant = Instant::now();
     let mut input_accum = Duration::ZERO;
     let mut welcomed = false;
     let mut run_ended_summary: Option<(u32, u32, u64)> = None;
+    // Per-client rumble state. We watch the snapshot stream for drops
+    // in OUR local player's hp (server is authoritative, so damage is
+    // applied server-side and reaches us via snapshot). Fire rumble
+    // fires on the press-edge of our own input intent — the server
+    // doesn't need to broadcast "you fired" back, since the player's
+    // finger already pulled the trigger.
+    let mut last_local_hp: Option<i32> = None;
+    let mut last_firing: bool = false;
 
     loop {
         let frame_start = Instant::now();
@@ -99,152 +121,57 @@ pub fn run_connect(addr: String) -> Result<()> {
             }
         }
 
-        // Local input events.
-        while event::poll(Duration::ZERO)? {
-            match event::read()? {
-                Event::Key(k) => {
-                    let press =
-                        matches!(k.kind, KeyEventKind::Press | KeyEventKind::Repeat);
-                    let release = matches!(k.kind, KeyEventKind::Release);
-                    if let KeyCode::Esc = k.code {
-                        if press && !matches!(k.kind, KeyEventKind::Repeat) {
-                            game.menu.toggle();
-                        }
-                        continue;
-                    }
-                    if let KeyCode::Char('`') = k.code {
-                        if press && !matches!(k.kind, KeyEventKind::Repeat) {
-                            game.console.toggle();
-                        }
-                        continue;
-                    }
-                    if let KeyCode::F(3) = k.code {
-                        if press && !matches!(k.kind, KeyEventKind::Repeat) {
-                            game.perf_overlay.toggle();
-                        }
-                        continue;
-                    }
-                    if let KeyCode::F(4) = k.code {
-                        if press && !matches!(k.kind, KeyEventKind::Repeat) {
-                            game.debug_spatial_grid = !game.debug_spatial_grid;
-                        }
-                        continue;
-                    }
-                    if let KeyCode::Tab = k.code {
-                        if press && !matches!(k.kind, KeyEventKind::Repeat) {
-                            game.inventory_open = !game.inventory_open;
-                        }
-                        continue;
-                    }
-                    if k.code == KeyCode::Char('c')
-                        && press
-                        && k.modifiers.contains(KeyModifiers::CONTROL)
-                    {
-                        return Ok(());
-                    }
-                    if game.menu.open {
-                        if !press || matches!(k.kind, KeyEventKind::Repeat) {
-                            continue;
-                        }
-                        match k.code {
-                            KeyCode::Up => game.menu.move_up(),
-                            KeyCode::Down => {
-                                let max = game.menu.items(game.is_authoritative).len();
-                                game.menu.move_down(max);
-                            }
-                            KeyCode::Enter => {
-                                let connect_cmd = game
-                                    .share_code
-                                    .as_ref()
-                                    .map(|c| c.connect_command());
-                                let install = game.install_one_liner.clone();
-                                let action = game.menu.activate(
-                                    game.is_authoritative,
-                                    connect_cmd.as_deref(),
-                                    install.as_deref(),
-                                );
-                                match action {
-                                    menu::MenuAction::None => {}
-                                    menu::MenuAction::Close => {}
-                                    menu::MenuAction::Quit => return Ok(()),
-                                    menu::MenuAction::TogglePause => {
-                                        // Clients don't own pause — item should be hidden
-                                        // anyway since is_authoritative == false.
-                                        game.menu.set_feedback("only the host can pause", 1.5);
-                                    }
-                                    menu::MenuAction::Copy(text) => {
-                                        let feedback = menu::copy_to_clipboard(&text);
-                                        eprintln!("\n{}", text);
-                                        game.menu.set_feedback(feedback, 2.0);
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                        continue;
-                    }
-                    match k.code {
-                        KeyCode::Char(' ') if press => game.mouse.lmb = true,
-                        KeyCode::Char(' ') if release => game.mouse.lmb = false,
-                        KeyCode::Char('e') | KeyCode::Char('E') if press => {
-                            if !matches!(k.kind, KeyEventKind::Repeat) {
-                                client.send_message(
-                                    DefaultChannel::ReliableOrdered,
-                                    proto::encode(&ClientMsg::Interact),
-                                );
-                            }
-                        }
-                        KeyCode::Char('q') if press => {
-                            if !matches!(k.kind, KeyEventKind::Repeat) {
-                                client.send_message(
-                                    DefaultChannel::ReliableOrdered,
-                                    proto::encode(&ClientMsg::CycleWeapon),
-                                );
-                            }
-                        }
-                        KeyCode::Char('t') | KeyCode::Char('T') if press => {
-                            if !matches!(k.kind, KeyEventKind::Repeat) {
-                                client.send_message(
-                                    DefaultChannel::ReliableOrdered,
-                                    proto::encode(&ClientMsg::DeployTurret),
-                                );
-                            }
-                        }
-                        KeyCode::Char('f') | KeyCode::Char('F') if press => {
-                            if !matches!(k.kind, KeyEventKind::Repeat) {
-                                client.send_message(
-                                    DefaultChannel::ReliableOrdered,
-                                    proto::encode(&ClientMsg::ActivateTraversal),
-                                );
-                            }
-                        }
-                        code if press => input.key_event(code, true),
-                        code if release => input.key_event(code, false),
-                        _ => {}
-                    }
+        // Damage rumble: diff local player HP between snapshots. This
+        // only ever reacts to THIS player's hp — nothing to do with
+        // remote teammates, so four connected clients will each rumble
+        // only on their own hits without any cross-talk.
+        if let Some(p) = game.local_player() {
+            if let Some(prev) = last_local_hp {
+                let dropped = prev - p.hp;
+                if dropped > 0 {
+                    gamepad::rumble(gamepad::Rumble::Damage { dmg: dropped });
                 }
-                Event::Mouse(m) => {
-                    game.mouse.col = m.column;
-                    game.mouse.row = m.row;
-                    match m.kind {
-                        MouseEventKind::Down(MouseButton::Left) => game.mouse.lmb = true,
-                        MouseEventKind::Up(MouseButton::Left) => game.mouse.lmb = false,
-                        MouseEventKind::ScrollUp => {
-                            game.camera.adjust_zoom(crate::camera::ZOOM_STEP);
-                        }
-                        MouseEventKind::ScrollDown => {
-                            game.camera.adjust_zoom(1.0 / crate::camera::ZOOM_STEP);
-                        }
-                        _ => {}
-                    }
-                }
-                Event::Resize(w, h) => {
-                    fb.resize(w, h);
-                    game.resize_viewport(w, h);
-                }
-                _ => {}
             }
+            last_local_hp = Some(p.hp);
         }
+
+        // Local input events, through the shared bindings router.
+        while event::poll(Duration::ZERO)? {
+            router.push_crossterm(event::read()?);
+        }
+        for ev in gamepad::drain_events() {
+            router.push_gamepad(ev);
+        }
+        let pad = gamepad::snapshot();
+        router.observe_gamepad_analog(&pad);
+
+        game.input_mode = match router.last_input() {
+            LastInput::MouseKeyboard => InputMode::MouseKeyboard,
+            LastInput::Gamepad => InputMode::Gamepad,
+        };
+
+        if dispatch_client_events(
+            &mut router,
+            &mut game,
+            &mut audio_overlay,
+            &mut wizard,
+            &mut fb,
+            &mut client,
+        )? {
+            return Ok(());
+        }
+
+        // Fire rumble: press-edge of local firing intent. Server is
+        // authoritative for whether the shot actually lands / uses
+        // ammo, but the player's trigger-pull is local — rumbling on
+        // their intent feels tight even with 80ms of network latency.
+        // Wizard suppresses rumble so capture buttons can't trigger
+        // a buzz mid-rebind.
+        let firing_now = wizard.is_none() && (router.firing() || game.mouse.lmb);
+        if firing_now && !last_firing {
+            gamepad::rumble(gamepad::Rumble::Fire);
+        }
+        last_firing = firing_now;
 
         // Tick client-side particles (pure visual) + menu feedback timer.
         game.tick_client(dt.as_secs_f32());
@@ -253,14 +180,32 @@ pub fn run_connect(addr: String) -> Result<()> {
         // Send input ~60 Hz.
         if client.is_connected() && welcomed && input_accum >= INPUT_PERIOD {
             input_accum = Duration::ZERO;
-            let (mx, my) = input.move_vec();
-            let aim = game.aim_target_for_local().unwrap_or((1.0, 0.0));
+            let prefer_gamepad = game.input_mode == InputMode::Gamepad;
+            let frame_input = resolve_frame_input(&router, prefer_gamepad, &mut last_pad_aim);
+            let (mx, my) = frame_input.move_vec;
+            let aim = match game.input_mode {
+                InputMode::Gamepad => frame_input.aim.unwrap_or((1.0, 0.0)),
+                InputMode::MouseKeyboard => {
+                    last_pad_aim = None;
+                    game.aim_target_for_local().unwrap_or((1.0, 0.0))
+                }
+            };
+            game.gamepad_aim = if game.input_mode == InputMode::Gamepad {
+                last_pad_aim
+            } else {
+                None
+            };
+            let firing = if wizard.is_some() {
+                false
+            } else {
+                router.firing() || game.mouse.lmb
+            };
             let inp = ClientInput {
-                move_x: mx,
-                move_y: my,
+                move_x: if wizard.is_some() { 0.0 } else { mx },
+                move_y: if wizard.is_some() { 0.0 } else { my },
                 aim_x: aim.0,
                 aim_y: aim.1,
-                firing: game.mouse.lmb,
+                firing,
             };
             client.send_message(
                 DefaultChannel::Unreliable,
@@ -270,7 +215,9 @@ pub fn run_connect(addr: String) -> Result<()> {
 
         transport.send_packets(&mut client).ok();
 
-        // Render.
+        // Render. AimZoom hold eases here.
+        let aim_held = router.is_held(bindings::Action::AimZoom);
+        game.camera.tick_zoom(dt.as_secs_f32().min(0.05), aim_held);
         game.update_camera_follow();
         fb.clear();
         if welcomed {
@@ -324,7 +271,17 @@ pub fn run_connect(addr: String) -> Result<()> {
                 }
             }
             game.console.render(&mut out, tc, tr)?;
-            game.menu.render(&mut out, tc, tr, game.is_authoritative, game.paused)?;
+            game.menu.render(
+                &mut out,
+                tc,
+                tr,
+                game.is_authoritative,
+                game.paused,
+                game.input_mode == crate::game::InputMode::Gamepad,
+            )?;
+            if let Some(w) = wizard.as_ref() {
+                w.render(&mut out, tc, tr)?;
+            }
         } else {
             fb.blit(&mut out)?;
             hud::draw_connecting(&mut out)?;
@@ -524,6 +481,172 @@ fn handle_unreliable(msg: ServerMsg, game: &mut Game) {
         }
         _ => {}
     }
+}
+
+/// Client-side event dispatch. Gameplay verbs (Interact, CycleWeapon,
+/// DeployTurret, Traversal) marshal to network packets instead of
+/// local method calls because the server owns player state.
+fn dispatch_client_events(
+    router: &mut InputRouter,
+    game: &mut Game,
+    audio_overlay: &mut audio::AudioOverlay,
+    wizard: &mut Option<RebindWizard>,
+    fb: &mut Framebuffer,
+    client: &mut RenetClient,
+) -> Result<bool> {
+    use crate::bindings::Action;
+    for ev in router.drain() {
+        match ev {
+            InputEvent::Quit => return Ok(true),
+            InputEvent::MenuToggle => {
+                if wizard.is_some() {
+                    *wizard = None;
+                    router.set_capture(None);
+                } else {
+                    game.menu.toggle();
+                }
+            }
+            InputEvent::Resize(w, h) => {
+                fb.resize(w, h);
+                game.resize_viewport(w, h);
+            }
+            InputEvent::Mouse(m) => {
+                game.mouse.col = m.column;
+                game.mouse.row = m.row;
+                match m.kind {
+                    MouseEventKind::Down(MouseButton::Left) => game.mouse.lmb = true,
+                    MouseEventKind::Up(MouseButton::Left) => game.mouse.lmb = false,
+                    MouseEventKind::ScrollUp => {
+                        game.camera.adjust_zoom(crate::camera::ZOOM_STEP);
+                    }
+                    MouseEventKind::ScrollDown => {
+                        game.camera.adjust_zoom(1.0 / crate::camera::ZOOM_STEP);
+                    }
+                    _ => {}
+                }
+            }
+            InputEvent::RawKeyboardCapture(code) => {
+                if let Some(w) = wizard.as_mut() {
+                    match w.handle_key_capture(code) {
+                        WizardOutcome::Continue => {}
+                        WizardOutcome::Save(new) => {
+                            if let Err(e) = new.save() {
+                                tracing::warn!(error = ?e, "save bindings");
+                            }
+                            router.set_bindings(new);
+                            router.set_capture(None);
+                            *wizard = None;
+                            game.menu.open = true;
+                        }
+                        WizardOutcome::Cancel => {
+                            router.set_capture(None);
+                            *wizard = None;
+                            game.menu.open = true;
+                        }
+                    }
+                }
+            }
+            InputEvent::RawGamepadCapture(btn) => {
+                if let Some(w) = wizard.as_mut() {
+                    match w.handle_gamepad_capture(btn) {
+                        WizardOutcome::Continue => {}
+                        WizardOutcome::Save(new) => {
+                            if let Err(e) = new.save() {
+                                tracing::warn!(error = ?e, "save bindings");
+                            }
+                            router.set_bindings(new);
+                            router.set_capture(None);
+                            *wizard = None;
+                            game.menu.open = true;
+                        }
+                        WizardOutcome::Cancel => {
+                            router.set_capture(None);
+                            *wizard = None;
+                            game.menu.open = true;
+                        }
+                    }
+                }
+            }
+            InputEvent::ActionPress(action) => {
+                if wizard.is_some() {
+                    continue;
+                }
+                if game.menu.open {
+                    let menu_action = dispatch_menu_nav(game, action);
+                    match menu_action {
+                        menu::MenuAction::None | menu::MenuAction::Close => {}
+                        menu::MenuAction::Quit => return Ok(true),
+                        menu::MenuAction::TogglePause => {
+                            // Clients don't own pause — item should
+                            // be hidden since is_authoritative is
+                            // false, but if the map is stale, warn.
+                            game.menu.set_feedback("only the host can pause", 1.5);
+                        }
+                        menu::MenuAction::Copy(text) => {
+                            let feedback = menu::copy_to_clipboard(&text);
+                            eprintln!("\n{}", text);
+                            game.menu.set_feedback(feedback, 2.0);
+                        }
+                        menu::MenuAction::RebindKeyboard => {
+                            *wizard = Some(RebindWizard::start(
+                                WizardDevice::Keyboard,
+                                router.bindings.clone(),
+                            ));
+                            router.set_capture(Some(bindings::router::CaptureMode::Keyboard));
+                            game.menu.open = false;
+                        }
+                        menu::MenuAction::RebindGamepad => {
+                            *wizard = Some(RebindWizard::start(
+                                WizardDevice::Gamepad,
+                                router.bindings.clone(),
+                            ));
+                            router.set_capture(Some(bindings::router::CaptureMode::Gamepad));
+                            game.menu.open = false;
+                        }
+                        menu::MenuAction::ResetBindings => {
+                            let defaults = bindings::Bindings::defaults();
+                            if let Err(e) = defaults.save() {
+                                tracing::warn!(error = ?e, "save bindings");
+                                game.menu.set_feedback("reset failed — see console", 2.0);
+                            } else {
+                                router.set_bindings(defaults);
+                                game.menu.set_feedback(
+                                    "bindings reset to defaults",
+                                    2.0,
+                                );
+                            }
+                        }
+                    }
+                    continue;
+                }
+                // Gameplay: gameplay verbs → network packets.
+                match action {
+                    Action::Interact => client.send_message(
+                        DefaultChannel::ReliableOrdered,
+                        proto::encode(&ClientMsg::Interact),
+                    ),
+                    Action::CycleWeapon => client.send_message(
+                        DefaultChannel::ReliableOrdered,
+                        proto::encode(&ClientMsg::CycleWeapon),
+                    ),
+                    Action::DeployTurret => client.send_message(
+                        DefaultChannel::ReliableOrdered,
+                        proto::encode(&ClientMsg::DeployTurret),
+                    ),
+                    Action::Traversal => client.send_message(
+                        DefaultChannel::ReliableOrdered,
+                        proto::encode(&ClientMsg::ActivateTraversal),
+                    ),
+                    _ => {
+                        // Overlays are local-only, regardless of net mode.
+                        dispatch_overlay(game, audio_overlay, action);
+                    }
+                }
+            }
+            InputEvent::ActionRelease(_) => {}
+        }
+    }
+    Ok(false)
 }
 
 fn parse_server_addr(s: &str) -> Result<SocketAddr> {

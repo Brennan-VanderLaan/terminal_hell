@@ -21,6 +21,9 @@ use std::io::Write;
 pub enum MenuItem {
     Resume,
     TogglePause,
+    RebindKeyboard,
+    RebindGamepad,
+    ResetBindings,
     CopyConnect,
     CopyInstall,
     Quit,
@@ -37,6 +40,9 @@ impl MenuItem {
                     "Pause run"
                 }
             }
+            MenuItem::RebindKeyboard => "Rebind keyboard",
+            MenuItem::RebindGamepad => "Rebind gamepad",
+            MenuItem::ResetBindings => "Reset bindings to defaults",
             MenuItem::CopyConnect => "Copy connect string",
             MenuItem::CopyInstall => "Copy install one-liner",
             MenuItem::Quit => "Quit",
@@ -51,6 +57,9 @@ pub enum MenuAction {
     Quit,
     TogglePause,
     Copy(String),
+    RebindKeyboard,
+    RebindGamepad,
+    ResetBindings,
 }
 
 pub struct Menu {
@@ -91,11 +100,14 @@ impl Menu {
     /// Build the active item list for the current context. Authoritative
     /// peers get the Pause toggle; clients don't.
     pub fn items(&self, is_authoritative: bool) -> Vec<MenuItem> {
-        let mut items = Vec::with_capacity(5);
+        let mut items = Vec::with_capacity(8);
         items.push(MenuItem::Resume);
         if is_authoritative {
             items.push(MenuItem::TogglePause);
         }
+        items.push(MenuItem::RebindKeyboard);
+        items.push(MenuItem::RebindGamepad);
+        items.push(MenuItem::ResetBindings);
         items.push(MenuItem::CopyConnect);
         items.push(MenuItem::CopyInstall);
         items.push(MenuItem::Quit);
@@ -130,6 +142,9 @@ impl Menu {
                 MenuAction::Close
             }
             MenuItem::TogglePause => MenuAction::TogglePause,
+            MenuItem::RebindKeyboard => MenuAction::RebindKeyboard,
+            MenuItem::RebindGamepad => MenuAction::RebindGamepad,
+            MenuItem::ResetBindings => MenuAction::ResetBindings,
             MenuItem::CopyConnect => match connect_string {
                 Some(s) => MenuAction::Copy(s.to_string()),
                 None => {
@@ -160,12 +175,13 @@ impl Menu {
         rows: u16,
         is_authoritative: bool,
         paused: bool,
+        gamepad_hint: bool,
     ) -> Result<()> {
         if !self.open {
             return Ok(());
         }
         let items = self.items(is_authoritative);
-        let panel_w: u16 = 44;
+        let panel_w: u16 = 48;
         let panel_h: u16 = (items.len() as u16) + 6;
         let x = cols.saturating_sub(panel_w) / 2;
         let y = rows.saturating_sub(panel_h) / 2;
@@ -190,7 +206,7 @@ impl Menu {
             out,
             MoveTo(x, y),
             SetForegroundColor(border),
-            Print(format!("┌{} terminal_hell {}┐", "─".repeat(12), "─".repeat(14))),
+            Print(format!("┌{} terminal_hell {}┐", "─".repeat(14), "─".repeat(16))),
         )?;
         queue!(out, MoveTo(x, y + panel_h - 1))?;
         queue!(out, Print(format!("└{}┘", "─".repeat(panel_w as usize - 2))))?;
@@ -220,7 +236,11 @@ impl Menu {
             }
         }
 
-        let hint = "↑/↓ move   Enter select   Esc close";
+        let hint = if gamepad_hint {
+            "D-Pad move   Ⓐ select   Ⓑ close"
+        } else {
+            "↑/↓ move   Enter select   Esc close"
+        };
         let hint_row = y + panel_h - 3;
         queue!(
             out,
