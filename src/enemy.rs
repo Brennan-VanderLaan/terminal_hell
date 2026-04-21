@@ -192,6 +192,39 @@ impl Archetype {
         })
     }
 
+    /// Exact inverse of [`from_name`]. Returns the TOML/brand snake
+    /// name for this archetype — callers that need to look up brand
+    /// `sprite_overrides` (keyed by snake name) start here.
+    pub fn to_name(self) -> &'static str {
+        match self {
+            Archetype::Rusher => "rusher",
+            Archetype::Pinkie => "pinkie",
+            Archetype::Charger => "charger",
+            Archetype::Revenant => "revenant",
+            Archetype::Marksman => "marksman",
+            Archetype::Pmc => "pmc",
+            Archetype::Swarmling => "swarmling",
+            Archetype::Orb => "orb",
+            Archetype::Miniboss => "miniboss",
+            Archetype::Eater => "eater",
+            Archetype::Breacher => "breacher",
+            Archetype::Rocketeer => "rocketeer",
+            Archetype::Leaper => "leaper",
+            Archetype::Sapper => "sapper",
+            Archetype::Juggernaut => "juggernaut",
+            Archetype::Howler => "howler",
+            Archetype::Sentinel => "sentinel",
+            Archetype::Splitter => "splitter",
+            Archetype::Killa => "killa",
+            Archetype::Zergling => "zergling",
+            Archetype::Floodling => "floodling",
+            Archetype::Flood => "flood",
+            Archetype::FloodCarrier => "flood_carrier",
+            Archetype::PlayerTurret => "player_turret",
+            Archetype::Phaser => "phaser",
+        }
+    }
+
     /// Does this archetype actively dodge incoming projectiles?
     /// Agile / alert units lean sideways out of the firing line;
     /// fodder + heavy + stationary archetypes just eat the hit.

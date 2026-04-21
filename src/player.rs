@@ -76,13 +76,25 @@ pub struct Player {
     /// visual bleed budget, not HP directly. Scales with every hit.
     pub blood_lost: u32,
     /// Archetype of the enemy that landed the killing hit, if any.
-    /// Used by the death report ("killed by Zergling"). Persistent
+    /// Used by the death report ("killed by Slasher"). Persistent
     /// across death — even when the player is reviving or
     /// spectating, the killer remains so we can name them.
     pub killer_archetype: Option<crate::enemy::Archetype>,
+    /// Brand tag of the enemy that landed the killing hit, when
+    /// known. Pairs with `killer_archetype` to surface brand-
+    /// flavoured names like "Slasher" instead of the bare archetype
+    /// "Leaper" in the death report (when the brand has a sprite
+    /// override for that archetype).
+    pub killer_brand: Option<crate::tag::Tag>,
+    /// Short verb describing the attack that killed us —
+    /// `"melee"`, `"rifle"`, `"rocket"`, etc. Populated by the
+    /// damage site alongside `killer_archetype` so the death report
+    /// can read "killed by: Zergling · melee" rather than leaving
+    /// the player guessing HOW they died.
+    pub killer_attack: Option<&'static str>,
     /// Display name + run total for what killed the player. Updated
     /// whenever a new hit-source archetype lands any damage, so the
-    /// report can show "killed by Zergling (137)" with context.
+    /// report can show "killed by Slasher (137)" with context.
     pub damage_by_source: std::collections::HashMap<crate::enemy::Archetype, u32>,
 }
 
@@ -122,6 +134,8 @@ impl Player {
             damage_taken: 0,
             blood_lost: 0,
             killer_archetype: None,
+            killer_brand: None,
+            killer_attack: None,
             damage_by_source: std::collections::HashMap::new(),
         }
     }
@@ -188,12 +202,28 @@ impl Player {
     }
 
     /// Apply damage with an optional source archetype (the enemy that
-    /// hit us). Tracks stats into `damage_taken` / `damage_by_source`
-    /// and, on the killing hit, records `killer_archetype`.
+    /// hit us). Back-compat wrapper; prefer `take_damage_from_branded`
+    /// when the caller also has the enemy's `brand_id` and attack verb.
     pub fn take_damage_from(
         &mut self,
         raw: i32,
         source: Option<crate::enemy::Archetype>,
+    ) {
+        self.take_damage_from_branded(raw, source, None, None);
+    }
+
+    /// Apply damage with an optional source archetype, brand tag, and
+    /// attack verb. Tracks stats into `damage_taken` /
+    /// `damage_by_source`, and on the killing hit records
+    /// `killer_archetype` + `killer_brand` + `killer_attack` so the
+    /// death report can name the killer and how they did it
+    /// ("killed by: Slasher · melee") instead of a bare archetype.
+    pub fn take_damage_from_branded(
+        &mut self,
+        raw: i32,
+        source: Option<crate::enemy::Archetype>,
+        brand: Option<crate::tag::Tag>,
+        attack: Option<&'static str>,
     ) {
         if raw <= 0 || self.is_iframed() {
             return;
@@ -258,10 +288,12 @@ impl Player {
             *entry = entry.saturating_add(effective);
             // On the killing hit, lock in who did it. We record the
             // source on every hit so the FINAL hit before HP <= 0
-            // wins — exactly the "Killed by the Zergling that lunged
+            // wins — exactly the "Killed by the Slasher that lunged
             // through the gap" behavior we want.
             if self.hp <= 0 {
                 self.killer_archetype = Some(arch);
+                self.killer_brand = brand;
+                self.killer_attack = attack;
             }
         }
     }

@@ -412,6 +412,33 @@ impl ContentDb {
         self.brand(&self.default_brand).expect("default brand validated at load")
     }
 
+    /// Human-readable name for an enemy. When the enemy's brand has
+    /// a `sprite_overrides` entry for this archetype, we use the art
+    /// filename's stem as the flavor name (dead_space's `leaper =
+    /// "slasher.art"` → `"Slasher"`). Otherwise the bare archetype
+    /// name ("Charger", "Zergling"). No parenthetical brand suffix —
+    /// the flavor name already carries the theme, and when there's
+    /// no flavor the archetype is its own answer.
+    pub fn enemy_display_name(
+        &self,
+        archetype: Archetype,
+        brand_id: Option<&str>,
+    ) -> String {
+        let arch_snake = archetype.to_name();
+        if let Some(brand_id) = brand_id {
+            if let Some(brand) = self.brands.get(brand_id) {
+                if let Some(art) = brand.sprite_overrides.get(arch_snake) {
+                    let stem = std::path::Path::new(art)
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or(art);
+                    return humanize_snake(stem);
+                }
+            }
+        }
+        format!("{archetype:?}")
+    }
+
     /// Resolved signature primitive pool for an archetype — skips any
     /// TOML entries that don't parse as a known primitive id.
     pub fn archetype_signature_primitives(&self, archetype: Archetype) -> Vec<Primitive> {
@@ -455,6 +482,28 @@ impl ContentDb {
         };
         names.iter().filter_map(|n| Perk::from_name(n)).collect()
     }
+}
+
+/// `some_snake_id` → `"Some Snake Id"`. Used to surface brand IDs
+/// (`tarkov_scavs`) and art-file stems (`greater_wisp`) as display
+/// names in the kill feed / death report.
+fn humanize_snake(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut cap_next = true;
+    for ch in s.chars() {
+        if ch == '_' || ch == '-' {
+            out.push(' ');
+            cap_next = true;
+        } else if cap_next {
+            for c in ch.to_uppercase() {
+                out.push(c);
+            }
+            cap_next = false;
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 fn archetype_from_name(name: &str) -> Result<Archetype> {

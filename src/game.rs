@@ -151,6 +151,34 @@ pub struct PickupToast {
     pub ttl_max: f32,
 }
 
+/// One line of the Counter-Strike-style kill feed rendered top-right.
+/// `<killer>` did something to `<victim>` with `<weapon>`. When either
+/// side is the local player, the renderer tints the line so it stands
+/// out from teammates' kills in multiplayer.
+#[derive(Clone, Debug)]
+pub struct KillFeedEntry {
+    pub killer: String,
+    pub weapon: String,
+    pub victim: String,
+    pub ttl: f32,
+    pub ttl_max: f32,
+    /// True when the local player is the killer — used by the
+    /// renderer to highlight your own kills.
+    pub local_killer: bool,
+    /// True when the local player is the victim — highlights in the
+    /// "you got hit" color.
+    pub local_victim: bool,
+}
+
+impl KillFeedEntry {
+    /// Default TTL — long enough to read at a glance, short enough
+    /// that the feed doesn't pile up in a busy wave.
+    pub const DEFAULT_TTL: f32 = 5.0;
+    /// Cap on entries kept in the list. Older ones get trimmed when
+    /// a new kill lands to avoid unbounded growth during a horde.
+    pub const MAX_ENTRIES: usize = 6;
+}
+
 /// Flat HUD-facing view of a player's weapon inventory.
 pub struct LocalLoadoutView {
     pub active_slot: u8,
@@ -250,6 +278,12 @@ pub struct Game {
     /// Transient "you just grabbed X" toasts. Pushed by the pickup
     /// consume path; ticked every frame, drawn as a HUD strip.
     pub toasts: Vec<PickupToast>,
+    /// Counter-Strike-style kill feed, stacked top-right. Each entry
+    /// is rendered as `<killer> [weapon] <victim>` for the duration
+    /// of its `ttl`. Pushed on player kills (in the kills_this_tick
+    /// loop) and on player deaths (in the melee damage site that
+    /// flips `player.hp` to zero).
+    pub kill_feed: Vec<KillFeedEntry>,
     /// Accumulator for the fire-propagation tick. Fire doesn't need
     /// sim-rate propagation — every 0.3s is plenty for the cascade
     /// to read as "the oil caught." This accumulates dt between
@@ -378,6 +412,7 @@ impl Game {
             death_started_at: 0.0,
             death_report_elapsed: 0.0,
             toasts: Vec::new(),
+            kill_feed: Vec::new(),
             fire_tick_accum: 0.0,
             is_authoritative: true,
             paused: false,
@@ -624,6 +659,26 @@ impl Game {
         self.toasts.retain_mut(|t| {
             t.ttl -= dt;
             t.ttl > 0.0
+        });
+    }
+
+    /// Insert a new kill-feed line at the top of the stack, trimming
+    /// any overflow off the bottom so a busy wave can't fill the
+    /// viewport. Newest at index 0 so the renderer can walk the feed
+    /// top-down.
+    pub fn push_kill_feed(&mut self, entry: KillFeedEntry) {
+        self.kill_feed.insert(0, entry);
+        if self.kill_feed.len() > KillFeedEntry::MAX_ENTRIES {
+            self.kill_feed.truncate(KillFeedEntry::MAX_ENTRIES);
+        }
+    }
+
+    /// Fade out the kill feed. Called once per render-tick so the
+    /// feed animates the same on solo, host, and client.
+    pub fn tick_kill_feed(&mut self, dt: f32) {
+        self.kill_feed.retain_mut(|e| {
+            e.ttl -= dt;
+            e.ttl > 0.0
         });
     }
 
@@ -1510,6 +1565,7 @@ impl Game {
         self.tick_daemon(dt);
         self.tick_signs(dt);
         self.tick_toasts(dt);
+        self.tick_kill_feed(dt);
         // Substance world-interaction passes. Three tight loops that
         // tie the ground layer to the rest of the sim:
         //   • ambient emitters  — smoke/steam/bubbles/sparks from
@@ -1761,6 +1817,10 @@ impl Game {
                 }
             }
         }
+        // Kill-feed entries staged during the enemy loop (the `self`
+        // borrow is locked to `self.enemies` inside, so we can't push
+        // directly into `self.kill_feed` until the loop exits).
+        let mut pending_player_deaths: Vec<(u32, Archetype, Option<crate::tag::Tag>)> = Vec::new();
         for (i, e) in self.enemies.iter_mut().enumerate() {
             // Eater behavior: while hungry (consumed < THRESHOLD), seek
             // the nearest corpse instead of a player. Once fed, flips
@@ -2204,7 +2264,21 @@ impl Game {
                             1.0
                         };
                         let dmg = ((base as f32) * scale).round() as i32;
-                        player.take_damage_from(dmg, Some(e.archetype));
+                        let was_alive = player.hp > 0;
+                        player.take_damage_from_branded(
+                            dmg,
+                            Some(e.archetype),
+                            e.brand_id,
+                            Some("melee"),
+                        );
+                        if was_alive && player.hp <= 0 {
+                            // Defer the kill-feed push out of this
+                            // mutable-player borrow — we need `self`
+                            // for `enemy_display_name`. Tag the slot
+                            // with the enemy's archetype + brand and
+                            // flush after the enemies loop exits.
+                            pending_player_deaths.push((player.id, e.archetype, e.brand_id));
+                        }
                         // Melee contact connected — touch_player gates
                         // this by touch_cooldown, so emits match the
                         // actual strike cadence rather than firing
@@ -2231,6 +2305,29 @@ impl Game {
             }
         }
         self.perf.end("enemy_loop");
+
+        // Flush player-death entries staged during the enemies loop.
+        // We push them AFTER the loop so the kill-feed helper can
+        // use `self.content` for brand-flavoured enemy names.
+        for (pid, arch, brand) in pending_player_deaths {
+            let local = self.local_id == Some(pid);
+            let victim = if local {
+                "You".to_string()
+            } else {
+                format!("P{pid}")
+            };
+            let killer =
+                self.content.enemy_display_name(arch, brand.as_ref().map(|t| t.as_str()));
+            self.push_kill_feed(KillFeedEntry {
+                killer,
+                weapon: "melee".to_string(),
+                victim,
+                ttl: KillFeedEntry::DEFAULT_TTL,
+                ttl_max: KillFeedEntry::DEFAULT_TTL,
+                local_killer: false,
+                local_victim: local,
+            });
+        }
 
         // Projectile-dodge pass. Agile archetypes scan nearby
         // in-flight projectiles (player-owned AND ally rockets) and
@@ -2909,6 +3006,42 @@ impl Game {
             if idx >= self.enemies.len() {
                 continue;
             }
+            // Kill-feed entry for this kill. Captured BEFORE we
+            // swap_remove the enemy so we can name it. `killer_id == 0`
+            // means DoT / bleed with no crediting weapon — we render
+            // those with a dash as the weapon so the player knows it
+            // was attrition, not a direct hit.
+            let enemy_arch = self.enemies[idx].archetype;
+            let enemy_brand = self.enemies[idx].brand_id;
+            let victim = self.content.enemy_display_name(
+                enemy_arch,
+                enemy_brand.as_ref().map(|t| t.as_str()),
+            );
+            let (killer_name, weapon_label, local_killer) = if killer_id == 0 {
+                ("—".to_string(), "bleed".to_string(), false)
+            } else {
+                let local = self.local_id == Some(killer_id);
+                let killer_name = if local {
+                    "You".to_string()
+                } else {
+                    format!("P{killer_id}")
+                };
+                let weapon = self
+                    .player_index(killer_id)
+                    .and_then(|i| self.runtimes[i].active_weapon().map(|w| w.mode.label()))
+                    .unwrap_or("—")
+                    .to_string();
+                (killer_name, weapon, local)
+            };
+            self.push_kill_feed(KillFeedEntry {
+                killer: killer_name,
+                weapon: weapon_label,
+                victim,
+                ttl: KillFeedEntry::DEFAULT_TTL,
+                ttl_max: KillFeedEntry::DEFAULT_TTL,
+                local_killer,
+                local_victim: false,
+            });
             // Credit Overdrive to the killer's active weapon, if any.
             // Also notify the player so perk-side kill hooks
             // (CorpsePulse heal, Rampage chain) fire.
@@ -3516,6 +3649,7 @@ impl Game {
         });
         self.tick_phantoms(dt);
         self.tick_toasts(dt);
+        self.tick_kill_feed(dt);
     }
 
     /// Host-only: flip pause state. Clients follow via snapshot.

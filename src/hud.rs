@@ -638,6 +638,87 @@ pub fn draw_pickup_toasts<W: Write>(
     Ok(())
 }
 
+/// Counter-Strike-style kill feed in the top-right corner. One line
+/// per kill: `Killer [weapon] Victim`. Newest at the top; lines fade
+/// out as their TTL drains. Killer/victim highlight swaps when the
+/// local player is involved so you can skim the feed for "was that
+/// me?" in a packed wave.
+pub fn draw_kill_feed<W: Write>(
+    out: &mut W,
+    cols: u16,
+    feed: &[crate::game::KillFeedEntry],
+) -> Result<()> {
+    if feed.is_empty() {
+        return Ok(());
+    }
+    // Top-right, below the zoom indicator (row 0) AND the wave
+    // countdown (row 3). Starts at row 5 so `next wave in …` never
+    // clashes with incoming kill lines. `draw_pickup_toasts` uses
+    // row 7 for loot pops; at that point the feed has typically
+    // rolled off or is ~2 lines deep and they stack cleanly.
+    let base_row: u16 = 5;
+    for (i, e) in feed.iter().enumerate() {
+        let fade = (e.ttl / e.ttl_max).clamp(0.0, 1.0);
+        // Killer = blue tint when it's you, white otherwise.
+        // Victim = red tint when it's you, tan otherwise. Weapon is
+        // always dim so the names pop.
+        let killer_color = if e.local_killer {
+            Color::Rgb {
+                r: (120.0 * fade) as u8,
+                g: (200.0 * fade) as u8,
+                b: (255.0 * fade) as u8,
+            }
+        } else {
+            Color::Rgb {
+                r: (230.0 * fade) as u8,
+                g: (230.0 * fade) as u8,
+                b: (240.0 * fade) as u8,
+            }
+        };
+        let victim_color = if e.local_victim {
+            Color::Rgb {
+                r: (255.0 * fade) as u8,
+                g: (90.0 * fade) as u8,
+                b: (90.0 * fade) as u8,
+            }
+        } else {
+            Color::Rgb {
+                r: (230.0 * fade) as u8,
+                g: (200.0 * fade) as u8,
+                b: (140.0 * fade) as u8,
+            }
+        };
+        let mid_color = Color::Rgb {
+            r: (140.0 * fade) as u8,
+            g: (140.0 * fade) as u8,
+            b: (150.0 * fade) as u8,
+        };
+        let killer = &e.killer;
+        let mid = format!(" [{}] ", e.weapon);
+        let victim = &e.victim;
+        let total_len =
+            (killer.chars().count() + mid.chars().count() + victim.chars().count()) as u16;
+        if total_len + 2 > cols {
+            continue;
+        }
+        let col = cols.saturating_sub(total_len).saturating_sub(1);
+        let row = base_row + i as u16;
+        queue!(
+            out,
+            MoveTo(col, row),
+            SetBackgroundColor(Color::Rgb { r: 20, g: 10, b: 30 }),
+            SetForegroundColor(killer_color),
+            Print(killer),
+            SetForegroundColor(mid_color),
+            Print(&mid),
+            SetForegroundColor(victim_color),
+            Print(victim),
+            ResetColor,
+        )?;
+    }
+    Ok(())
+}
+
 pub fn draw_kiosk_labels<W: Write>(
     out: &mut W,
     game: &crate::game::Game,
@@ -843,12 +924,22 @@ pub fn draw_death_report<W: Write>(
     // possible when the final damage comes from a source we don't
     // track, e.g. an AI pulse projectile).
     let killer_name: String = if let Some(arch) = local.and_then(|p| p.killer_archetype) {
-        format!("{:?}", arch)
+        let brand = local
+            .and_then(|p| p.killer_brand)
+            .map(|t| t.as_str().to_string());
+        let base = game.content.enemy_display_name(arch, brand.as_deref());
+        // Append the attack verb if we know it ("Zergling · melee").
+        // Keeps the single "killed by" line evocative without adding
+        // another row to the panel.
+        match local.and_then(|p| p.killer_attack) {
+            Some(how) => format!("{base} · {how}"),
+            None => base,
+        }
     } else if let Some(p) = local {
         p.damage_by_source
             .iter()
             .max_by_key(|(_, v)| **v)
-            .map(|(k, _)| format!("{:?}", k))
+            .map(|(k, _)| game.content.enemy_display_name(*k, None))
             .unwrap_or_else(|| "the dark".to_string())
     } else {
         "the dark".to_string()
@@ -864,22 +955,31 @@ pub fn draw_death_report<W: Write>(
         "       (the gold settles)       "
     };
 
+    // Widen the panel for the longer killer line ("Slasher · melee"
+    // etc. up to ~26 chars after brand flavor). Every other row
+    // pads to the same width so the panel stays a crisp rectangle.
+    const PANEL_W: usize = 42;
+    let blank: String = " ".repeat(PANEL_W);
+    // Truncate paranoia: really long flavor names get clipped so the
+    // panel can't grow past PANEL_W and break the centering.
+    let killer_clipped: String = killer_name.chars().take(26).collect();
     let lines: Vec<String> = vec![
-        "                                     ".into(),
-        format!("{:^37}", title),
-        "                                     ".into(),
-        format!("   killed by: {:<10} ({:>4})   ", killer_name, killer_total),
-        "                                     ".into(),
-        format!("   wave reached   : {:>10}   ", wave),
-        format!("   team kills     : {:>10}   ", team_kills),
-        format!("   time survived  : {:>7}m {:02}s", mins, secs),
-        "                                     ".into(),
-        format!("   damage dealt   : {:>10}   ", damage_dealt),
-        format!("   damage taken   : {:>10}   ", damage_taken),
-        format!("   blood lost     : {:>10}   ", blood_lost),
-        "                                     ".into(),
-        accept_hint.to_string(),
-        "                                     ".into(),
+        blank.clone(),
+        format!("{title:^PANEL_W$}"),
+        blank.clone(),
+        format!("   killed by:  {killer_clipped:<26}   "),
+        format!("   hits taken: {killer_total:>4}                 "),
+        blank.clone(),
+        format!("   wave reached   : {wave:>10}       "),
+        format!("   team kills     : {team_kills:>10}       "),
+        format!("   time survived  : {mins:>7}m {secs:02}s     "),
+        blank.clone(),
+        format!("   damage dealt   : {damage_dealt:>10}       "),
+        format!("   damage taken   : {damage_taken:>10}       "),
+        format!("   blood lost     : {blood_lost:>10}       "),
+        blank.clone(),
+        format!("{accept_hint:^PANEL_W$}"),
+        blank,
     ];
     let width = lines.iter().map(|l| l.chars().count() as u16).max().unwrap_or(0);
     let height = lines.len() as u16;

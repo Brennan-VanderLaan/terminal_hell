@@ -255,6 +255,7 @@ pub fn run_connect(addr: String) -> Result<()> {
             hud::draw_clear_countdown(&mut out, tc, game.director.clear_timer)?;
             hud::draw_pickup_labels(&mut out, &game)?;
             hud::draw_pickup_toasts(&mut out, tc, &game.toasts)?;
+            hud::draw_kill_feed(&mut out, tc, &game.kill_feed)?;
             if game.paused {
                 hud::draw_paused_banner(&mut out, tc, tr, game.is_authoritative)?;
             }

@@ -302,6 +302,7 @@ pub fn run_solo() -> Result<()> {
         hud::draw_clear_countdown(&mut stdout, tc, game.director.clear_timer)?;
         hud::draw_pickup_labels(&mut stdout, &game)?;
         hud::draw_pickup_toasts(&mut stdout, tc, &game.toasts)?;
+        hud::draw_kill_feed(&mut stdout, tc, &game.kill_feed)?;
         // Single flush after every HUD overlay has queued its bytes
         // — one flush per frame keeps the terminal from repainting
         // mid-pass, which is the source of the flicker we saw when
