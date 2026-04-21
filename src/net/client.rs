@@ -58,6 +58,7 @@ pub fn run_connect(addr: String) -> Result<()> {
     tracing::info!(%server_addr, "connecting");
 
     let _guard = terminal::TerminalGuard::enter()?;
+    let _timer_guard = crate::platform::TimerResolutionGuard::millisecond();
     let mut out = stdout();
 
     let (cols, rows) = crossterm::terminal::size()?;
@@ -139,11 +140,14 @@ pub fn run_connect(addr: String) -> Result<()> {
         while event::poll(Duration::ZERO)? {
             router.push_crossterm(event::read()?);
         }
-        for ev in gamepad::drain_events() {
+        let pad_events = gamepad::drain_events();
+        game.perf.set_count("gpad_events_frame", pad_events.len());
+        for ev in pad_events {
             router.push_gamepad(ev);
         }
         let pad = gamepad::snapshot();
         router.observe_gamepad_analog(&pad);
+        crate::telemetry::ingest_gamepad(&mut game.perf);
 
         game.input_mode = match router.last_input() {
             LastInput::MouseKeyboard => InputMode::MouseKeyboard,

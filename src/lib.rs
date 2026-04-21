@@ -36,6 +36,7 @@ pub mod pathfind;
 pub mod perf_overlay;
 pub mod perk;
 pub mod pickup;
+pub mod platform;
 pub mod player;
 pub mod primitive;
 pub mod projectile;
@@ -68,6 +69,10 @@ const SIM_DT_SECS: f32 = 1.0 / 30.0;
 
 pub fn run_solo() -> Result<()> {
     let _guard = terminal::TerminalGuard::enter()?;
+    // Bump Windows scheduler resolution to 1ms for the duration of the
+    // session so thread::sleep honors sub-15ms durations (gamepad
+    // worker poll + main-loop frame pacing).
+    let _timer_guard = platform::TimerResolutionGuard::millisecond();
     let mut stdout = stdout();
 
     let (cols, rows) = crossterm::terminal::size()?;
@@ -139,13 +144,16 @@ pub fn run_solo() -> Result<()> {
         while event::poll(Duration::ZERO)? {
             router.push_crossterm(event::read()?);
         }
-        for ev in gamepad::drain_events() {
+        let pad_events = gamepad::drain_events();
+        game.perf.set_count("gpad_events_frame", pad_events.len());
+        for ev in pad_events {
             router.push_gamepad(ev);
         }
         // Pure analog stick/trigger movement (no button edges) also
         // counts as "I'm on the controller now".
         let pad = gamepad::snapshot();
         router.observe_gamepad_analog(&pad);
+        telemetry::ingest_gamepad(&mut game.perf);
 
         // Stage 2: reflect the router's device-activity tracker into
         // the UI mode flag.

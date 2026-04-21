@@ -10,6 +10,7 @@
 //! (no controller, no permissions, missing udev, …) so callers don't
 //! have to guard — same contract as `audio::emit`.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
@@ -87,6 +88,84 @@ struct Manager {
 
 static MANAGER: OnceLock<Manager> = OnceLock::new();
 
+/// Lock-free telemetry the worker writes and the main loop reads once
+/// per frame. All durations are nanoseconds; 0 = never-written.
+/// `snapshot_ns_since_epoch` is stamped every worker iteration so the
+/// main thread can compute the age of the current snapshot (which is
+/// the actual "input lag" number you feel at the controller).
+struct GamepadTelemetry {
+    worker_iter_ns: AtomicU64,
+    worker_period_ns: AtomicU64,
+    next_event_ns: AtomicU64,
+    read_snapshot_ns: AtomicU64,
+    rumble_spawn_ns: AtomicU64,
+    snapshot_ns_since_epoch: AtomicU64,
+    events_total: AtomicU64,
+    rumble_queue_depth: AtomicU64,
+    rumble_retained: AtomicU64,
+}
+
+static TELEMETRY: GamepadTelemetry = GamepadTelemetry {
+    worker_iter_ns: AtomicU64::new(0),
+    worker_period_ns: AtomicU64::new(0),
+    next_event_ns: AtomicU64::new(0),
+    read_snapshot_ns: AtomicU64::new(0),
+    rumble_spawn_ns: AtomicU64::new(0),
+    snapshot_ns_since_epoch: AtomicU64::new(0),
+    events_total: AtomicU64::new(0),
+    rumble_queue_depth: AtomicU64::new(0),
+    rumble_retained: AtomicU64::new(0),
+};
+
+/// Process-wide monotonic reference point. Initialized on first
+/// `ensure_init` call; both worker and main thread convert
+/// `Instant`s to `ns_since(epoch)` so the age of the snapshot can be
+/// computed across threads with a single `AtomicU64`.
+static EPOCH: OnceLock<Instant> = OnceLock::new();
+
+fn epoch() -> Instant {
+    *EPOCH.get_or_init(Instant::now)
+}
+
+/// Structured copy of the telemetry atomics. Main loop pulls this each
+/// frame and feeds durations + counters into its `FrameProfile`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GamepadTelemetrySnapshot {
+    pub worker_iter: Duration,
+    pub worker_period: Duration,
+    pub next_event: Duration,
+    pub read_snapshot: Duration,
+    pub rumble_spawn: Duration,
+    /// Time since the worker last refreshed the shared snapshot — the
+    /// number you actually feel at the controller.
+    pub snap_age: Duration,
+    pub events_total: u64,
+    pub rumble_queue_depth: u64,
+    pub rumble_retained: u64,
+}
+
+/// Read the current telemetry. Cheap: all atomic relaxed loads.
+pub fn telemetry() -> GamepadTelemetrySnapshot {
+    let now_ns = epoch().elapsed().as_nanos() as u64;
+    let snap_ns = TELEMETRY.snapshot_ns_since_epoch.load(Ordering::Relaxed);
+    let snap_age = if snap_ns == 0 {
+        Duration::ZERO
+    } else {
+        Duration::from_nanos(now_ns.saturating_sub(snap_ns))
+    };
+    GamepadTelemetrySnapshot {
+        worker_iter: Duration::from_nanos(TELEMETRY.worker_iter_ns.load(Ordering::Relaxed)),
+        worker_period: Duration::from_nanos(TELEMETRY.worker_period_ns.load(Ordering::Relaxed)),
+        next_event: Duration::from_nanos(TELEMETRY.next_event_ns.load(Ordering::Relaxed)),
+        read_snapshot: Duration::from_nanos(TELEMETRY.read_snapshot_ns.load(Ordering::Relaxed)),
+        rumble_spawn: Duration::from_nanos(TELEMETRY.rumble_spawn_ns.load(Ordering::Relaxed)),
+        snap_age,
+        events_total: TELEMETRY.events_total.load(Ordering::Relaxed),
+        rumble_queue_depth: TELEMETRY.rumble_queue_depth.load(Ordering::Relaxed),
+        rumble_retained: TELEMETRY.rumble_retained.load(Ordering::Relaxed),
+    }
+}
+
 /// Idempotent startup. Spawns the worker thread if it hasn't started
 /// and a `Gilrs` context can be constructed. Silent on failure —
 /// absence of a controller is the normal case.
@@ -94,6 +173,9 @@ pub fn ensure_init() {
     if MANAGER.get().is_some() {
         return;
     }
+    // Lock in the telemetry epoch before the worker starts so the
+    // first snapshot timestamp is measured against a fixed reference.
+    let _ = epoch();
     write_status("ensure_init: entering Gilrs::new()");
     let gilrs = match Gilrs::new() {
         Ok(g) => {
@@ -237,8 +319,26 @@ fn worker_loop(mut gilrs: Gilrs, rumble_rx: Receiver<Rumble>, event_tx: Sender<G
     // via the handle; dropping frees the server-side slot, but cancels
     // playback — so we retain handles until their deadline passes.
     let mut retained: Vec<(Instant, Effect)> = Vec::new();
+    // Telemetry: last iteration's start, used to compute real poll
+    // period (iteration + sleep) so we can see when thread::sleep is
+    // overshooting (Windows <=10 1909 scheduler ticks at ~15ms).
+    let epoch = epoch();
+    let mut last_iter_start: Option<Instant> = None;
 
     loop {
+        let iter_start = Instant::now();
+        if let Some(prev) = last_iter_start {
+            TELEMETRY.worker_period_ns.store(
+                iter_start.duration_since(prev).as_nanos() as u64,
+                Ordering::Relaxed,
+            );
+        }
+        last_iter_start = Some(iter_start);
+
+        // Time the gilrs event drain in isolation — this is where
+        // XInput empty-slot polling cost shows up on Windows.
+        let t_ne = Instant::now();
+        let mut events_this_iter: u64 = 0;
         while let Some(ev) = gilrs.next_event() {
             match ev.event {
                 EventType::Connected => {
@@ -255,7 +355,9 @@ fn worker_loop(mut gilrs: Gilrs, rumble_rx: Receiver<Rumble>, event_tx: Sender<G
                                 maybe_open_linux_fallback(&gilrs, active, ff_supported);
                             log_fallback(&linux_fallback, ff_supported);
                         }
-                        let _ = event_tx.send(GamepadEvent::Connected);
+                        if event_tx.send(GamepadEvent::Connected).is_ok() {
+                            events_this_iter += 1;
+                        }
                     }
                 }
                 EventType::Disconnected => {
@@ -271,44 +373,69 @@ fn worker_loop(mut gilrs: Gilrs, rumble_rx: Receiver<Rumble>, event_tx: Sender<G
                                 maybe_open_linux_fallback(&gilrs, active, ff_supported);
                         }
                         retained.clear();
-                        let _ = event_tx.send(GamepadEvent::Disconnected);
+                        if event_tx.send(GamepadEvent::Disconnected).is_ok() {
+                            events_this_iter += 1;
+                        }
                     }
                 }
                 EventType::ButtonPressed(btn, _) => {
                     if let Some(b) = map_button(btn) {
-                        let _ = event_tx.send(GamepadEvent::Press(b));
+                        if event_tx.send(GamepadEvent::Press(b)).is_ok() {
+                            events_this_iter += 1;
+                        }
                     }
                 }
                 EventType::ButtonReleased(btn, _) => {
                     if let Some(b) = map_button(btn) {
-                        let _ = event_tx.send(GamepadEvent::Release(b));
+                        if event_tx.send(GamepadEvent::Release(b)).is_ok() {
+                            events_this_iter += 1;
+                        }
                     }
                 }
                 _ => {}
             }
         }
+        TELEMETRY.next_event_ns.store(t_ne.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        if events_this_iter > 0 {
+            TELEMETRY.events_total.fetch_add(events_this_iter, Ordering::Relaxed);
+        }
 
+        // Time the axis read in isolation — XInput state query cost.
+        let t_rs = Instant::now();
         let snap = active
             .and_then(|id| gilrs.connected_gamepad(id))
             .map(read_snapshot)
             .unwrap_or_default();
+        TELEMETRY.read_snapshot_ns.store(t_rs.elapsed().as_nanos() as u64, Ordering::Relaxed);
         if let Some(m) = MANAGER.get() {
             if let Ok(mut s) = m.shared.lock() {
                 s.snapshot = snap;
             }
         }
+        // Stamp the snapshot freshness AFTER the shared-state write so
+        // the main thread's `snap_age` read reflects a value it can
+        // actually observe.
+        TELEMETRY.snapshot_ns_since_epoch.store(
+            epoch.elapsed().as_nanos() as u64,
+            Ordering::Relaxed,
+        );
 
         // Drain rumble commands non-blocking. Coalesce so auto-fire
         // can't flood gilrs's effect slots — only the strongest
         // queued effect within one poll tick actually spawns.
         let mut best: Option<Rumble> = None;
+        let mut queued: u64 = 0;
         loop {
             match rumble_rx.try_recv() {
-                Ok(r) => best = Some(merge_rumble(best, r)),
+                Ok(r) => {
+                    best = Some(merge_rumble(best, r));
+                    queued += 1;
+                }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => return,
             }
         }
+        TELEMETRY.rumble_queue_depth.store(queued, Ordering::Relaxed);
         // Rumble routing:
         //   - gilrs supports FF for this pad → use gilrs's builder
         //     (XInput on Windows, IOKit on macOS, full-FF evdev nodes
@@ -318,6 +445,7 @@ fn worker_loop(mut gilrs: Gilrs, rumble_rx: Receiver<Rumble>, event_tx: Sender<G
         //   - Neither works → swallow silently (already logged once
         //     at connect).
         if let (Some(kind), Some(id)) = (best, active) {
+            let t_rm = Instant::now();
             if ff_supported {
                 if let Some((effect, deadline)) = spawn_rumble(&mut gilrs, id, kind) {
                     retained.push((deadline, effect));
@@ -348,12 +476,14 @@ fn worker_loop(mut gilrs: Gilrs, rumble_rx: Receiver<Rumble>, event_tx: Sender<G
                 #[cfg(not(target_os = "linux"))]
                 let _ = (kind, id);
             }
+            TELEMETRY.rumble_spawn_ns.store(t_rm.elapsed().as_nanos() as u64, Ordering::Relaxed);
         }
 
         // Prune expired effects. Dropping the handle stops the
         // (already-ended) effect and releases the slab slot.
         let now = Instant::now();
         retained.retain(|(deadline, _)| *deadline > now);
+        TELEMETRY.rumble_retained.store(retained.len() as u64, Ordering::Relaxed);
 
         // Linux fallback path has its own stop-schedule because
         // xpadneo + similar HID drivers ignore `replay.length` and
@@ -365,6 +495,14 @@ fn worker_loop(mut gilrs: Gilrs, rumble_rx: Receiver<Rumble>, event_tx: Sender<G
             dev.tick();
         }
 
+        // Record body time BEFORE sleep. `worker_period_ns` captures
+        // iter + sleep on the next iteration; the delta between them is
+        // the actual sleep duration, which is the signal for whether
+        // the Windows timer resolution bump is doing its job.
+        TELEMETRY.worker_iter_ns.store(
+            iter_start.elapsed().as_nanos() as u64,
+            Ordering::Relaxed,
+        );
         // ~500 Hz poll — tight enough for crisp FF timing, cheap on CPU.
         thread::sleep(Duration::from_millis(2));
     }

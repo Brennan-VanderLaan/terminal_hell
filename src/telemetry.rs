@@ -68,6 +68,15 @@ impl FrameProfile {
         }
     }
 
+    /// Fold an externally-measured duration into the current frame.
+    /// Used for cross-thread telemetry (gamepad worker thread) where
+    /// there's no single callsite to wrap with `begin`/`end`.
+    #[inline]
+    pub fn record_duration(&mut self, label: &'static str, dur: Duration) {
+        *self.this_frame.entry(label).or_default() += dur;
+        *self.rolling_calls.entry(label).or_default() += 1;
+    }
+
     /// Record an entity / queue population. Overwrites any previous
     /// value for this label; the report shows the most recent.
     pub fn set_count(&mut self, label: &'static str, n: usize) {
@@ -176,4 +185,25 @@ impl ReportLine {
             self.total_this_window.as_millis()
         )
     }
+}
+
+/// Pull the lock-free gamepad telemetry atomics into the frame
+/// profile. Called once per frame from every entry-point loop so the
+/// F3 overlay shows controller worker timings alongside sim + render.
+///
+/// `gpad_snap_age` is the key signal: it's the main-thread-observed
+/// age of the latest gamepad snapshot — the number you actually feel
+/// at the controller. If it's north of ~5ms, the worker's 2ms sleep
+/// is rounding up to the Windows 15.6ms scheduler tick.
+pub fn ingest_gamepad(profile: &mut FrameProfile) {
+    let gt = crate::gamepad::telemetry();
+    profile.record_duration("gpad_snap_age", gt.snap_age);
+    profile.record_duration("gpad_worker_iter", gt.worker_iter);
+    profile.record_duration("gpad_worker_period", gt.worker_period);
+    profile.record_duration("gpad_next_event", gt.next_event);
+    profile.record_duration("gpad_read_snap", gt.read_snapshot);
+    profile.record_duration("gpad_rumble_spawn", gt.rumble_spawn);
+    profile.set_count("gpad_events_total", gt.events_total as usize);
+    profile.set_count("gpad_rumble_q", gt.rumble_queue_depth as usize);
+    profile.set_count("gpad_rumble_retained", gt.rumble_retained as usize);
 }
