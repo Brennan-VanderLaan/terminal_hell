@@ -9,9 +9,8 @@ name = "Half-Life — Black Mesa Incident"
 description = "Headcrabs convert, zombies stagger, Combine close in with rifles."
 
 spawn_pool = [
-    "floodling",
-    "flood",
-    "rusher",
+    "headcrab",
+    "zombie",
     "marksman",
     "pmc",
     "leaper",
@@ -25,12 +24,15 @@ signature_traversal = "blink"
 signature_perks = ["quick_hands", "survivor", "iron_will"]
 
 [spawn_weights]
-# Standard Headcrabs — parasite converters.
-floodling = 4
-# Headcrab Zombies — marines post-conversion. Staggering shamblers.
-flood = 3
-# Security guards / scientists-turned-zombies — the raw fodder layer.
-rusher = 3
+# Headcrab parasites — leap-attach → zombie conversion after gestation.
+# B4 upgraded from skinned Floodlings to the dedicated Headcrab
+# archetype so the brand's canonical behavior lives in its own registry
+# entry, not shared with the Flood faction.
+headcrab = 4
+# Converted shamblers — marines post-gestation. Dedicated Zombie
+# archetype replaces the skinned Rusher so its stats + behavior are
+# self-describing and can be tuned without touching Rusher.
+zombie = 3
 # Combine Soldier / Metrocop — ranged riflemen.
 marksman = 3
 # Elite Combine / Overwatch — heavier armored push.
@@ -44,14 +46,14 @@ leaper = 2
 # content/core/art/half_life/.
 
 [sprite_overrides]
-rusher = "headcrab_zombie.art"
+zombie = "headcrab_zombie.art"
 marksman = "combine_soldier.art"
 pmc = "combine_elite.art"
-floodling = "headcrab.art"
+headcrab = "headcrab.art"
 leaper = "fast_zombie.art"
 
 # Headcrab Zombie — shambling host with the crab clinging to its skull.
-[sprite_palettes.rusher]
+[sprite_palettes.zombie]
 H = "#c84830"
 C = "#3a1008"
 E = "#ffe040"
@@ -90,7 +92,7 @@ R = "#1a1410"
 S = "#14141a"
 
 # Headcrab alone — four splayed legs, curled maw.
-[sprite_palettes.floodling]
+[sprite_palettes.headcrab]
 L = "#7a2814"
 B = "#c85038"
 E = "#ffe040"

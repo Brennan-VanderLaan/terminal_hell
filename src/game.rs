@@ -1,4 +1,5 @@
 use crate::arena::{Arena, Material, Object, Tile};
+use crate::behavior::BehaviorRegistry;
 use crate::body_effect::ReactionRegistry;
 use crate::camera::Camera;
 use crate::carcosa::{Phantom, YellowSign};
@@ -342,6 +343,11 @@ pub struct Game {
     /// Body-on-death + body-on-interaction reaction lookup. Built-ins
     /// install at startup; future pack / plugin code can append.
     pub reactions: ReactionRegistry,
+    /// Per-archetype default BehaviorSet lookup. Built-ins install at
+    /// startup; B1 lets brand TOML override entries after `with_builtins`.
+    /// As of B0 the sim doesn't consult this at spawn time yet — the
+    /// registry exists so downstream work has a single source of truth.
+    pub behaviors: BehaviorRegistry,
     /// Tag-driven interaction rules (OnDeath, OnContact, ...). Any
     /// module can append rules; firing a body event queries this book
     /// for every tag the body carries.
@@ -375,6 +381,17 @@ impl Game {
         let default_brand = content.default_brand.clone();
         let mut camera = Camera::new(cols, rows);
         camera.center = (arena.width as f32 / 2.0, arena.height as f32 / 2.0);
+        // B1: seed the registry with built-in defaults, then merge
+        // TOML-authored `[behavior]` overrides from archetypes.toml
+        // on top. Any unknown-ID fallbacks log a warn through
+        // apply_toml so a brand typo surfaces in the in-game log
+        // console without taking down the load.
+        let mut behaviors = BehaviorRegistry::with_builtins();
+        for (arch, stats) in &content.archetypes {
+            if let Some(b) = stats.behavior.as_ref() {
+                behaviors.apply_toml(arch.to_name(), b);
+            }
+        }
         Self {
             arena,
             content,
@@ -435,6 +452,7 @@ impl Game {
             corpses: Vec::new(),
             next_corpse_id: 1,
             reactions: ReactionRegistry::with_builtins(),
+            behaviors,
             interactions: crate::interaction::InteractionBook::with_builtins(),
             tick_body_reactions: Vec::new(),
             tick_toast_events: Vec::new(),
@@ -2450,73 +2468,87 @@ impl Game {
             self.emit_noise(x, y, 90.0, 4.0);
         }
 
-        // Floodling conversion pass: each Floodling within touch
-        // range of a Horde enemy converts that enemy to Flood (or
-        // FloodCarrier on a 30% roll) and dies itself. Order doesn't
-        // matter — processed with swap_remove.
-        // Pre-compute all seeds we need so we don't overlap self
-        // borrows inside the scan.
+        // Floodling conversion pass — B2 retrofit.
+        //
+        // Gated on the Floodling archetype's BehaviorSet carrying a
+        // Convert action (installed by `BehaviorRegistry::with_builtins`
+        // and overridable by brand TOML). Dispatch finds a living
+        // non-Flood victim in touch range, rolls the 30/70 Flood/
+        // FloodCarrier split, and fires the Stack-mode swap via
+        // `apply_convert_stack`.
+        //
+        // The 30/70 split is a pre-retrofit gameplay quirk preserved
+        // at the dispatch layer — the Convert action itself declares
+        // `flood_carrier` as its canonical target. B3 will either
+        // promote the split to a first-class Convert-primitive feature
+        // or collapse to a single target; for B2 it's a dispatch wart
+        // with a clear cleanup path.
+        //
+        // `into_team` on the Convert action is honored by-convention
+        // today because Enemy::spawn already assigns team=flood for
+        // both Flood and FloodCarrier archetypes. Explicit into_team
+        // overrides with hostility reconfiguration is B3 work.
+        let floodling_convert_present = self
+            .behaviors
+            .for_archetype(Archetype::Floodling)
+            .actions
+            .iter()
+            .any(|a| matches!(a, crate::behavior::Action::Convert { .. }));
+
         let mut conversions: Vec<(usize, Archetype)> = Vec::new();
         let mut dying_floodlings: Vec<usize> = Vec::new();
-        let enemies_len = self.enemies.len();
-        for fi in 0..enemies_len {
-            let (fx, fy, arch) = {
-                let f = &self.enemies[fi];
-                (f.x, f.y, f.archetype)
-            };
-            if arch != Archetype::Floodling {
-                continue;
-            }
-            if dying_floodlings.contains(&fi) {
-                continue;
-            }
-            let mut victim: Option<(usize, f32, f32)> = None;
-            for vi in 0..enemies_len {
-                if vi == fi {
-                    continue;
-                }
-                let v = &self.enemies[vi];
-                // Skip already-Flood hosts (one-shot conversion) and
-                // other Floodlings, and skip dead victims. Team-tag
-                // check — generic; any future "flood-family" team
-                // works without archetype list edits.
-                let is_already_infected = v.team == crate::tag::Tag::new(crate::enemy::TEAM_FLOOD);
-                if is_already_infected
-                    || v.archetype == Archetype::Floodling
-                    || v.hp <= 0
-                {
-                    continue;
-                }
-                let dx = v.x - fx;
-                let dy = v.y - fy;
-                if dx * dx + dy * dy < 2.6 * 2.6 {
-                    victim = Some((vi, v.x, v.y));
-                    break;
-                }
-            }
-            if let Some((vi, vx, vy)) = victim {
-                let seed = self.next_seed((vx as i32, vy as i32));
-                let new_kind = if (seed & 0xFF) < 80 {
-                    Archetype::FloodCarrier
-                } else {
-                    Archetype::Flood
+        if floodling_convert_present {
+            let enemies_len = self.enemies.len();
+            for fi in 0..enemies_len {
+                let (fx, fy, arch) = {
+                    let f = &self.enemies[fi];
+                    (f.x, f.y, f.archetype)
                 };
-                conversions.push((vi, new_kind));
-                dying_floodlings.push(fi);
+                if arch != Archetype::Floodling {
+                    continue;
+                }
+                if dying_floodlings.contains(&fi) {
+                    continue;
+                }
+                let mut victim: Option<(usize, f32, f32)> = None;
+                for vi in 0..enemies_len {
+                    if vi == fi {
+                        continue;
+                    }
+                    let v = &self.enemies[vi];
+                    // Skip already-Flood hosts (one-shot conversion) and
+                    // other Floodlings, and skip dead victims. Team-tag
+                    // check — generic; any future "flood-family" team
+                    // works without archetype list edits.
+                    let is_already_infected =
+                        v.team == crate::tag::Tag::new(crate::enemy::TEAM_FLOOD);
+                    if is_already_infected
+                        || v.archetype == Archetype::Floodling
+                        || v.hp <= 0
+                    {
+                        continue;
+                    }
+                    let dx = v.x - fx;
+                    let dy = v.y - fy;
+                    if dx * dx + dy * dy < 2.6 * 2.6 {
+                        victim = Some((vi, v.x, v.y));
+                        break;
+                    }
+                }
+                if let Some((vi, vx, vy)) = victim {
+                    let seed = self.next_seed((vx as i32, vy as i32));
+                    let new_kind = if (seed & 0xFF) < 80 {
+                        Archetype::FloodCarrier
+                    } else {
+                        Archetype::Flood
+                    };
+                    conversions.push((vi, new_kind));
+                    dying_floodlings.push(fi);
+                }
             }
         }
-        // Apply conversions by rebuilding the victim enemy with the
-        // new archetype but preserving position.
         for (vi, new_arch) in conversions {
-            if vi >= self.enemies.len() {
-                continue;
-            }
-            let (x, y) = (self.enemies[vi].x, self.enemies[vi].y);
-            let stats = self.content.stats(new_arch).clone();
-            self.enemies[vi] = Enemy::spawn(new_arch, &stats, x, y);
-            // Puff of green gore to sell the transformation.
-            let seed = self.next_seed((x as i32, y as i32));
-            self.emit_blast((x, y), Pixel::rgb(150, 255, 140), seed, 1);
+            self.apply_convert_stack(vi, new_arch);
         }
         // Kill Floodlings that converted someone. Process in reverse
         // index order so swap_remove stays stable.
@@ -2527,6 +2559,17 @@ impl Game {
                 self.enemies[idx].hp = 0;
             }
         }
+
+        // B4.5: generic Convert dispatch + phase tick + Consume growth.
+        // These three passes make Headcrab leap-attach + phased
+        // gestation + Rat consume-to-grow actually fire at runtime.
+        // OnHostDeath routing lives in the death-cleanup pass further
+        // down; that's what resolves infected hosts that die
+        // mid-gestation.
+        self.tick_generic_convert();
+        self.tick_infection_phases(dt);
+        self.tick_enemy_melee(&mut enemy_status_kills);
+        self.tick_consume_growth();
 
         // Apply Breacher wall smashes. Each smash is worth the
         // equivalent of 3 wall HP so a cheap wall falls in one hit;
@@ -3002,6 +3045,47 @@ impl Game {
         // on each kill to the firing weapon while we still have the killer id.
         kills_this_tick.sort_by(|a, b| a.0.cmp(&b.0));
         kills_this_tick.dedup_by(|a, b| a.0 == b.0);
+
+        // B4.5: OnHostDeath routing. Infected hosts in the kill set
+        // respond per their infection's policy:
+        //  - `Cancel` (default) — infection is discarded, regular
+        //    death cleanup proceeds.
+        //  - `TriggerTerminal` — terminal fires at the dying host's
+        //    tile, which replaces the slot with the Convert's `into`
+        //    archetype (at full HP). The swapped-in entity is alive,
+        //    so it's removed from this tick's kill list.
+        //  - `AdvancePhase` — collapses to `TriggerTerminal` for the
+        //    B4.5 scope (full detached-infection-on-corpse semantics
+        //    is a future add when corpses grow richer state).
+        {
+            use crate::behavior::OnHostDeath;
+            let mut host_terminals: Vec<usize> = Vec::new();
+            let mut cancel_idxs: Vec<usize> = Vec::new();
+            for (idx, _) in &kills_this_tick {
+                let Some(e) = self.enemies.get(*idx) else { continue };
+                let Some(infection) = e.infection_state.as_ref() else { continue };
+                match infection.on_host_death {
+                    OnHostDeath::Cancel => cancel_idxs.push(*idx),
+                    OnHostDeath::TriggerTerminal | OnHostDeath::AdvancePhase => {
+                        host_terminals.push(*idx);
+                    }
+                }
+            }
+            for idx in cancel_idxs {
+                if let Some(e) = self.enemies.get_mut(idx) {
+                    e.infection_state = None;
+                }
+            }
+            for idx in &host_terminals {
+                self.apply_infection_terminal(*idx);
+            }
+            if !host_terminals.is_empty() {
+                let terminal_set: std::collections::HashSet<usize> =
+                    host_terminals.iter().copied().collect();
+                kills_this_tick.retain(|(idx, _)| !terminal_set.contains(idx));
+            }
+        }
+
         for (idx, killer_id) in kills_this_tick.into_iter().rev() {
             if idx >= self.enemies.len() {
                 continue;
@@ -3101,9 +3185,30 @@ impl Game {
             // Fire the archetype's body_on_death reaction (if any).
             // Content-driven: archetype TOML names a reaction registered
             // in the ReactionRegistry; the bind happens here.
-            if let Some(name) = self.content.stats(arch).body_on_death.clone() {
+            let toml_death_name = self.content.stats(arch).body_on_death.clone();
+            if let Some(name) = toml_death_name.as_deref() {
                 let seed = self.next_seed((cx as i32, cy as i32));
-                self.fire_body_reaction(&name, cx, cy, seed);
+                self.fire_body_reaction(name, cx, cy, seed);
+            }
+            // B4.5: also fire BehaviorSet.reactions for OnDeath
+            // triggers. This is the B5 unification — declarative
+            // reactions declared in the registry (or via brand TOML
+            // `[behavior.reactions]`) now fire at death. Dedup against
+            // the TOML body_on_death path so brands declaring the same
+            // effect in both places don't double-fire.
+            {
+                use crate::behavior::ReactionTrigger;
+                let behavior = self.behaviors.for_archetype(arch);
+                for r in &behavior.reactions {
+                    if r.trigger != ReactionTrigger::OnDeath {
+                        continue;
+                    }
+                    if toml_death_name.as_deref() == Some(r.effect.as_str()) {
+                        continue; // already fired above
+                    }
+                    let seed = self.next_seed((cx as i32, cy as i32));
+                    self.fire_body_reaction(&r.effect, cx, cy, seed);
+                }
             }
             // Also fire tag-driven OnDeath rules from the interaction
             // book — this is where emergent spawns (Corpse-Eater raise),
@@ -3662,6 +3767,500 @@ impl Game {
     fn next_seed(&mut self, tile: (i32, i32)) -> u64 {
         self.seed_counter = self.seed_counter.wrapping_add(0x9E3779B97F4A7C15);
         self.seed_counter ^ ((tile.0 as u64) << 32) ^ (tile.1 as u64)
+    }
+
+    /// B2 retrofit: apply a Stack-mode Convert to the enemy at
+    /// `victim_idx`. Preserves the entity slot; rebuilds the Enemy via
+    /// [`Enemy::spawn`] with the new archetype so its default team +
+    /// hostiles come along automatically. Emits the pre-retrofit green-
+    /// gore puff as a visual tell.
+    ///
+    /// Currently ignores a Convert action's `into_team` override —
+    /// the B2 Floodling caller is always converting into a Flood-
+    /// family archetype whose default team already matches the spec's
+    /// `into_team = "flood"`. Honoring explicit into_team overrides
+    /// with paired hostility-set reconfiguration is B3+ work.
+    fn apply_convert_stack(&mut self, victim_idx: usize, into: Archetype) {
+        if victim_idx >= self.enemies.len() {
+            return;
+        }
+        let (x, y) = (self.enemies[victim_idx].x, self.enemies[victim_idx].y);
+        let stats = self.content.stats(into).clone();
+        self.enemies[victim_idx] = Enemy::spawn(into, &stats, x, y);
+        // Puff of green gore to sell the transformation.
+        let seed = self.next_seed((x as i32, y as i32));
+        self.emit_blast((x, y), Pixel::rgb(150, 255, 140), seed, 1);
+    }
+
+    /// B4.5: apply a Swap-mode Convert. Functionally equivalent to
+    /// `apply_convert_stack` today (both rebuild the slot via
+    /// [`Enemy::spawn`]) — the semantic contract differs though:
+    /// Swap conceptually *kills* the host and spawns the new archetype
+    /// fresh at the host's tile. Emits a tawny-orange tell so the
+    /// Headcrab→Zombie conversion reads distinctly from Flood's
+    /// green Stack puff.
+    fn apply_convert_swap(&mut self, host_idx: usize, into: Archetype) {
+        if host_idx >= self.enemies.len() {
+            return;
+        }
+        let (x, y) = (self.enemies[host_idx].x, self.enemies[host_idx].y);
+        let stats = self.content.stats(into).clone();
+        self.enemies[host_idx] = Enemy::spawn(into, &stats, x, y);
+        let seed = self.next_seed((x as i32, y as i32));
+        self.emit_blast((x, y), Pixel::rgb(220, 160, 80), seed, 2);
+    }
+
+    /// B4.5: fire the infection terminal on the host at `host_idx`.
+    /// Dispatches Swap vs Stack per the `InfectionState.mode` field
+    /// and clears the infection.
+    fn apply_infection_terminal(&mut self, host_idx: usize) {
+        if host_idx >= self.enemies.len() {
+            return;
+        }
+        let Some(infection) = self.enemies[host_idx].infection_state.take() else {
+            return;
+        };
+        let into = infection.into_archetype;
+        match infection.mode {
+            crate::behavior::ConvertMode::Swap => self.apply_convert_swap(host_idx, into),
+            crate::behavior::ConvertMode::Stack => self.apply_convert_stack(host_idx, into),
+        }
+    }
+
+    /// B4.5: generic Convert dispatch. For every enemy whose
+    /// BehaviorSet carries a Convert action (except Floodling, which
+    /// preserves its B2 hardcoded 30/70-split dispatch), scan for a
+    /// valid hostile victim within trigger range and install an
+    /// [`InfectionState`] on the victim. The infector then dies
+    /// (one-shot pattern — matches headcrab/facehugger/floodling
+    /// canon).
+    ///
+    /// Trigger range:
+    /// - `OnAttachSuccess` → the sibling `LeapAttach` action's range
+    ///   (falls back to infector.reach when no LeapAttach declared)
+    /// - `OnHit` → `infector.reach + 1.0` (rough melee+radius)
+    /// - Other triggers: skipped for now (future sim work).
+    ///
+    /// Stack rule: only one active infection per host — a second
+    /// Convert landing on an already-infected host is a no-op.
+    fn tick_generic_convert(&mut self) {
+        use crate::behavior::{
+            Action, ConvertTrigger, InfectionState, OnHostDeath as OhD, Phase,
+        };
+        // Scan + collect; mutate after so the borrow checker is happy.
+        let mut installations: Vec<(usize, Box<InfectionState>)> = Vec::new();
+        let mut dying_infectors: Vec<usize> = Vec::new();
+
+        for fi in 0..self.enemies.len() {
+            // Floodling keeps its B2-era hardcoded dispatch — the 30/70
+            // Flood/FloodCarrier split isn't yet a first-class Convert
+            // field. Generic path handles everything else.
+            if self.enemies[fi].archetype == Archetype::Floodling {
+                continue;
+            }
+            if self.enemies[fi].hp <= 0 {
+                continue;
+            }
+            // Infected hosts are victims, not infectors.
+            if self.enemies[fi].infection_state.is_some() {
+                continue;
+            }
+            if dying_infectors.contains(&fi) {
+                continue;
+            }
+
+            let behavior = self.behaviors.for_archetype(self.enemies[fi].archetype);
+
+            // Find the first Convert action + the range of its sibling
+            // LeapAttach action if one exists.
+            let mut convert_params: Option<(
+                String,
+                crate::behavior::ConvertMode,
+                bool,
+                Option<String>,
+                OhD,
+                Vec<Phase>,
+                ConvertTrigger,
+            )> = None;
+            let mut leap_range: Option<f32> = None;
+            for action in &behavior.actions {
+                match action {
+                    Action::Convert {
+                        into,
+                        mode,
+                        kill_host,
+                        into_team,
+                        on_host_death,
+                        phases,
+                        trigger,
+                        ..
+                    } => {
+                        if convert_params.is_none() {
+                            convert_params = Some((
+                                into.clone(),
+                                *mode,
+                                *kill_host,
+                                into_team.clone(),
+                                *on_host_death,
+                                phases.clone(),
+                                *trigger,
+                            ));
+                        }
+                    }
+                    Action::LeapAttach { range, .. } => {
+                        if leap_range.is_none() {
+                            leap_range = Some(*range);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            let Some((
+                into_str,
+                mode,
+                _kill_host,
+                into_team_str,
+                on_host_death,
+                phases,
+                trigger,
+            )) = convert_params
+            else {
+                continue;
+            };
+
+            let trigger_range = match trigger {
+                ConvertTrigger::OnAttachSuccess => {
+                    leap_range.unwrap_or(self.enemies[fi].reach())
+                }
+                ConvertTrigger::OnHit => self.enemies[fi].reach() + 1.0,
+                // OnKill requires a kill-credit hook; Immediate needs
+                // a cooldown to prevent per-tick storms. Both are
+                // deferred past B4.5.
+                ConvertTrigger::OnKill | ConvertTrigger::Immediate => continue,
+            };
+
+            let Some(into_arch) = Archetype::from_name(&into_str) else {
+                tracing::warn!(
+                    into = %into_str,
+                    "convert target not a known archetype — skipping"
+                );
+                continue;
+            };
+
+            let fx = self.enemies[fi].x;
+            let fy = self.enemies[fi].y;
+            let f_arch = self.enemies[fi].archetype;
+            let f_hostiles = self.enemies[fi].hostiles.clone();
+
+            // Scan for the first valid victim in range.
+            let mut victim_idx: Option<usize> = None;
+            for vi in 0..self.enemies.len() {
+                if vi == fi {
+                    continue;
+                }
+                let v = &self.enemies[vi];
+                if v.hp <= 0 {
+                    continue;
+                }
+                if v.infection_state.is_some() {
+                    continue;
+                }
+                if v.archetype == f_arch {
+                    continue;
+                }
+                if v.archetype == into_arch {
+                    // Don't re-infect things that are already the
+                    // target archetype (e.g., Headcrab-on-Zombie).
+                    continue;
+                }
+                if !f_hostiles.has(v.team) {
+                    continue;
+                }
+                let dx = v.x - fx;
+                let dy = v.y - fy;
+                if dx * dx + dy * dy < trigger_range * trigger_range {
+                    victim_idx = Some(vi);
+                    break;
+                }
+            }
+
+            let Some(vi) = victim_idx else { continue };
+
+            let state = Box::new(InfectionState {
+                into_archetype: into_arch,
+                mode,
+                kill_host: _kill_host,
+                into_team: into_team_str.as_ref().map(|s| crate::tag::Tag::new(s)),
+                on_host_death,
+                phase_timer: phases.first().map(|p| p.duration).unwrap_or(0.0),
+                phases,
+                phase_idx: 0,
+            });
+            installations.push((vi, state));
+            dying_infectors.push(fi);
+        }
+
+        for (vi, state) in installations {
+            if vi < self.enemies.len()
+                && self.enemies[vi].infection_state.is_none()
+                && self.enemies[vi].hp > 0
+            {
+                self.enemies[vi].infection_state = Some(state);
+            }
+        }
+        dying_infectors.sort();
+        dying_infectors.dedup();
+        for idx in dying_infectors.into_iter().rev() {
+            if idx < self.enemies.len() {
+                self.enemies[idx].hp = 0;
+            }
+        }
+    }
+
+    /// B4.5: advance active infections by one sim step. Terminal fires
+    /// when all phases expire.
+    fn tick_infection_phases(&mut self, dt: f32) {
+        use crate::behavior::InfectionTick;
+        let mut terminals: Vec<usize> = Vec::new();
+        for (idx, e) in self.enemies.iter_mut().enumerate() {
+            if e.hp <= 0 {
+                // Dead hosts are handled by the OnHostDeath hook in
+                // the death cleanup pass.
+                continue;
+            }
+            let Some(infection) = e.infection_state.as_deref_mut() else {
+                continue;
+            };
+            match infection.tick(dt) {
+                InfectionTick::Continue | InfectionTick::AdvancedPhase => {}
+                InfectionTick::TerminalFire => terminals.push(idx),
+            }
+        }
+        for idx in terminals {
+            self.apply_infection_terminal(idx);
+        }
+    }
+
+    /// B4.5: enemy-on-enemy contact damage. A enemy whose
+    /// `hostiles` tag set contains another enemy's `team` and is
+    /// within reach applies its `touch_damage` to the victim, then
+    /// enters a 0.5s bite cooldown. One contact per attacker per
+    /// tick — prevents a rat surrounded by 3 rushers from dealing
+    /// triple contact damage the instant the cooldown expires.
+    ///
+    /// Asymmetric: A hits B when A.hostiles contains B.team,
+    /// independent of whether B's hostiles contains A.team. So a
+    /// "starving" rat (hostile to everything) bites a "horde" rusher
+    /// even though the rusher doesn't consider the rat a threat.
+    /// Reciprocal damage emerges naturally when both enemies'
+    /// hostile lists cover each other.
+    ///
+    /// Targets:
+    /// - Excludes PlayerTurret from the ATTACKER side because player-
+    ///   controlled turrets ranged-fire only — they shouldn't
+    ///   accidentally lunge and bite a neighbor via this path.
+    /// - Excludes dead enemies (hp <= 0) on both sides.
+    /// - Excludes enemies with hostiles == empty (no targets).
+    ///
+    /// Perf: O(n²) over the enemies vec. For the typical ≤500 enemy
+    /// count this is ~250k distance checks per tick. If that becomes
+    /// a hotspot, the spatial grid at `self.spatial` can be wired in
+    /// for O(n·k) behavior where k is average near-neighbor count.
+    fn tick_enemy_melee(&mut self, status_kills: &mut Vec<usize>) {
+        let mut hits: Vec<(usize, i32)> = Vec::new();
+        let mut bitten_attackers: Vec<usize> = Vec::new();
+        let enemies_len = self.enemies.len();
+        for ai in 0..enemies_len {
+            let (ax, ay, a_reach, a_arch, a_hostiles, can_bite) = {
+                let a = &self.enemies[ai];
+                if a.hp <= 0 {
+                    continue;
+                }
+                // PlayerTurrets + stationary emplacements shouldn't
+                // melee — they're ranged or passive. Gate by
+                // archetype-specific opt-out until a "melee_bite"
+                // behavior tag replaces this list.
+                if matches!(
+                    a.archetype,
+                    Archetype::PlayerTurret | Archetype::Sentinel | Archetype::Howler
+                ) {
+                    continue;
+                }
+                if a.hostiles.is_empty() {
+                    continue;
+                }
+                (
+                    a.x,
+                    a.y,
+                    a.reach(),
+                    a.archetype,
+                    a.hostiles.clone(),
+                    a.touch_damage() > 0,
+                )
+            };
+            if !can_bite {
+                continue;
+            }
+            // Pick the first valid victim in reach.
+            let mut victim_idx: Option<usize> = None;
+            for bi in 0..enemies_len {
+                if bi == ai {
+                    continue;
+                }
+                let b = &self.enemies[bi];
+                if b.hp <= 0 {
+                    continue;
+                }
+                if b.archetype == a_arch {
+                    continue;
+                }
+                if !a_hostiles.has(b.team) {
+                    continue;
+                }
+                let dx = b.x - ax;
+                let dy = b.y - ay;
+                let reach = a_reach + b.hit_radius();
+                if dx * dx + dy * dy <= reach * reach {
+                    victim_idx = Some(bi);
+                    break;
+                }
+            }
+            let Some(bi) = victim_idx else { continue };
+            // Fire the bite (cooldown-gated; returns 0 if the
+            // attacker is still on bite-cooldown).
+            let dmg = self.enemies[ai].try_bite_enemy();
+            if dmg > 0 {
+                hits.push((bi, dmg));
+                bitten_attackers.push(ai);
+            }
+        }
+        // Apply damage + visual flash. Victims whose hp hits 0 get
+        // queued into the caller's status-kill list so the regular
+        // death-cleanup path spawns corpses, credits kill counts,
+        // and fires body_on_death + BehaviorSet reactions.
+        for (idx, dmg) in hits {
+            if let Some(e) = self.enemies.get_mut(idx) {
+                if e.hp > 0 {
+                    e.hp = e.hp.saturating_sub(dmg);
+                    e.hit_flash = 0.12;
+                    if e.hp <= 0 {
+                        status_kills.push(idx);
+                    }
+                }
+            }
+        }
+        // Note: `bitten_attackers` isn't needed for anything beyond
+        // potential future telemetry (e.g., "how many enemy-on-enemy
+        // bites this tick"). try_bite_enemy already set cooldown on
+        // successful bites, so no further mutation is required.
+        let _ = bitten_attackers;
+    }
+
+    /// B4.5: generic Consume dispatch. Enemies whose BehaviorSet
+    /// declares a Consume action with `growth_into = Some` scan for
+    /// nearest corpse within range; eating it credits `hp_gain` toward
+    /// `consumed_hp`. Once the cumulative total hits `growth_threshold`,
+    /// the eater self-swaps into the growth archetype.
+    ///
+    /// Skips the Eater archetype, which keeps its legacy `consumed:u8`
+    /// aggro-flip flow (aggro change at N corpses, no archetype swap).
+    /// Tag-targeting Consume on live enemies is deferred — current
+    /// implementation only eats corpses.
+    fn tick_consume_growth(&mut self) {
+        use crate::behavior::Action;
+        let mut claimed_corpses: std::collections::HashSet<u32> =
+            std::collections::HashSet::new();
+        let mut growths: Vec<(usize, Archetype)> = Vec::new();
+        let mut corpse_removals: Vec<u32> = Vec::new();
+
+        for fi in 0..self.enemies.len() {
+            if self.enemies[fi].archetype == Archetype::Eater {
+                // Eater keeps its legacy consumed:u8 aggro-flip flow.
+                continue;
+            }
+            if self.enemies[fi].hp <= 0 {
+                continue;
+            }
+
+            let behavior = self.behaviors.for_archetype(self.enemies[fi].archetype);
+            let mut consume_params: Option<(Vec<String>, f32, f32, String, u32)> = None;
+            for action in &behavior.actions {
+                if let Action::Consume {
+                    targets,
+                    range,
+                    hp_gain,
+                    growth_into: Some(into),
+                    growth_threshold: Some(threshold),
+                } = action
+                {
+                    consume_params = Some((
+                        targets.clone(),
+                        *range,
+                        *hp_gain,
+                        into.clone(),
+                        *threshold,
+                    ));
+                    break;
+                }
+            }
+            let Some((targets, range, hp_gain, growth_into_str, growth_threshold)) =
+                consume_params
+            else {
+                continue;
+            };
+            // MVP: only corpse consumption drives growth. Live-enemy
+            // consumption would need damage routing + credit rules.
+            if !targets.iter().any(|t| t == "corpse") {
+                continue;
+            }
+
+            let (fx, fy) = (self.enemies[fi].x, self.enemies[fi].y);
+            let range_sq = range * range;
+            let mut closest: Option<(u32, f32)> = None;
+            let corpse_count = self.corpses.len();
+            for c in &self.corpses {
+                if claimed_corpses.contains(&c.id) {
+                    continue;
+                }
+                let dx = c.x - fx;
+                let dy = c.y - fy;
+                let d2 = dx * dx + dy * dy;
+                if d2 <= range_sq && closest.map_or(true, |(_, b)| d2 < b) {
+                    closest = Some((c.id, d2));
+                }
+            }
+            let Some((corpse_id, _)) = closest else {
+                continue;
+            };
+            let _ = corpse_count;
+            claimed_corpses.insert(corpse_id);
+            corpse_removals.push(corpse_id);
+
+            let add = hp_gain.max(0.0) as u32;
+            let new_total = self.enemies[fi].consumed_hp.saturating_add(add);
+            self.enemies[fi].consumed_hp = new_total;
+
+            if new_total >= growth_threshold {
+                if let Some(into_arch) = Archetype::from_name(&growth_into_str) {
+                    growths.push((fi, into_arch));
+                } else {
+                    tracing::warn!(
+                        into = %growth_into_str,
+                        "consume growth_into not a known archetype — skipping"
+                    );
+                }
+            }
+        }
+
+        for id in corpse_removals {
+            self.corpses.retain(|c| c.id != id);
+        }
+        // Apply growths last so the eater doesn't immediately re-enter
+        // the scan as a different archetype this tick.
+        for (idx, into_arch) in growths {
+            self.apply_convert_swap(idx, into_arch);
+        }
     }
 
     fn emit_blast(&mut self, at: (f32, f32), color: Pixel, seed: u64, intensity: u8) {

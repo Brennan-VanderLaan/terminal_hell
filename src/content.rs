@@ -13,6 +13,7 @@ use include_dir::{Dir, include_dir};
 use serde::Deserialize;
 use std::collections::HashMap;
 
+use crate::behavior::BehaviorToml;
 use crate::enemy::Archetype;
 use crate::perk::Perk;
 use crate::primitive::Primitive;
@@ -66,6 +67,14 @@ pub struct ArchetypeStats {
     /// generic (rusher, swarmling).
     #[serde(default)]
     pub signature_fire_mode: Option<String>,
+    /// Optional [`BehaviorToml`] override block. Merges over the
+    /// archetype's default registered BehaviorSet at Game construction
+    /// time. Absent → the archetype uses its `BehaviorRegistry::
+    /// with_builtins` default. B1 wiring — the sim doesn't consult the
+    /// resulting BehaviorSet at dispatch yet; B2+ starts routing
+    /// through it.
+    #[serde(default)]
+    pub behavior: Option<BehaviorToml>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -549,6 +558,10 @@ fn raw_names(db: &HashMap<Archetype, ArchetypeStats>) -> Vec<&'static str> {
             Archetype::FloodCarrier => "flood_carrier",
             Archetype::PlayerTurret => "player_turret",
             Archetype::Phaser => "phaser",
+            Archetype::Headcrab => "headcrab",
+            Archetype::Zombie => "zombie",
+            Archetype::Rat => "rat",
+            Archetype::DireRat => "dire_rat",
         })
         .collect()
 }

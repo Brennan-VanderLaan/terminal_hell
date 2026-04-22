@@ -94,6 +94,9 @@ impl TagSet {
     pub fn from_strs(strs: &[&str]) -> Self {
         Self { tags: strs.iter().map(|s| Tag::new(s)).collect() }
     }
+    pub fn from_string_slice(strs: &[String]) -> Self {
+        Self { tags: strs.iter().map(|s| Tag::new(s)).collect() }
+    }
     pub fn has(&self, t: Tag) -> bool {
         self.tags.iter().any(|&x| x == t)
     }
@@ -112,6 +115,16 @@ impl TagSet {
         self.tags.is_empty()
     }
 }
+
+/// Bag-equality: same tags regardless of insertion order. Two tagsets
+/// are equal if they contain the same tag elements. O(n*m) but sets
+/// are typically <8 tags so this is cheaper than sorting.
+impl PartialEq for TagSet {
+    fn eq(&self, other: &Self) -> bool {
+        self.tags.len() == other.tags.len() && self.tags.iter().all(|&t| other.has(t))
+    }
+}
+impl Eq for TagSet {}
 
 fn intern_table() -> &'static Mutex<HashMap<String, &'static str>> {
     static TABLE: OnceLock<Mutex<HashMap<String, &'static str>>> = OnceLock::new();

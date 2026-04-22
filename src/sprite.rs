@@ -408,6 +408,19 @@ pub fn enemy_sprite(archetype: Archetype) -> Sprite {
         Archetype::Floodling => floodling(),
         Archetype::Flood => flood(),
         Archetype::FloodCarrier => flood_carrier(),
+        // B4 new archetypes — MVP art: Headcrab reuses the Floodling
+        // silhouette (they're mechanically cousins and visually similar),
+        // Zombie reuses the Flood silhouette. Brand-level sprite_overrides
+        // in half_life.toml point to distinct headcrab.art / headcrab_
+        // zombie.art files when that brand is active, so in practice
+        // players see dedicated art via the existing override path.
+        Archetype::Headcrab => floodling(),
+        Archetype::Zombie => flood(),
+        // Rat + DireRat MVP art: reuse Swarmling (small scurrying) and
+        // Splitter (larger biological) silhouettes. Dedicated rat art
+        // lands with a future art pass.
+        Archetype::Rat => swarmling(),
+        Archetype::DireRat => splitter(),
         // PlayerTurret borrows the Sentinel silhouette recolored
         // survivor-cyan so friendly vs hostile turrets are
         // immediately distinguishable.

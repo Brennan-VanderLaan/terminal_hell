@@ -81,6 +81,27 @@ pub enum Archetype {
     /// brief shimmer telegraph. Fragile but punishing in melee once
     /// it lands next to you — survives on being hard to track.
     Phaser,
+    /// B4 first-content: Half-Life Xen parasite. Seeks any living
+    /// non-infected host (NearestAttachable), leaps onto contact,
+    /// converts the host to a Zombie after a two-phase gestation
+    /// (mounted + deteriorating). Team "parasite", hostile to
+    /// survivors + horde. Fragile, fast, on-brand-terrifying.
+    Headcrab,
+    /// B4 first-content: Headcrab-converted marine. Shambling bruiser
+    /// — slower than a Rusher, hits harder, team "horde" so Zombies
+    /// re-join the normal wave threat model after conversion.
+    Zombie,
+    /// B4 first-content: starving plague rat. Tiny, fast, team "swarm"
+    /// so it hunts every living thing — survivors, horde, parasites,
+    /// flood — equally. Eats corpses to grow into a DireRat via the
+    /// Consume primitive's `growth_into` + `growth_threshold` fields.
+    /// Behavior.md §4.4 spec example.
+    Rat,
+    /// B4 first-content: grown form of the Rat. Bigger, slower,
+    /// sturdier, same hostile-to-all team allegiance. Emergent —
+    /// intended to appear via Consume-growth rather than direct spawn,
+    /// though direct spawn is permitted (low weight) in the brand pool.
+    DireRat,
 }
 
 /// Generic team + hostility system. Instead of a hardcoded Faction
@@ -126,6 +147,10 @@ impl Archetype {
             22 => Archetype::FloodCarrier,
             23 => Archetype::PlayerTurret,
             24 => Archetype::Phaser,
+            25 => Archetype::Headcrab,
+            26 => Archetype::Zombie,
+            27 => Archetype::Rat,
+            28 => Archetype::DireRat,
             _ => Archetype::Rusher,
         }
     }
@@ -156,6 +181,10 @@ impl Archetype {
             Archetype::FloodCarrier => 22,
             Archetype::PlayerTurret => 23,
             Archetype::Phaser => 24,
+            Archetype::Headcrab => 25,
+            Archetype::Zombie => 26,
+            Archetype::Rat => 27,
+            Archetype::DireRat => 28,
         }
     }
 
@@ -188,6 +217,10 @@ impl Archetype {
             "flood_carrier" => Archetype::FloodCarrier,
             "player_turret" => Archetype::PlayerTurret,
             "phaser" => Archetype::Phaser,
+            "headcrab" => Archetype::Headcrab,
+            "zombie" => Archetype::Zombie,
+            "rat" => Archetype::Rat,
+            "dire_rat" => Archetype::DireRat,
             _ => return None,
         })
     }
@@ -222,6 +255,10 @@ impl Archetype {
             Archetype::FloodCarrier => "flood_carrier",
             Archetype::PlayerTurret => "player_turret",
             Archetype::Phaser => "phaser",
+            Archetype::Headcrab => "headcrab",
+            Archetype::Zombie => "zombie",
+            Archetype::Rat => "rat",
+            Archetype::DireRat => "dire_rat",
         }
     }
 
@@ -282,6 +319,10 @@ impl Archetype {
             Archetype::FloodCarrier => "flood_carrier",
             Archetype::PlayerTurret => "player_turret",
             Archetype::Phaser => "phaser",
+            Archetype::Headcrab => "headcrab",
+            Archetype::Zombie => "zombie",
+            Archetype::Rat => "rat",
+            Archetype::DireRat => "dire_rat",
         }
     }
 }
@@ -381,6 +422,15 @@ pub struct Enemy {
     /// targeting. `None` today; scaffolding for the RTS-style control
     /// path (see src/behavior.rs::DirectorOverride).
     pub director_override: Option<crate::behavior::DirectorOverride>,
+    /// Live Convert infection riding this host. `Some` from the tick
+    /// a Convert action's trigger fires on this enemy through to the
+    /// tick the terminal executes. Boxed so uninfected enemies stay
+    /// cache-small.
+    pub infection_state: Option<Box<crate::behavior::InfectionState>>,
+    /// Cumulative HP consumed by this enemy's Consume action. Drives
+    /// the `growth_into` self-swap when the threshold is reached;
+    /// unused by enemies whose Consume declares no growth.
+    pub consumed_hp: u32,
 }
 
 impl Enemy {
@@ -425,10 +475,22 @@ impl Enemy {
             // faction-war behavior. Everyone else is "horde" and
             // targets "survivor" only. Content packs can author new
             // teams by seeding different defaults via TOML (future).
+            // Team routing. Headcrab sits on its own `parasite` team
+            // so it hunts both survivors + horde (just like Floodlings
+            // do, only via a different tag — keeps the Flood and
+            // Half-Life factions distinguishable in the target buckets).
+            // Zombie re-joins the regular horde after conversion. Rats
+            // sit on their own `swarm` team, hostile to every living
+            // faction — the "eats everything" identity of Behavior.md
+            // §4.4's starving-rat example.
             team: if matches!(archetype, Archetype::Flood | Archetype::FloodCarrier) {
                 crate::tag::Tag::new(TEAM_FLOOD)
             } else if matches!(archetype, Archetype::PlayerTurret) {
                 crate::tag::Tag::new(TEAM_SURVIVOR)
+            } else if matches!(archetype, Archetype::Headcrab) {
+                crate::tag::Tag::new("parasite")
+            } else if matches!(archetype, Archetype::Rat | Archetype::DireRat) {
+                crate::tag::Tag::new("swarm")
             } else {
                 crate::tag::Tag::new(TEAM_HORDE)
             },
@@ -436,6 +498,17 @@ impl Enemy {
                 crate::tag::TagSet::from_strs(&[TEAM_SURVIVOR, TEAM_HORDE])
             } else if matches!(archetype, Archetype::PlayerTurret) {
                 crate::tag::TagSet::from_strs(&[TEAM_HORDE, TEAM_FLOOD])
+            } else if matches!(archetype, Archetype::Headcrab) {
+                crate::tag::TagSet::from_strs(&[TEAM_SURVIVOR, TEAM_HORDE])
+            } else if matches!(archetype, Archetype::Rat | Archetype::DireRat) {
+                // Starving rats eat literally everything alive — the
+                // one archetype in the game with a 4-way hostile list.
+                crate::tag::TagSet::from_strs(&[
+                    TEAM_SURVIVOR,
+                    TEAM_HORDE,
+                    TEAM_FLOOD,
+                    "parasite",
+                ])
             } else {
                 crate::tag::TagSet::from_strs(&[TEAM_SURVIVOR])
             },
@@ -443,6 +516,8 @@ impl Enemy {
             reload_timer: 0.0,
             grenade_cooldown: if matches!(archetype, Archetype::Killa) { 4.0 } else { 0.0 },
             director_override: None,
+            infection_state: None,
+            consumed_hp: 0,
         }
     }
 
@@ -497,6 +572,10 @@ impl Enemy {
         self.touch_damage
     }
 
+    pub fn reach(&self) -> f32 {
+        self.reach
+    }
+
     pub fn hit_radius(&self) -> f32 {
         self.hit_radius
     }
@@ -530,6 +609,14 @@ impl Enemy {
             // Phaser: pale violet with a warp-edge shimmer. Reads as
             // "something moved through the air here."
             Archetype::Phaser => Pixel::rgb(200, 140, 255),
+            // Headcrab: sickly orange-yellow — Xen biology palette.
+            Archetype::Headcrab => Pixel::rgb(230, 170, 60),
+            // Zombie: bruised flesh-gray with a yellow bite pallor.
+            Archetype::Zombie => Pixel::rgb(170, 170, 140),
+            // Rat: dirty brown-grey scurry.
+            Archetype::Rat => Pixel::rgb(140, 110, 80),
+            // DireRat: sickly yellow-brown, eyes too bright.
+            Archetype::DireRat => Pixel::rgb(170, 140, 70),
         }
     }
 
@@ -560,6 +647,10 @@ impl Enemy {
             Archetype::FloodCarrier => Pixel::rgb(140, 200, 110),
             Archetype::PlayerTurret => Pixel::rgb(30, 120, 160),
             Archetype::Phaser => Pixel::rgb(120, 70, 180),
+            Archetype::Headcrab => Pixel::rgb(190, 130, 40),
+            Archetype::Zombie => Pixel::rgb(120, 100, 80),
+            Archetype::Rat => Pixel::rgb(100, 70, 50),
+            Archetype::DireRat => Pixel::rgb(130, 90, 40),
         }
     }
 
@@ -817,6 +908,21 @@ impl Enemy {
             return self.touch_damage;
         }
         0
+    }
+
+    /// B4.5: try to land a contact bite against another enemy. Returns
+    /// the damage dealt (0 if cooldown or self.touch_damage == 0);
+    /// caller handles applying the damage + flashing the victim.
+    /// Separate from touch_player so the two paths can evolve
+    /// independently — enemy-on-enemy bite has the same cooldown
+    /// window (0.5s) for balance reasons but the caller decides
+    /// reach geometry.
+    pub fn try_bite_enemy(&mut self) -> i32 {
+        if self.touch_cooldown > 0.0 || self.touch_damage == 0 {
+            return 0;
+        }
+        self.touch_cooldown = 0.5;
+        self.touch_damage
     }
 
     pub fn render(&self, fb: &mut Framebuffer, camera: &Camera, content: &crate::content::ContentDb) {

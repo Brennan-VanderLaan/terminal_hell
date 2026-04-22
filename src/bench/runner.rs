@@ -342,6 +342,22 @@ pub fn run_scenario_with_interrupt(
         0.0
     };
 
+    // Final archetype census — count living enemies per archetype.
+    // B4.5 scenarios (headcrab_swarm, rat_feast) assert on this to
+    // verify Convert + Consume dispatch fired end-to-end.
+    let mut census_map: std::collections::HashMap<&'static str, u32> =
+        std::collections::HashMap::new();
+    for e in &game.enemies {
+        if e.hp > 0 {
+            *census_map.entry(e.archetype.to_name()).or_default() += 1;
+        }
+    }
+    let mut final_archetype_census: Vec<(String, u32)> = census_map
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
+    final_archetype_census.sort_by(|a, b| a.0.cmp(&b.0));
+
     Ok(ScenarioReport {
         name: scenario.name.to_string(),
         render_mode: render_mode.label(),
@@ -363,6 +379,7 @@ pub fn run_scenario_with_interrupt(
         peak_corpses,
         subsystems,
         cleared_early,
+        final_archetype_census,
     })
 }
 

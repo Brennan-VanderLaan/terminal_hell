@@ -436,6 +436,17 @@ fn swarm_params(arch: Archetype) -> Option<SwarmParams> {
             budget_cost: 2,
             cadence_pause: 1.0,
         }),
+        // Starving rats — dense vermin pours. Small clusters but many
+        // of them; cheap budget cost so the swarm overwhelms rather
+        // than attritions. Matches the Behavior.md §4.4 "eats
+        // everything" flavor — density is the threat.
+        Archetype::Rat => Some(SwarmParams {
+            clusters: (5, 9),
+            cluster_size: (6, 10),
+            spread: 1.8,
+            budget_cost: 1,
+            cadence_pause: 0.7,
+        }),
         _ => None,
     }
 }

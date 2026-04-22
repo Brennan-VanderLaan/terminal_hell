@@ -34,6 +34,11 @@ pub struct ScenarioReport {
     /// True if the scenario ended because all enemies died (when
     /// `stop_when_clear`). False if it ran to full duration.
     pub cleared_early: bool,
+    /// Final living-enemy census by archetype, collected at scenario
+    /// end. Lets B4.5 bench scenarios assert that conversions fired
+    /// end-to-end (e.g., `headcrab_swarm` expects Zombies > 0 at
+    /// finish). Sorted by archetype name for stable diffing.
+    pub final_archetype_census: Vec<(String, u32)>,
 }
 
 pub struct SubsystemSample {
@@ -83,6 +88,12 @@ impl ScenarioReport {
                     "    {:<22} {:>6}µs  total calls {:>6}\n",
                     sub.label, sub.avg_us, sub.total_calls,
                 ));
+            }
+        }
+        if !self.final_archetype_census.is_empty() {
+            s.push_str("  final archetype census:\n");
+            for (name, count) in &self.final_archetype_census {
+                s.push_str(&format!("    {:<22} {:>6}\n", name, count));
             }
         }
         s

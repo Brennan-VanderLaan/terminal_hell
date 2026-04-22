@@ -439,3 +439,178 @@ gore_profile = "extreme"
 # Corpse-feeder boss → siphon + overdrive + chain burst drops.
 signature_primitives = ["siphon", "overdrive", "chain"]
 signature_fire_mode = "burst"
+
+# ═══════════════════════════════════════════════════════════════════
+# B4 first-content: Half-Life — Headcrab + Zombie
+# ═══════════════════════════════════════════════════════════════════
+
+# Xen parasite. Fragile, fast, leaps at living hosts and converts
+# them into Zombies after a 6-second gestation (2.5s mounted + 3.5s
+# deteriorating). Behavior block below declares the full Convert
+# primitive with phases — spec §4.1 Behavior.md headcrab example.
+# The sim doesn't yet fire LeapAttach / phased Convert (B5+ work);
+# content is authored today so the authoring surface + registry
+# resolution paths are exercised end-to-end.
+[headcrab]
+hp = 18
+speed = 14.0
+touch_damage = 4
+hit_radius = 1.4
+reach = 1.8
+tags = ["biological", "parasite", "agile"]
+# Dying headcrabs bleed like anything else.
+body_on_death = "spawn_blood"
+gore_profile = "standard"
+# Parasites thematically drop contagion+siphon rolls.
+signature_primitives = ["contagion", "siphon"]
+signature_fire_mode = "auto"
+
+[headcrab.palette]
+# Reuse floodling palette keys — same sprite until dedicated art lands.
+B = "#e6a838"
+L = "#8e4a10"
+E = "#ffe078"
+M = "#1e0a04"
+D = "#5a2808"
+
+[headcrab.behavior]
+targeter = "nearest_attachable"
+
+[[headcrab.behavior.actions]]
+kind = "leap_attach"
+range = 3.5
+windup = 0.35
+cooldown = 1.2
+
+[[headcrab.behavior.actions]]
+kind = "convert"
+trigger = "on_attach_success"
+into = "zombie"
+mode = "swap"
+kill_host = true
+into_team = "horde"
+chain_cap = 1
+on_host_death = "trigger_terminal"
+
+[[headcrab.behavior.actions.phases]]
+name = "mounted"
+duration = 2.5
+tags_add = ["infected"]
+behavior_override = "panicked_host"
+sprite_overlay = "headcrab_clinging"
+
+[[headcrab.behavior.actions.phases]]
+name = "deteriorating"
+duration = 3.5
+tags_add = ["infected", "symptomatic"]
+behavior_override = "stumbling_host"
+sprite_overlay = "headcrab_deteriorating"
+ambient_vfx = ["blood_mist"]
+speed_mult = 0.4
+hp_drain_per_sec = 3.0
+
+[[headcrab.behavior.actions]]
+kind = "melee"
+
+# Converted marine. Shambling bruiser — slower than a Rusher, hits
+# harder, tagged "infected" so parasite-faction rules can key off it.
+[zombie]
+hp = 80
+speed = 9.0
+touch_damage = 14
+hit_radius = 2.5
+reach = 2.6
+tags = ["biological", "flesh", "infected", "shambling"]
+body_on_death = "spawn_big_blood"
+gore_profile = "heavy"
+# Zombies drop ember/breach — stumbling close-range threats.
+signature_primitives = ["breach", "ignite"]
+signature_fire_mode = "pump"
+
+[zombie.palette]
+# Bruised flesh-gray with yellow bite-pallor highlights.
+H = "#78735c"
+B = "#aaa48c"
+E = "#ffe040"
+D = "#3c3828"
+M = "#181612"
+
+[zombie.behavior]
+targeter = "nearest_player"
+
+[[zombie.behavior.actions]]
+kind = "melee"
+
+# ═══════════════════════════════════════════════════════════════════
+# B4 first-content: Starving Rats — undercity vermin
+# ═══════════════════════════════════════════════════════════════════
+
+# Plague rat. Tiny, fast, eats corpses to grow into a dire_rat after
+# 30 HP of consumed fodder. Team "swarm" — hostile to every living
+# faction (survivors, horde, flood, parasite). Behavior.md §4.4 spec
+# example for the Consume primitive with growth_into/growth_threshold.
+[rat]
+hp = 12
+speed = 22.0
+touch_damage = 3
+hit_radius = 1.2
+reach = 1.2
+tags = ["biological", "swarm", "vermin", "starving"]
+body_on_death = "spawn_blood"
+gore_profile = "standard"
+# Starving rats drop siphon primitives — they steal, they don't gift.
+signature_primitives = ["siphon"]
+signature_fire_mode = "auto"
+
+[rat.palette]
+# Dirty brown-grey scurry.
+H = "#8c6a4a"
+B = "#a8886a"
+E = "#e04030"
+D = "#38241a"
+M = "#181008"
+
+[rat.behavior]
+targeter = "nearest_corpse"
+
+[[rat.behavior.actions]]
+kind = "consume"
+targets = ["corpse", "enemy"]
+range = 1.2
+hp_gain = 6.0
+growth_into = "dire_rat"
+growth_threshold = 30
+
+[[rat.behavior.actions]]
+kind = "melee"
+
+# Grown rat — bigger, slower, sturdier, same hostile-to-all swarm
+# allegiance. Emerges via the rat's Consume growth; direct spawn is
+# permitted but low-weight so most DireRats are the result of a rat
+# that fed long enough to transform.
+[dire_rat]
+hp = 80
+speed = 15.0
+touch_damage = 14
+hit_radius = 2.6
+reach = 2.4
+tags = ["biological", "swarm", "vermin", "heavy"]
+body_on_death = "spawn_big_blood"
+gore_profile = "heavy"
+# Grown rats drop breach + siphon — the threshold-swapped threat.
+signature_primitives = ["breach", "siphon"]
+signature_fire_mode = "pump"
+
+[dire_rat.palette]
+# Sickly yellow-brown, eyes too bright.
+H = "#a88848"
+B = "#d0a858"
+E = "#f0c038"
+D = "#4a3824"
+M = "#1a1208"
+
+[dire_rat.behavior]
+targeter = "nearest_hostile"
+
+[[dire_rat.behavior.actions]]
+kind = "melee"
