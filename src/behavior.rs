@@ -39,6 +39,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::enemy::Archetype;
+use crate::primitive::Primitive;
 use crate::tag::{Tag, TagSet};
 
 // ============================================================================
@@ -170,6 +171,10 @@ pub enum Action {
     Convert {
         /// Archetype id of the terminal form (string — resolves to
         /// [`Archetype`] via [`Archetype::from_name`] at spawn time).
+        /// Used as the sole target when `variant_weights` is empty,
+        /// and as the fallback when a seeded `variant_weights` roll
+        /// fails to resolve any entry (e.g., brand typo → warn +
+        /// fallback, not crash).
         into: String,
         #[serde(default)]
         mode: ConvertMode,
@@ -200,6 +205,16 @@ pub enum Action {
         /// `TriggerTerminal` for canon-faithful inevitability.
         #[serde(default)]
         on_host_death: OnHostDeath,
+        /// Weighted pool of alternate `into` archetypes. When non-
+        /// empty, the generic Convert dispatch picks one at infection
+        /// time proportional to the weights. Empty means "use `into`
+        /// 100% of the time" — the common case. This is how Flood
+        /// expresses its 70/30 Flood/FloodCarrier split at the
+        /// registry level rather than a hardcoded dispatch branch.
+        ///
+        /// TOML: `variant_weights = [["flood", 70], ["flood_carrier", 30]]`
+        #[serde(default)]
+        variant_weights: Vec<(String, u32)>,
     },
     /// Reanimate a corpse entity. Distinct from Convert (which targets
     /// living hostiles). Necromancer / Flood-reanimation flavor.
@@ -417,6 +432,14 @@ pub struct InfectionState {
     pub phase_idx: usize,
     /// Seconds remaining in the current phase.
     pub phase_timer: f32,
+    /// Cascade depth for contagion propagation. Patient-zero is 0;
+    /// each contagion-spread hop increments by one. Checked against
+    /// the parent Convert's `chain_cap` to bound epidemic spread.
+    pub depth: u8,
+    /// Max cascade depth inherited from the parent Convert action.
+    /// Copied at install time so the phase tick doesn't need to
+    /// re-resolve the Convert source.
+    pub chain_cap: u8,
 }
 
 impl InfectionState {
@@ -469,12 +492,17 @@ pub struct BehaviorSet {
     /// Priority-ordered action list. First matching + ready entry
     /// fires per tick. Empty = no offensive dispatch.
     pub actions: Vec<Action>,
-    /// Event reactions. See [`Reaction`] — not yet consumed by the
-    /// sim in B1; bridged to body_effect in B5.
+    /// Event reactions. See [`Reaction`] — bridged to body_effect in B5.
     pub reactions: Vec<Reaction>,
     /// Interaction-matrix tags (e.g. "biological", "armored",
     /// "heavy"). Keyed the same way as gore / substance tags.
     pub tags: TagSet,
+    /// B6: enemy-side primitive slot list. Applied on melee hit to
+    /// the victim — Ignite sets the victim on fire, Cryo chills them,
+    /// Contagion spreads any burn/frost the attacker itself is
+    /// carrying. Mirrors the weapon-side primitive palette so brand
+    /// authoring stays consistent across attack surfaces.
+    pub primitives: Vec<Primitive>,
 }
 
 impl BehaviorSet {
@@ -489,6 +517,7 @@ impl BehaviorSet {
             actions: vec![Action::Melee],
             reactions: Vec::new(),
             tags: TagSet::default(),
+            primitives: Vec::new(),
         }
     }
 }
@@ -532,6 +561,11 @@ pub struct BehaviorToml {
     pub actions: Vec<Action>,
     pub reactions: Vec<Reaction>,
     pub tags: Vec<String>,
+    /// B6: Primitive slot list, authored as a list of snake_case
+    /// primitive ids (`"ignite"`, `"cryo"`, `"contagion"`, etc.).
+    /// Resolved to [`Primitive`] at apply time; unknown ids are
+    /// silently skipped with a warn log (no hard failure).
+    pub primitives: Vec<String>,
 }
 
 impl BehaviorToml {
@@ -674,6 +708,22 @@ impl BehaviorRegistry {
         if !toml.tags.is_empty() {
             base.tags = TagSet::from_string_slice(&toml.tags);
         }
+        if !toml.primitives.is_empty() {
+            let mut resolved: Vec<Primitive> = Vec::new();
+            for s in &toml.primitives {
+                match Primitive::from_name(s) {
+                    Some(p) => resolved.push(p),
+                    None => {
+                        tracing::warn!(
+                            archetype = archetype_name,
+                            primitive = %s,
+                            "unknown primitive id in behavior TOML — skipping"
+                        );
+                    }
+                }
+            }
+            base.primitives = resolved;
+        }
         self.entries.insert(archetype_name.to_string(), base);
     }
 
@@ -717,6 +767,7 @@ impl BehaviorRegistry {
                     effect: "charge_telegraph".to_string(),
                 }],
                 tags: TagSet::default(),
+            primitives: Vec::new(),
             },
         );
         r.register(
@@ -735,6 +786,7 @@ impl BehaviorRegistry {
                     effect: "explode_big".to_string(),
                 }],
                 tags: TagSet::from_strs(&["floating"]),
+            primitives: Vec::new(),
             },
         );
         r.register(
@@ -755,6 +807,7 @@ impl BehaviorRegistry {
                 ],
                 reactions: Vec::new(),
                 tags: TagSet::from_strs(&["biological", "agile", "leaper"]),
+            primitives: Vec::new(),
             },
         );
         r.register("phaser", tagged_melee(&["arcane", "agile", "phaser"]));
@@ -776,14 +829,16 @@ impl BehaviorRegistry {
                     effect: "spawn_swarmlings".to_string(),
                 }],
                 tags: TagSet::from_strs(&["biological", "fragmenting"]),
+            primitives: Vec::new(),
             },
         );
         r.register("zergling", tagged_melee(&["biological", "swarm", "agile"]));
-        // Floodling — carries the B2 retrofit's canonical Convert action.
-        // Dispatch at `game.rs::tick_flood_conversions` reads this action
-        // to drive the in-place Stack-mode swap of any living non-Flood
-        // host within touch range. The 30/70 Flood/FloodCarrier split is
-        // preserved as a dispatch-layer quirk — B3 cleanup target.
+        // Floodling — 70/30 Flood/FloodCarrier split is now a
+        // first-class feature of the Convert primitive via
+        // `variant_weights`. The B4.5→B6 migration retired the
+        // Floodling-specific hardcoded branch in `game.rs`; the
+        // generic dispatch handles Floodlings identically to any
+        // other Convert-carrying archetype.
         r.register(
             "floodling",
             BehaviorSet {
@@ -792,7 +847,7 @@ impl BehaviorRegistry {
                 actions: vec![
                     Action::Melee,
                     Action::Convert {
-                        into: "flood_carrier".to_string(),
+                        into: "flood".to_string(),
                         mode: ConvertMode::Stack,
                         kill_host: false,
                         into_team: Some("flood".to_string()),
@@ -801,10 +856,15 @@ impl BehaviorRegistry {
                         trigger: ConvertTrigger::OnHit,
                         phases: Vec::new(),
                         on_host_death: OnHostDeath::TriggerTerminal,
+                        variant_weights: vec![
+                            ("flood".to_string(), 70),
+                            ("flood_carrier".to_string(), 30),
+                        ],
                     },
                 ],
                 reactions: Vec::new(),
                 tags: TagSet::from_strs(&["parasite", "infectious"]),
+            primitives: Vec::new(),
             },
         );
         r.register("flood", tagged_melee(&["flood", "infected", "feral"]));
@@ -823,6 +883,7 @@ impl BehaviorRegistry {
                     effect: "burst_floodlings".to_string(),
                 }],
                 tags: TagSet::from_strs(&["flood", "carrier", "volatile"]),
+            primitives: Vec::new(),
             },
         );
 
@@ -835,6 +896,7 @@ impl BehaviorRegistry {
                 actions: vec![Action::Hitscan { range: 40.0, tell: 0.45 }],
                 reactions: Vec::new(),
                 tags: TagSet::default(),
+            primitives: Vec::new(),
             },
         );
         r.register(
@@ -845,6 +907,7 @@ impl BehaviorRegistry {
                 actions: vec![Action::Hitscan { range: 40.0, tell: 0.45 }],
                 reactions: Vec::new(),
                 tags: TagSet::from_strs(&["tactical"]),
+            primitives: Vec::new(),
             },
         );
         r.register(
@@ -855,6 +918,7 @@ impl BehaviorRegistry {
                 actions: vec![Action::Hitscan { range: 60.0, tell: 0.18 }],
                 reactions: Vec::new(),
                 tags: TagSet::from_strs(&["biological", "armored", "heavy", "boss"]),
+            primitives: Vec::new(),
             },
         );
 
@@ -883,6 +947,7 @@ impl BehaviorRegistry {
                 ],
                 reactions: Vec::new(),
                 tags: TagSet::from_strs(&["abomination", "hungry"]),
+            primitives: Vec::new(),
             },
         );
 
@@ -899,6 +964,7 @@ impl BehaviorRegistry {
                 }],
                 reactions: Vec::new(),
                 tags: TagSet::from_strs(&["biological", "heavy", "breacher"]),
+            primitives: Vec::new(),
             },
         );
         r.register(
@@ -920,6 +986,7 @@ impl BehaviorRegistry {
                     effect: "explode_big".to_string(),
                 }],
                 tags: TagSet::from_strs(&["biological", "volatile", "breacher"]),
+            primitives: Vec::new(),
             },
         );
         r.register(
@@ -934,6 +1001,7 @@ impl BehaviorRegistry {
                 }],
                 reactions: Vec::new(),
                 tags: TagSet::from_strs(&["mechanical", "heavy", "armored", "breacher"]),
+            primitives: Vec::new(),
             },
         );
 
@@ -951,6 +1019,7 @@ impl BehaviorRegistry {
                 }],
                 reactions: Vec::new(),
                 tags: TagSet::from_strs(&["tactical", "rocketeer"]),
+            primitives: Vec::new(),
             },
         );
 
@@ -963,6 +1032,7 @@ impl BehaviorRegistry {
                 actions: vec![Action::Melee],
                 reactions: Vec::new(),
                 tags: TagSet::from_strs(&["cultist", "support", "noisy"]),
+            primitives: Vec::new(),
             },
         );
         r.register(
@@ -973,6 +1043,7 @@ impl BehaviorRegistry {
                 actions: vec![Action::Hitscan { range: 48.0, tell: 0.55 }],
                 reactions: Vec::new(),
                 tags: TagSet::from_strs(&["mechanical", "turret"]),
+            primitives: Vec::new(),
             },
         );
         r.register(
@@ -983,6 +1054,7 @@ impl BehaviorRegistry {
                 actions: vec![Action::Hitscan { range: 28.0, tell: 0.3 }],
                 reactions: Vec::new(),
                 tags: TagSet::from_strs(&["mechanical", "ally", "turret"]),
+            primitives: Vec::new(),
             },
         );
 
@@ -1028,6 +1100,9 @@ impl BehaviorRegistry {
                                 ambient_vfx: Vec::new(),
                                 speed_mult: 1.0,
                                 hp_drain_per_sec: 0.0,
+                                // Mounted phase doesn't spread — the
+                                // gestation is between this host and
+                                // the terminal only.
                                 contagious: false,
                             },
                             Phase {
@@ -1049,6 +1124,7 @@ impl BehaviorRegistry {
                             },
                         ],
                         on_host_death: OnHostDeath::TriggerTerminal,
+                        variant_weights: Vec::new(),
                     },
                     // Melee fallback when the host is already in contact
                     // range but LeapAttach is on cooldown.
@@ -1056,6 +1132,11 @@ impl BehaviorRegistry {
                 ],
                 reactions: Vec::new(),
                 tags: TagSet::from_strs(&["parasite", "infectious", "biological"]),
+                // B6: Cryo bite — the headcrab's leap-attach briefly
+                // chills the host on contact. Makes the marine
+                // stagger for a beat, selling the impact of the
+                // latch moment before phases take over.
+                primitives: vec![Primitive::Cryo],
             },
         );
         // Zombie — the converted marine. Shambling direct-melee with
@@ -1078,6 +1159,11 @@ impl BehaviorRegistry {
                     "infected",
                     "shambling",
                 ]),
+                // B6: Contagion-slotted bite — when the zombie is
+                // already on fire / frozen (e.g. from a player's
+                // Ignite weapon), the contagion spreads to the next
+                // victim the zombie bites. Plague-bearer flavor.
+                primitives: vec![Primitive::Contagion],
             },
         );
 
@@ -1110,6 +1196,7 @@ impl BehaviorRegistry {
                 ],
                 reactions: Vec::new(),
                 tags: TagSet::from_strs(&["biological", "swarm", "vermin", "starving"]),
+            primitives: Vec::new(),
             },
         );
         // DireRat — grown form. Bigger, slower, no Consume (already
@@ -1124,6 +1211,7 @@ impl BehaviorRegistry {
                 actions: vec![Action::Melee],
                 reactions: Vec::new(),
                 tags: TagSet::from_strs(&["biological", "swarm", "vermin", "heavy"]),
+            primitives: Vec::new(),
             },
         );
 
@@ -1139,6 +1227,7 @@ fn tagged_melee(tags: &[&str]) -> BehaviorSet {
         actions: vec![Action::Melee],
         reactions: Vec::new(),
         tags: TagSet::from_strs(tags),
+        primitives: Vec::new(),
     }
 }
 
@@ -1600,6 +1689,8 @@ mod tests {
             phase_timer: phases.first().map(|p| p.duration).unwrap_or(0.0),
             phases,
             phase_idx: 0,
+            depth: 0,
+            chain_cap: 3,
         }
     }
 
@@ -1658,6 +1749,49 @@ mod tests {
         let mut infection = infection_with_phases(Vec::new());
         assert_eq!(infection.tick(0.033), InfectionTick::TerminalFire);
         assert_eq!(infection.tick(0.033), InfectionTick::TerminalFire);
+    }
+
+    // -- B6 primitives-on-enemies --------------------------------------
+
+    /// Zombie's registry default carries the Contagion primitive.
+    /// Melee-bite dispatch keys on this to transmit any burn/frost
+    /// the zombie is carrying onto the bitten victim.
+    #[test]
+    fn zombie_declares_contagion_primitive() {
+        let reg = BehaviorRegistry::with_builtins();
+        let z = reg.get("zombie").unwrap();
+        assert!(z.primitives.contains(&Primitive::Contagion));
+    }
+
+    /// Headcrab's registry default carries Cryo — the leap-attach
+    /// briefly chills the host on contact.
+    #[test]
+    fn headcrab_declares_cryo_primitive() {
+        let reg = BehaviorRegistry::with_builtins();
+        let hc = reg.get("headcrab").unwrap();
+        assert!(hc.primitives.contains(&Primitive::Cryo));
+    }
+
+    /// TOML `[behavior] primitives = [...]` parses into the
+    /// BehaviorToml `primitives` field as snake_case strings, and
+    /// `apply_toml` resolves them to [`Primitive`] enum variants.
+    /// Unknown names are silently dropped (warn-logged).
+    #[test]
+    fn toml_primitives_parse_and_merge() {
+        let mut reg = BehaviorRegistry::new();
+        reg.register("rusher", BehaviorSet::direct_melee());
+        let src = r#"
+            primitives = ["ignite", "cryo", "not_a_primitive"]
+        "#;
+        let t: BehaviorToml = toml::from_str(src).unwrap();
+        assert_eq!(t.primitives.len(), 3);
+        reg.apply_toml("rusher", &t);
+        let set = reg.get("rusher").unwrap();
+        // `not_a_primitive` drops silently with a warn; good ones
+        // land.
+        assert_eq!(set.primitives.len(), 2);
+        assert!(set.primitives.contains(&Primitive::Ignite));
+        assert!(set.primitives.contains(&Primitive::Cryo));
     }
 
     // -- B3: on-brand metadata enrichment -------------------------------
@@ -1779,9 +1913,10 @@ mod tests {
     // -- B2: Flood retrofit guards --------------------------------------
 
     /// Floodling's default BehaviorSet must carry a Convert action.
-    /// The game-layer Flood dispatch gates on this — if the registry
-    /// loses it, Floodlings silently stop converting victims, which
-    /// would be a much worse regression than a bench-time panic.
+    /// Generic dispatch gates on this — if the registry loses it,
+    /// Floodlings silently stop converting victims. The Convert also
+    /// declares `variant_weights` for the 70/30 Flood/FloodCarrier
+    /// split that used to be a hardcoded dispatch branch pre-B6.
     #[test]
     fn floodling_default_has_convert_action() {
         let reg = BehaviorRegistry::with_builtins();
@@ -1797,18 +1932,43 @@ mod tests {
                     chain_cap,
                     on_host_death,
                     phases,
+                    variant_weights,
                     ..
-                } => Some((into, *mode, into_team, *chain_cap, *on_host_death, phases.len())),
+                } => Some((
+                    into.clone(),
+                    *mode,
+                    into_team.clone(),
+                    *chain_cap,
+                    *on_host_death,
+                    phases.len(),
+                    variant_weights.clone(),
+                )),
                 _ => None,
             })
             .expect("Floodling must declare a Convert action after B2");
-        let (into, mode, into_team, chain_cap, on_host_death, phase_count) = convert;
-        assert_eq!(into, "flood_carrier");
+        let (into, mode, into_team, chain_cap, on_host_death, phase_count, weights) = convert;
+        assert_eq!(into, "flood", "Floodling's `into` is the 70% majority variant");
         assert_eq!(mode, ConvertMode::Stack);
         assert_eq!(into_team.as_deref(), Some("flood"));
         assert_eq!(chain_cap, 0);
         assert_eq!(on_host_death, OnHostDeath::TriggerTerminal);
-        assert_eq!(phase_count, 0, "B2 flood is instant-on-hit; phases arrive with B4");
+        assert_eq!(phase_count, 0, "Floodling is instant-on-hit; no phases");
+        // variant_weights must split 70/30 for bench equivalence with
+        // the pre-B6 hardcoded dispatch.
+        let total: u32 = weights.iter().map(|(_, w)| *w).sum();
+        assert_eq!(total, 100);
+        let flood_w = weights
+            .iter()
+            .find(|(n, _)| n == "flood")
+            .map(|(_, w)| *w)
+            .unwrap_or(0);
+        let fc_w = weights
+            .iter()
+            .find(|(n, _)| n == "flood_carrier")
+            .map(|(_, w)| *w)
+            .unwrap_or(0);
+        assert_eq!(flood_w, 70, "Flood should be 70% of Floodling converts");
+        assert_eq!(fc_w, 30, "FloodCarrier should be 30% of Floodling converts");
     }
 
     /// A brand override that strips Floodling's Convert action must

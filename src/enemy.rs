@@ -487,7 +487,14 @@ impl Enemy {
                 crate::tag::Tag::new(TEAM_FLOOD)
             } else if matches!(archetype, Archetype::PlayerTurret) {
                 crate::tag::Tag::new(TEAM_SURVIVOR)
-            } else if matches!(archetype, Archetype::Headcrab) {
+            } else if matches!(archetype, Archetype::Headcrab | Archetype::Floodling) {
+                // Both Floodling and Headcrab are parasites — one team
+                // so cross-faction targeting doesn't pick other
+                // parasites as prey when they're in the same bucket.
+                // Pre-B6 Floodling was on "horde" team with a
+                // hardcoded dispatch that ignored team routing; the
+                // generic dispatch respects teams, so Floodlings need
+                // their own bucket.
                 crate::tag::Tag::new("parasite")
             } else if matches!(archetype, Archetype::Rat | Archetype::DireRat) {
                 crate::tag::Tag::new("swarm")
@@ -498,7 +505,12 @@ impl Enemy {
                 crate::tag::TagSet::from_strs(&[TEAM_SURVIVOR, TEAM_HORDE])
             } else if matches!(archetype, Archetype::PlayerTurret) {
                 crate::tag::TagSet::from_strs(&[TEAM_HORDE, TEAM_FLOOD])
-            } else if matches!(archetype, Archetype::Headcrab) {
+            } else if matches!(archetype, Archetype::Headcrab | Archetype::Floodling) {
+                // Parasites hunt both survivors + horde. Floodling
+                // previously relied on a hardcoded dispatch that
+                // ignored the hostile set; post-B6 the generic
+                // Convert path respects hostiles, so the Floodling's
+                // target pool has to be declared.
                 crate::tag::TagSet::from_strs(&[TEAM_SURVIVOR, TEAM_HORDE])
             } else if matches!(archetype, Archetype::Rat | Archetype::DireRat) {
                 // Starving rats eat literally everything alive — the

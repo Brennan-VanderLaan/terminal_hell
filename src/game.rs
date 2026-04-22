@@ -1,5 +1,5 @@
 use crate::arena::{Arena, Material, Object, Tile};
-use crate::behavior::BehaviorRegistry;
+use crate::behavior::{BehaviorRegistry, BehaviorSet};
 use crate::body_effect::ReactionRegistry;
 use crate::camera::Camera;
 use crate::carcosa::{Phantom, YellowSign};
@@ -391,6 +391,38 @@ impl Game {
             if let Some(b) = stats.behavior.as_ref() {
                 behaviors.apply_toml(arch.to_name(), b);
             }
+        }
+        // B5: promote each archetype's TOML `body_on_death` into an
+        // `OnDeath` entry on the BehaviorSet.reactions list if one
+        // isn't already there. After this pass, runtime dispatch
+        // reads only BehaviorSet.reactions — the TOML field becomes
+        // an authoring convenience that load-time normalizes into
+        // the registry. Idempotent: re-promoting an effect that's
+        // already declared is a no-op.
+        for (arch, stats) in &content.archetypes {
+            let Some(effect) = stats.body_on_death.as_ref() else { continue };
+            let name = arch.to_name();
+            let already_present = behaviors
+                .get(name)
+                .map(|set| {
+                    set.reactions.iter().any(|r| {
+                        r.trigger == crate::behavior::ReactionTrigger::OnDeath
+                            && r.effect == *effect
+                    })
+                })
+                .unwrap_or(false);
+            if already_present {
+                continue;
+            }
+            let mut patched = behaviors
+                .get(name)
+                .cloned()
+                .unwrap_or_else(BehaviorSet::direct_melee);
+            patched.reactions.push(crate::behavior::Reaction {
+                trigger: crate::behavior::ReactionTrigger::OnDeath,
+                effect: effect.clone(),
+            });
+            behaviors.register(name, patched);
         }
         Self {
             arena,
@@ -2468,98 +2500,12 @@ impl Game {
             self.emit_noise(x, y, 90.0, 4.0);
         }
 
-        // Floodling conversion pass — B2 retrofit.
+        // B4.5–B6: the generic Convert dispatch below now handles
+        // Floodlings too. The B2-era hardcoded Floodling pass has been
+        // retired; its 30/70 Flood/FloodCarrier split is expressed in
+        // the Floodling's Convert action via the `variant_weights`
+        // field (`[("flood", 70), ("flood_carrier", 30)]`).
         //
-        // Gated on the Floodling archetype's BehaviorSet carrying a
-        // Convert action (installed by `BehaviorRegistry::with_builtins`
-        // and overridable by brand TOML). Dispatch finds a living
-        // non-Flood victim in touch range, rolls the 30/70 Flood/
-        // FloodCarrier split, and fires the Stack-mode swap via
-        // `apply_convert_stack`.
-        //
-        // The 30/70 split is a pre-retrofit gameplay quirk preserved
-        // at the dispatch layer — the Convert action itself declares
-        // `flood_carrier` as its canonical target. B3 will either
-        // promote the split to a first-class Convert-primitive feature
-        // or collapse to a single target; for B2 it's a dispatch wart
-        // with a clear cleanup path.
-        //
-        // `into_team` on the Convert action is honored by-convention
-        // today because Enemy::spawn already assigns team=flood for
-        // both Flood and FloodCarrier archetypes. Explicit into_team
-        // overrides with hostility reconfiguration is B3 work.
-        let floodling_convert_present = self
-            .behaviors
-            .for_archetype(Archetype::Floodling)
-            .actions
-            .iter()
-            .any(|a| matches!(a, crate::behavior::Action::Convert { .. }));
-
-        let mut conversions: Vec<(usize, Archetype)> = Vec::new();
-        let mut dying_floodlings: Vec<usize> = Vec::new();
-        if floodling_convert_present {
-            let enemies_len = self.enemies.len();
-            for fi in 0..enemies_len {
-                let (fx, fy, arch) = {
-                    let f = &self.enemies[fi];
-                    (f.x, f.y, f.archetype)
-                };
-                if arch != Archetype::Floodling {
-                    continue;
-                }
-                if dying_floodlings.contains(&fi) {
-                    continue;
-                }
-                let mut victim: Option<(usize, f32, f32)> = None;
-                for vi in 0..enemies_len {
-                    if vi == fi {
-                        continue;
-                    }
-                    let v = &self.enemies[vi];
-                    // Skip already-Flood hosts (one-shot conversion) and
-                    // other Floodlings, and skip dead victims. Team-tag
-                    // check — generic; any future "flood-family" team
-                    // works without archetype list edits.
-                    let is_already_infected =
-                        v.team == crate::tag::Tag::new(crate::enemy::TEAM_FLOOD);
-                    if is_already_infected
-                        || v.archetype == Archetype::Floodling
-                        || v.hp <= 0
-                    {
-                        continue;
-                    }
-                    let dx = v.x - fx;
-                    let dy = v.y - fy;
-                    if dx * dx + dy * dy < 2.6 * 2.6 {
-                        victim = Some((vi, v.x, v.y));
-                        break;
-                    }
-                }
-                if let Some((vi, vx, vy)) = victim {
-                    let seed = self.next_seed((vx as i32, vy as i32));
-                    let new_kind = if (seed & 0xFF) < 80 {
-                        Archetype::FloodCarrier
-                    } else {
-                        Archetype::Flood
-                    };
-                    conversions.push((vi, new_kind));
-                    dying_floodlings.push(fi);
-                }
-            }
-        }
-        for (vi, new_arch) in conversions {
-            self.apply_convert_stack(vi, new_arch);
-        }
-        // Kill Floodlings that converted someone. Process in reverse
-        // index order so swap_remove stays stable.
-        dying_floodlings.sort();
-        dying_floodlings.dedup();
-        for idx in dying_floodlings.into_iter().rev() {
-            if idx < self.enemies.len() {
-                self.enemies[idx].hp = 0;
-            }
-        }
-
         // B4.5: generic Convert dispatch + phase tick + Consume growth.
         // These three passes make Headcrab leap-attach + phased
         // gestation + Rat consume-to-grow actually fire at runtime.
@@ -3182,29 +3128,17 @@ impl Game {
             };
             self.emit_noise(cx, cy, scream_radius, 1.6);
 
-            // Fire the archetype's body_on_death reaction (if any).
-            // Content-driven: archetype TOML names a reaction registered
-            // in the ReactionRegistry; the bind happens here.
-            let toml_death_name = self.content.stats(arch).body_on_death.clone();
-            if let Some(name) = toml_death_name.as_deref() {
-                let seed = self.next_seed((cx as i32, cy as i32));
-                self.fire_body_reaction(name, cx, cy, seed);
-            }
-            // B4.5: also fire BehaviorSet.reactions for OnDeath
-            // triggers. This is the B5 unification — declarative
-            // reactions declared in the registry (or via brand TOML
-            // `[behavior.reactions]`) now fire at death. Dedup against
-            // the TOML body_on_death path so brands declaring the same
-            // effect in both places don't double-fire.
+            // B5 unified: BehaviorSet.reactions is the single source
+            // of truth for on-death effects. `Game::new` promotes each
+            // archetype's TOML `body_on_death` into this list at load
+            // time, so the previously-duplicated dispatch paths collapse
+            // to one readable loop here.
             {
                 use crate::behavior::ReactionTrigger;
                 let behavior = self.behaviors.for_archetype(arch);
                 for r in &behavior.reactions {
                     if r.trigger != ReactionTrigger::OnDeath {
                         continue;
-                    }
-                    if toml_death_name.as_deref() == Some(r.effect.as_str()) {
-                        continue; // already fired above
                     }
                     let seed = self.next_seed((cx as i32, cy as i32));
                     self.fire_body_reaction(&r.effect, cx, cy, seed);
@@ -3827,13 +3761,14 @@ impl Game {
         }
     }
 
-    /// B4.5: generic Convert dispatch. For every enemy whose
-    /// BehaviorSet carries a Convert action (except Floodling, which
-    /// preserves its B2 hardcoded 30/70-split dispatch), scan for a
-    /// valid hostile victim within trigger range and install an
-    /// [`InfectionState`] on the victim. The infector then dies
-    /// (one-shot pattern — matches headcrab/facehugger/floodling
-    /// canon).
+    /// B4.5–B6: generic Convert dispatch. For every enemy whose
+    /// BehaviorSet carries a Convert action, scan for a valid hostile
+    /// victim within trigger range and install an [`InfectionState`]
+    /// on the victim. The infector then dies (one-shot pattern —
+    /// matches headcrab/facehugger/floodling canon). Variant-
+    /// weighted conversions (e.g., Floodling's 70/30 Flood/FloodCarrier
+    /// split) resolve at infection time through the Convert action's
+    /// `variant_weights` field.
     ///
     /// Trigger range:
     /// - `OnAttachSuccess` → the sibling `LeapAttach` action's range
@@ -3852,12 +3787,6 @@ impl Game {
         let mut dying_infectors: Vec<usize> = Vec::new();
 
         for fi in 0..self.enemies.len() {
-            // Floodling keeps its B2-era hardcoded dispatch — the 30/70
-            // Flood/FloodCarrier split isn't yet a first-class Convert
-            // field. Generic path handles everything else.
-            if self.enemies[fi].archetype == Archetype::Floodling {
-                continue;
-            }
             if self.enemies[fi].hp <= 0 {
                 continue;
             }
@@ -3881,6 +3810,8 @@ impl Game {
                 OhD,
                 Vec<Phase>,
                 ConvertTrigger,
+                Vec<(String, u32)>,
+                u8,
             )> = None;
             let mut leap_range: Option<f32> = None;
             for action in &behavior.actions {
@@ -3893,6 +3824,8 @@ impl Game {
                         on_host_death,
                         phases,
                         trigger,
+                        variant_weights,
+                        chain_cap,
                         ..
                     } => {
                         if convert_params.is_none() {
@@ -3904,6 +3837,8 @@ impl Game {
                                 *on_host_death,
                                 phases.clone(),
                                 *trigger,
+                                variant_weights.clone(),
+                                *chain_cap,
                             ));
                         }
                     }
@@ -3924,6 +3859,8 @@ impl Game {
                 on_host_death,
                 phases,
                 trigger,
+                variant_weights,
+                chain_cap,
             )) = convert_params
             else {
                 continue;
@@ -3940,12 +3877,47 @@ impl Game {
                 ConvertTrigger::OnKill | ConvertTrigger::Immediate => continue,
             };
 
-            let Some(into_arch) = Archetype::from_name(&into_str) else {
-                tracing::warn!(
-                    into = %into_str,
-                    "convert target not a known archetype — skipping"
-                );
-                continue;
+            // Resolve the terminal archetype. If the Convert action
+            // declares `variant_weights`, roll a seeded weighted pick
+            // among them; otherwise use the fixed `into`. Unknown
+            // archetype names in the pool (e.g., brand typo) are
+            // skipped so one bad entry doesn't taint the whole roll.
+            let into_arch = if !variant_weights.is_empty() {
+                let seed = self.next_seed((
+                    self.enemies[fi].x as i32,
+                    self.enemies[fi].y as i32,
+                ));
+                let total: u32 =
+                    variant_weights.iter().map(|(_, w)| *w).sum();
+                let picked = if total == 0 {
+                    None
+                } else {
+                    let mut roll = (seed as u32) % total;
+                    let mut chosen: Option<&str> = None;
+                    for (name, w) in &variant_weights {
+                        if *w == 0 {
+                            continue;
+                        }
+                        if roll < *w {
+                            chosen = Some(name);
+                            break;
+                        }
+                        roll -= *w;
+                    }
+                    chosen.and_then(Archetype::from_name)
+                };
+                picked.unwrap_or_else(|| {
+                    Archetype::from_name(&into_str).unwrap_or(Archetype::Rusher)
+                })
+            } else {
+                let Some(a) = Archetype::from_name(&into_str) else {
+                    tracing::warn!(
+                        into = %into_str,
+                        "convert target not a known archetype — skipping"
+                    );
+                    continue;
+                };
+                a
             };
 
             let fx = self.enemies[fi].x;
@@ -3996,6 +3968,8 @@ impl Game {
                 phase_timer: phases.first().map(|p| p.duration).unwrap_or(0.0),
                 phases,
                 phase_idx: 0,
+                depth: 0,
+                chain_cap,
             });
             installations.push((vi, state));
             dying_infectors.push(fi);
@@ -4139,22 +4113,193 @@ impl Game {
         // queued into the caller's status-kill list so the regular
         // death-cleanup path spawns corpses, credits kill counts,
         // and fires body_on_death + BehaviorSet reactions.
-        for (idx, dmg) in hits {
-            if let Some(e) = self.enemies.get_mut(idx) {
+        //
+        // B6 primitives-on-enemies: for each bite, apply the
+        // attacker's primitive slots to the victim. The weapon-side
+        // Primitive enum is reused here with enemy-side semantics:
+        //   Ignite   → victim catches fire (apply_burn)
+        //   Cryo     → victim is chilled (apply_frost)
+        //   Acid     → victim burns low-and-long
+        //   Contagion→ attacker's burn/frost (if any) transmits to
+        //              the victim — Spec §4.5 "infected tag spread"
+        // Other primitive slots (Chain, Ricochet, etc.) are
+        // projectile-only and are silently no-ops on melee.
+        //
+        // B6 contagion-phase propagation: when the attacker carries
+        // an active infection whose current phase has
+        // `contagious = true`, a fresh copy of that infection (one
+        // depth deeper) installs on the bitten victim, subject to
+        // chain_cap.
+        let hit_count = hits.len();
+        let mut primitive_applications: Vec<(usize, usize)> = Vec::new();
+        for (i, (idx, dmg)) in hits.iter().enumerate() {
+            if let Some(e) = self.enemies.get_mut(*idx) {
                 if e.hp > 0 {
-                    e.hp = e.hp.saturating_sub(dmg);
+                    e.hp = e.hp.saturating_sub(*dmg);
                     e.hit_flash = 0.12;
                     if e.hp <= 0 {
-                        status_kills.push(idx);
+                        status_kills.push(*idx);
+                    }
+                }
+            }
+            if i < bitten_attackers.len() {
+                primitive_applications.push((bitten_attackers[i], *idx));
+            }
+        }
+        // Apply attacker primitives to victims — done after the
+        // damage loop so the attacker's current state (burn/frost
+        // carried over) is consistent for the Contagion read.
+        for (attacker_idx, victim_idx) in &primitive_applications {
+            let (prims, atk_burn, atk_frost) = {
+                let Some(attacker) = self.enemies.get(*attacker_idx) else {
+                    continue;
+                };
+                let behavior = self.behaviors.for_archetype(attacker.archetype);
+                (behavior.primitives.clone(), attacker.burn.clone(), attacker.frost.clone())
+            };
+            if prims.is_empty() {
+                continue;
+            }
+            let Some(victim) = self.enemies.get_mut(*victim_idx) else {
+                continue;
+            };
+            if victim.hp <= 0 {
+                continue;
+            }
+            use crate::primitive::Primitive;
+            for p in &prims {
+                match p {
+                    Primitive::Ignite => {
+                        victim.apply_burn(10.0, 3.0);
+                    }
+                    Primitive::Acid => {
+                        // Lower dps, longer ttl — acid sizzle.
+                        victim.apply_burn(5.0, 5.0);
+                    }
+                    Primitive::Cryo => {
+                        victim.apply_frost(1.5);
+                    }
+                    Primitive::Contagion => {
+                        // Transmit any burn/frost the attacker
+                        // itself is carrying. No-op when clean.
+                        if let Some(b) = atk_burn.as_ref() {
+                            victim.apply_burn(b.damage_per_sec, b.ttl);
+                        }
+                        if let Some(f) = atk_frost.as_ref() {
+                            victim.apply_frost(f.ttl);
+                        }
+                    }
+                    _ => {
+                        // Chain / Ricochet / Pierce / Overdrive /
+                        // GravityWell / Siphon / ShieldBreak /
+                        // Breach — projectile-flavored primitives
+                        // that don't make sense on melee contact.
+                        // Deliberate no-op so brands can carry
+                        // them on weapons or future dispatch paths
+                        // without errors here.
                     }
                 }
             }
         }
-        // Note: `bitten_attackers` isn't needed for anything beyond
-        // potential future telemetry (e.g., "how many enemy-on-enemy
-        // bites this tick"). try_bite_enemy already set cooldown on
-        // successful bites, so no further mutation is required.
-        let _ = bitten_attackers;
+        // Contagion spread — iterate bitten pairs (same ordering as
+        // `hits`). Collect proposed installations; apply after the
+        // damage-loop borrow drops.
+        let mut contagion_installs: Vec<(usize, Box<crate::behavior::InfectionState>)> =
+            Vec::new();
+        let n = hit_count.min(bitten_attackers.len());
+        for k in 0..n {
+            let attacker_idx = bitten_attackers[k];
+            let Some(attacker) = self.enemies.get(attacker_idx) else {
+                continue;
+            };
+            let Some(infection) = attacker.infection_state.as_ref() else {
+                continue;
+            };
+            let Some(phase) = infection.current_phase() else {
+                continue;
+            };
+            if !phase.contagious {
+                continue;
+            }
+            if infection.depth >= infection.chain_cap && infection.chain_cap > 0 {
+                continue;
+            }
+            // Victim: same one the bite landed on. Look it up from
+            // the `hits` pairing — after the damage loop, but
+            // `bitten_attackers[k]` and original `hits[k].0` are in
+            // lockstep as long as we indexed safely.
+            // (The damage loop consumed `hits` by value — we rebuild
+            // the victim index via the surviving `bitten_attackers`
+            // list plus a targeted look-up.)
+            // Simpler: scan for the first enemy within the attacker's
+            // reach that shares the infection's `into_archetype`-
+            // compatible hostile set. This re-derives the victim
+            // rather than threading the old index through a moved
+            // Vec; the reach check is identical to the bite check.
+            let a_x = attacker.x;
+            let a_y = attacker.y;
+            let a_reach = attacker.reach();
+            let a_hostiles = attacker.hostiles.clone();
+            let a_arch = attacker.archetype;
+            let into_arch = infection.into_archetype;
+            let mode = infection.mode;
+            let kill_host = infection.kill_host;
+            let into_team = infection.into_team;
+            let on_host_death = infection.on_host_death;
+            let phases = infection.phases.clone();
+            let depth = infection.depth.saturating_add(1);
+            let chain_cap = infection.chain_cap;
+            for vi in 0..self.enemies.len() {
+                if vi == attacker_idx {
+                    continue;
+                }
+                let v = &self.enemies[vi];
+                if v.hp <= 0 {
+                    continue;
+                }
+                if v.infection_state.is_some() {
+                    continue;
+                }
+                if v.archetype == a_arch {
+                    continue;
+                }
+                if v.archetype == into_arch {
+                    continue;
+                }
+                if !a_hostiles.has(v.team) {
+                    continue;
+                }
+                let dx = v.x - a_x;
+                let dy = v.y - a_y;
+                let reach = a_reach + v.hit_radius();
+                if dx * dx + dy * dy <= reach * reach {
+                    let new_state = Box::new(crate::behavior::InfectionState {
+                        into_archetype: into_arch,
+                        mode,
+                        kill_host,
+                        into_team,
+                        on_host_death,
+                        phase_timer: phases
+                            .first()
+                            .map(|p| p.duration)
+                            .unwrap_or(0.0),
+                        phases: phases.clone(),
+                        phase_idx: 0,
+                        depth,
+                        chain_cap,
+                    });
+                    contagion_installs.push((vi, new_state));
+                    break;
+                }
+            }
+        }
+        for (vi, state) in contagion_installs {
+            if let Some(v) = self.enemies.get_mut(vi) {
+                if v.hp > 0 && v.infection_state.is_none() {
+                    v.infection_state = Some(state);
+                }
+            }
+        }
     }
 
     /// B4.5: generic Consume dispatch. Enemies whose BehaviorSet

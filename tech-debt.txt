@@ -1,0 +1,9 @@
+  Design-question gaps still outstanding (user's call)
+
+  - OnHostileNear telegraph dispatch (Pinkie/Charger) — declared on their BehaviorSets but not runtime-consumed. The hardcoded sprint-windup logic at game.rs:~2060 handles the feel today;
+  making it fire through reactions would be pure refactor with no player-visible change.
+  - Phase visual overlays (sprite_overlay, palette_tint, ambient_vfx) — carried on InfectionState, authored in TOML, but the renderer doesn't yet overlay them on hosts. Cosmetic — currently
+  mid-gestation hosts look identical to uninfected ones.
+  - OnHostDeath::AdvancePhase — collapses to TriggerTerminal because the sim doesn't yet detach infections from dying hosts onto corpses. Would need corpse-carried state.
+  - Network sync of infection_state — host-authoritative, so terminal swaps arrive via the existing archetype snapshot path. Mid-gestation visuals diverge between host and client (see
+  above). Not load-bearing until those visuals land.
