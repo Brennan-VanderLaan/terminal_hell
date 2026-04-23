@@ -1,56 +1,87 @@
 # Serious Sam — Endless Horde. Dozens on screen, headless screamers,
 # swarms of fast cheap enemies. Play like a wide circle saw.
+#
+# Converted to BrandUnit authoring shape. Every unit leans into the
+# canonical Sam bestiary silhouette — headless kamikazes, bronze
+# werebulls, rocketeer torsos, Kleer skeletons, sirian harpies.
 
 id = "serious_sam"
 name = "Serious Sam — Endless Horde"
 description = "Dozens at once. Circular strafing or death."
 
-spawn_pool = ["rusher", "swarmling", "charger", "howler", "sapper", "leaper"]
-miniboss = "miniboss"
+spawn_pool = [
+    "beheaded_kamikaze",
+    "beheaded_rocketeer",
+    "werebull",
+    "kleer_skeleton",
+    "sirian_harpy",
+    "marsh_hopper",
+    "scythian_witch",
+]
+miniboss = "biomechanoid_major"
 
-# Strafe-king flavor → Slide locks you into a committed movement arc
-# which is exactly how Sam plays. Perks keep the circle saw spinning:
-# Adrenaline off every body slamming into you, Rampage stacking with
-# every explosion, QuickHands so the minigun never dies.
 signature_traversal = "slide"
 signature_perks = ["adrenaline", "rampage", "quick_hands"]
 
 [spawn_weights]
-# Headless kamikazes + kleer skeletons.
-rusher = 7
-# Biomechanoid werebulls.
-charger = 2
-# Beheaded firecracker / rocketeer pose.
-swarmling = 4
-# Scythian witch-harpy leap.
-leaper = 2
-# Scream of Sirian cult.
-howler = 1
-# Suicide-vomiter.
-sapper = 1
+beheaded_kamikaze = 7
+beheaded_rocketeer = 3
+werebull = 2
+kleer_skeleton = 3
+sirian_harpy = 1
+marsh_hopper = 3
+scythian_witch = 1
 
-# ── Brand sprite overrides ─────────────────────────────────────────
-# Serious Sam — Egyptian tomb horde. Headless bombers, armored
-# werebulls, bone kleers, Sirian harpies. Bright golden-sand + bone
-# + Egyptian bronze palette.
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster.
+# ═══════════════════════════════════════════════════════════════════
 
-[sprite_overrides]
-rusher = "beheaded_kamikaze.art"
-charger = "werebull.art"
-rocketeer = "beheaded_rocketeer.art"
-howler = "sirian_harpy.art"
-sapper = "kleer_skeleton.art"
-
-# Beheaded Kamikaze — stump neck, red-pipe arteries, bombs each fist.
-[sprite_palettes.rusher]
+# Beheaded Kamikaze — stump-neck screamer with bombs each hand.
+# Rusher-backed with extra speed (they SCREAM and SPRINT).
+[units.beheaded_kamikaze]
+archetype = "rusher"
+display_name = "Beheaded Kamikaze"
+hp = 45
+speed = 30.0
+touch_damage = 8
+sprite = "beheaded_kamikaze.art"
+[units.beheaded_kamikaze.palette]
 B = "#d8a848"
 D = "#6a4818"
 N = "#c01818"
 F = "#2a2a2e"
 H = "#ff4020"
 
-# Werebull — huge biomech bull, bronze armor plates, horns.
-[sprite_palettes.charger]
+# Beheaded Rocketeer — headless torso with twin launcher tubes.
+# Rocketeer-backed — the canonical rocket-arc threat.
+[units.beheaded_rocketeer]
+archetype = "rocketeer"
+display_name = "Beheaded Rocketeer"
+hp = 70
+speed = 10.0
+preferred_distance = 40.0
+sprite = "beheaded_rocketeer.art"
+[units.beheaded_rocketeer.palette]
+B = "#d8a848"
+D = "#6a4818"
+N = "#c01818"
+R = "#3a3c40"
+[units.beheaded_rocketeer.ranged_profile]
+tell = 0.5
+shot_cooldown = 2.0
+mag_size = 1
+reload = 0.0
+
+# Werebull — bronze biomech bull with horns. Charger-backed, high speed,
+# committed linear charge.
+[units.werebull]
+archetype = "charger"
+display_name = "Werebull"
+hp = 130
+speed = 30.0
+touch_damage = 28
+sprite = "werebull.art"
+[units.werebull.palette]
 B = "#c89438"
 D = "#5a3810"
 E = "#ff3020"
@@ -58,15 +89,30 @@ H = "#f0e4b0"
 A = "#402010"
 M = "#886028"
 
-# Beheaded Rocketeer — headless torso with twin launcher tubes.
-[sprite_palettes.rocketeer]
-B = "#d8a848"
-D = "#6a4818"
-N = "#c01818"
-R = "#3a3c40"
+# Kleer Skeleton — stark bone frame with spiked ball-and-chain mace.
+# Leaper-backed; acrobatic bone-wielder that pounces forward.
+[units.kleer_skeleton]
+archetype = "leaper"
+display_name = "Kleer Skeleton"
+hp = 70
+speed = 16.0
+touch_damage = 24
+sprite = "kleer_skeleton.art"
+[units.kleer_skeleton.palette]
+B = "#f0ead0"
+D = "#5a5238"
+E = "#ff3020"
+S = "#3a3a40"
+M = "#707078"
 
-# Sirian Harpy — winged screamer, open shrieking maw.
-[sprite_palettes.howler]
+# Sirian Harpy — winged shrieker. Howler-backed; shriek calls the rest
+# of the wave toward the player.
+[units.sirian_harpy]
+archetype = "howler"
+display_name = "Sirian Harpy"
+hp = 55
+sprite = "sirian_harpy.art"
+[units.sirian_harpy.palette]
 B = "#d8a058"
 D = "#6a4818"
 E = "#ff3020"
@@ -75,11 +121,34 @@ W = "#8a6028"
 C = "#6a4818"
 T = "#e8c878"
 
-# Kleer Skeleton — stark bone frame with spiked ball mace on chain.
-[sprite_palettes.sapper]
-B = "#f0ead0"
-D = "#5a5238"
-E = "#ff3020"
-S = "#3a3a40"
-M = "#707078"
+# Marsh Hopper — tiny fast biter. Swarmling-backed for extra density.
+[units.marsh_hopper]
+archetype = "swarmling"
+display_name = "Marsh Hopper"
+hp = 14
+sprite = "marsh_hopper.art"
+[units.marsh_hopper.palette]
+B = "#4a6028"
+D = "#1a2008"
+E = "#ffe040"
+G = "#80a040"
 
+# Scythian Witch — flying sapper variant. Sapper-backed — detonates on
+# contact.
+[units.scythian_witch]
+archetype = "sapper"
+display_name = "Scythian Witch"
+hp = 45
+speed = 16.0
+sprite = "scythian_witch.art"
+[units.scythian_witch.palette]
+B = "#6a1a4a"
+D = "#2a0810"
+E = "#ff3020"
+W = "#a82088"
+C = "#180408"
+
+# Biomechanoid Major — the miniboss silhouette.
+[units.biomechanoid_major]
+archetype = "miniboss"
+display_name = "Biomechanoid Major"

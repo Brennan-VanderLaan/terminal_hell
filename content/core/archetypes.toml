@@ -65,12 +65,16 @@ signature_fire_mode = "pump"
 
 [revenant]
 hp = 55
-speed = 12.0
+# Doom Revenant — strafes fast between rocket bursts. Bump from
+# 12 → 15 so the twin-cannon rhythm reads as mobile, not plodding.
+speed = 15.0
 touch_damage = 8
 hit_radius = 2.6
 reach = 2.4
 preferred_distance = 42.0
-ranged_damage = 18
+# Lower per-shot damage since the burst fires 2 rockets in quick
+# succession (vs one slow shot before). Burst total stays aggressive.
+ranged_damage = 12
 tags = ["undead", "ranged"]
 # Undead — shatters into bone dust, not blood.
 body_on_death = "spawn_bone_dust"
@@ -80,7 +84,10 @@ signature_fire_mode = "rail"
 
 [marksman]
 hp = 45
-speed = 10.0
+# Sniper — deliberate, takes position. Slower move speed sells the
+# "set up, scope in, shoot" rhythm. Ranged profile uses 0.85s tell
+# + 3.5s cooldown, so snipers are rare but heavy-hitting.
+speed = 7.0
 touch_damage = 6
 hit_radius = 2.4
 reach = 2.0
@@ -90,7 +97,10 @@ reach = 2.0
 # on the arena's far edge and credibly threaten from there, instead
 # of creeping into mid-range to fire.
 preferred_distance = 90.0
-ranged_damage = 26
+# Bumped from 26 → 32 to compensate for the longer 3.5s cooldown
+# per shot — a sniper that lands less often should punch harder
+# when it does connect.
+ranged_damage = 32
 tags = ["biological", "ranged"]
 # The definitional rail-drop archetype (per spec).
 signature_primitives = ["pierce", "shield_break"]
@@ -180,7 +190,9 @@ signature_fire_mode = "pump"
 # explosion radius + follow-on effects).
 [rocketeer]
 hp = 70
-speed = 9.0
+# Rocket grunt — mobile enough to reposition between shots rather
+# than planting for the whole engagement. 9 → 11 gets them moving.
+speed = 11.0
 touch_damage = 4
 hit_radius = 2.6
 reach = 2.4
@@ -551,7 +563,11 @@ kind = "melee"
 # example for the Consume primitive with growth_into/growth_threshold.
 [rat]
 hp = 12
-speed = 22.0
+# Scurry vermin — faster than a Rusher (22), slower than a Zergling
+# (34). 30 puts them above most melee archetypes, so a rat swarm
+# crossing the floor actually feels like an unstoppable tide rather
+# than a slow roll.
+speed = 30.0
 touch_damage = 3
 hit_radius = 1.2
 reach = 1.2

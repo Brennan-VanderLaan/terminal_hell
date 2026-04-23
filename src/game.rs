@@ -1046,7 +1046,9 @@ impl Game {
             // is the closest stand-in we have for a humanoid player
             // silhouette (§17 notes a proper PlayerBody archetype
             // as a future polish pass).
-            self.spawn_corpse(Archetype::Pmc, bx, by);
+            // Player "corpse" — synthetic Pmc silhouette with no
+            // brand/unit context (the player isn't in `enemies`).
+            self.spawn_corpse(Archetype::Pmc, bx, by, None, None);
         }
         self.death_phase = Some(DeathPhase::Dying {
             ttl: Self::DEATH_DYING_SECS,
@@ -1875,18 +1877,37 @@ impl Game {
             // Eater behavior: while hungry (consumed < THRESHOLD), seek
             // the nearest corpse instead of a player. Once fed, flips
             // to normal aggro and charges survivors.
-            let eater_target = if e.archetype == Archetype::Eater
-                && e.consumed < EATER_HUNGER_THRESHOLD
-                && !corpse_positions.is_empty()
-            {
-                corpse_positions
-                    .iter()
-                    .min_by(|a, b| {
-                        let da = (a.1 - e.x).powi(2) + (a.2 - e.y).powi(2);
-                        let db = (b.1 - e.x).powi(2) + (b.2 - e.y).powi(2);
-                        da.partial_cmp(&db).unwrap()
-                    })
-                    .copied()
+            // Corpse-seeking for scavenger archetypes. Computed as a
+            // nearest-corpse vs nearest-hostile merge further down:
+            // a starving rat walks to whichever is closest (corpse or
+            // living enemy), not corpses-always-over-hostiles — that
+            // flavor had rats ignoring nearby Rushers in favor of
+            // corpses across the map.
+            //
+            //   Eater — hunts corpses while hungry (< 5 eaten);
+            //     flips to players once fed (via this flag going
+            //     false).
+            //   Rat   — always hunts corpses when they're closer
+            //     than a living hostile, until Consume-growth kicks
+            //     it into the DireRat archetype.
+            //
+            // TODO(B6+): generalize to "any archetype whose
+            // BehaviorSet has a Consume action whose targets include
+            // 'corpse'" — currently hardcoded to these two.
+            let wants_corpse = (e.archetype == Archetype::Eater
+                && e.consumed < EATER_HUNGER_THRESHOLD)
+                || e.archetype == Archetype::Rat;
+            let nearest_corpse: Option<(u32, f32, f32, f32)> = if wants_corpse {
+                let mut best: Option<(u32, f32, f32, f32)> = None;
+                for (pid, cx, cy) in &corpse_positions {
+                    let dx = cx - e.x;
+                    let dy = cy - e.y;
+                    let d2 = dx * dx + dy * dy;
+                    if best.map_or(true, |(_, _, _, bd)| d2 < bd) {
+                        best = Some((*pid, *cx, *cy, d2));
+                    }
+                }
+                best
             } else {
                 None
             };
@@ -1920,17 +1941,23 @@ impl Game {
                 }
             }
 
-            // Cross-faction target scan: Horde can hunt survivor-team
-            // PlayerTurrets + Flood can hunt the Horde. Bucketed by
-            // team up front — this enemy only scans buckets matching
-            // its own hostile tags, skipping entirely when no hostile
-            // team exists on the map (the common zerg-on-zerg case).
+            // Cross-faction target scan: find the nearest hostile
+            // across BOTH the enemies-by-team buckets AND the live
+            // player positions list (when this enemy hunts
+            // survivors). Previously the two pools were checked in
+            // fallback order, which meant a headcrab in a crowd of
+            // rushers always chased a Rusher even if the player was
+            // closer. Now survivor-players enter the same distance
+            // comparison as any other hostile, so "nearest hostile"
+            // means nearest, period.
             let survivor_tag = crate::tag::Tag::new(crate::enemy::TEAM_SURVIVOR);
-            let cross_faction_target = {
-                let mut best: Option<(f32, f32, f32)> = None;
+            let hunts_survivors = e.hostiles.has(survivor_tag);
+            let nearest_hostile = {
+                let mut best: Option<(u32, f32, f32, f32)> = None;
+                // Enemies on hostile teams (non-survivor teams are
+                // iterated from the bucketed map; survivor entities
+                // are players, not enemies).
                 for hostile_tag in e.hostiles.iter() {
-                    // Survivor is handled separately via the `positions`
-                    // list (real players, not entity-side entries).
                     if hostile_tag == survivor_tag {
                         continue;
                     }
@@ -1944,34 +1971,44 @@ impl Game {
                         let dx = hx - e.x;
                         let dy = hy - e.y;
                         let d2 = dx * dx + dy * dy;
-                        if best.map_or(true, |(_, _, bd)| d2 < bd) {
-                            best = Some((*hx, *hy, d2));
+                        if best.map_or(true, |(_, _, _, bd)| d2 < bd) {
+                            best = Some((0u32, *hx, *hy, d2));
                         }
                     }
                 }
-                best.map(|(x, y, _)| (0u32, x, y))
+                // Players join the same distance pool when this
+                // enemy's hostility includes the survivor tag. The
+                // player with the lowest d² wins if they're closer
+                // than any enemy-team candidate.
+                if hunts_survivors {
+                    for (pid, px, py) in &positions {
+                        let dx = px - e.x;
+                        let dy = py - e.y;
+                        let d2 = dx * dx + dy * dy;
+                        if best.map_or(true, |(_, _, _, bd)| d2 < bd) {
+                            best = Some((*pid, *px, *py, d2));
+                        }
+                    }
+                }
+                // Corpses join the distance pool for scavenging
+                // archetypes (Eater-while-hungry / Rat). A nearby
+                // corpse can beat a distant Rusher but never beats
+                // a Rusher that's right there — rats attack adjacent
+                // prey, walk to corpses when they're actually closer.
+                if let Some(c) = nearest_corpse {
+                    if best.map_or(true, |(_, _, _, bd)| c.3 < bd) {
+                        best = Some((c.0, c.1, c.2, c.3));
+                    }
+                }
+                best.map(|(pid, x, y, _)| (pid, x, y))
             };
 
-            // Target priority: Director override → cross-faction →
-            // Eater corpse → marked player → nearest player.
-            let hunts_survivors = e.hostiles.has(survivor_tag);
+            // Target priority: Director override → nearest hostile
+            // (enemies + players + corpses in one distance pool) →
+            // marked player fallback.
             let target = override_target
-                .or(cross_faction_target)
-                .or(eater_target)
-                .or(marked_pos)
-                .or_else(|| {
-                    if !hunts_survivors {
-                        return None;
-                    }
-                    positions
-                        .iter()
-                        .min_by(|a, b| {
-                            let da = (a.1 - e.x).powi(2) + (a.2 - e.y).powi(2);
-                            let db = (b.1 - e.x).powi(2) + (b.2 - e.y).powi(2);
-                            da.partial_cmp(&db).unwrap()
-                        })
-                        .copied()
-                });
+                .or(nearest_hostile)
+                .or(marked_pos);
             // Breacher pathfinding override. Compute A* toward the
             // current target; follow waypoints instead of straight-line
             // chase; if a waypoint is behind a wall, smash instead of
@@ -2248,8 +2285,14 @@ impl Game {
             // chase the noise. Loud actions (wall breaks, rocket
             // blasts, player gunfire) populate `e.noise_target` in a
             // pre-pass above the enemy loop.
+            //
+            // Post-nearest-hostile-merge: noise fires only when the
+            // enemy has NO explicit target — including no hostile,
+            // no corpse, no mark. nearest_hostile already subsumes
+            // corpses now (for scavengers), so a separate
+            // eater_target check is redundant.
             let noise_override = if override_target.is_none()
-                && eater_target.is_none()
+                && nearest_hostile.is_none()
                 && marked_pos.is_none()
             {
                 e.noise_target.map(|(nx, ny)| (0u32, nx, ny))
@@ -2506,15 +2549,46 @@ impl Game {
         // the Floodling's Convert action via the `variant_weights`
         // field (`[("flood", 70), ("flood_carrier", 30)]`).
         //
-        // B4.5: generic Convert dispatch + phase tick + Consume growth.
-        // These three passes make Headcrab leap-attach + phased
-        // gestation + Rat consume-to-grow actually fire at runtime.
-        // OnHostDeath routing lives in the death-cleanup pass further
-        // down; that's what resolves infected hosts that die
-        // mid-gestation.
-        self.tick_generic_convert();
+        // Build a spatial index once and share it across the Convert
+        // and melee passes. This drops the Zerg-tide-10k scenario
+        // from ~24 s/tick (O(n²) naive pair scan) back to
+        // sub-millisecond — each attacker's victim search becomes a
+        // 3×3-cell neighborhood lookup bounded by population density,
+        // not population size. Same cell sizing as the separation
+        // pass so we could also share that build later if needed.
+        const ENEMY_INTERACT_CELL: f32 = 14.0;
+        let mut interact_grid = crate::spatial::SpatialGrid::new(
+            self.arena.width as f32,
+            self.arena.height as f32,
+            ENEMY_INTERACT_CELL,
+        );
+        for (i, e) in self.enemies.iter().enumerate() {
+            if e.hp > 0 {
+                interact_grid.insert(i as u32, e.x, e.y);
+            }
+        }
+        // Kill-feed plumbing for enemy-on-enemy carnage.
+        // - `enemy_kill_attribution`: when a bite pushes a victim's
+        //   HP to 0, we record the attacker so the feed reads
+        //   "Rat [bite] → Rusher" instead of "— bleed → Rusher".
+        // - `feed_suppress`: infectors dying via the one-shot Convert
+        //   pattern are already represented by the install-time
+        //   infection message, so we skip their individual "— bleed"
+        //   feed entry to avoid duplication.
+        let mut enemy_kill_attribution: std::collections::HashMap<
+            usize,
+            (Archetype, Option<crate::tag::Tag>, &'static str),
+        > = std::collections::HashMap::new();
+        let mut feed_suppress: std::collections::HashSet<usize> =
+            std::collections::HashSet::new();
+
+        self.tick_generic_convert(&interact_grid, &mut feed_suppress);
         self.tick_infection_phases(dt);
-        self.tick_enemy_melee(&mut enemy_status_kills);
+        self.tick_enemy_melee(
+            &mut enemy_status_kills,
+            &interact_grid,
+            &mut enemy_kill_attribution,
+        );
         self.tick_consume_growth();
 
         // Apply Breacher wall smashes. Each smash is worth the
@@ -3037,41 +3111,74 @@ impl Game {
                 continue;
             }
             // Kill-feed entry for this kill. Captured BEFORE we
-            // swap_remove the enemy so we can name it. `killer_id == 0`
-            // means DoT / bleed with no crediting weapon — we render
-            // those with a dash as the weapon so the player knows it
-            // was attrition, not a direct hit.
-            let enemy_arch = self.enemies[idx].archetype;
-            let enemy_brand = self.enemies[idx].brand_id;
-            let victim = self.content.enemy_display_name(
-                enemy_arch,
-                enemy_brand.as_ref().map(|t| t.as_str()),
-            );
-            let (killer_name, weapon_label, local_killer) = if killer_id == 0 {
-                ("—".to_string(), "bleed".to_string(), false)
+            // swap_remove the enemy so we can name it.
+            //
+            // Attribution precedence:
+            //   1. Explicit player killer_id → "You" or "P#" + weapon
+            //      label. Standard gameplay credit.
+            //   2. Enemy-on-enemy attribution (bite kills via
+            //      `tick_enemy_melee`) → attacker archetype + "bite".
+            //      Gives players a sense of threat: "Rat bit a
+            //      Rusher" tells you a swarm is eating your enemies.
+            //   3. `feed_suppress` set → skip entirely. Infectors
+            //      whose deaths were already narrated by an earlier
+            //      infection entry ("Headcrab infected Marine")
+            //      don't double up with "— bleed → Headcrab".
+            //   4. Default → "— bleed → <victim>". DoT / status
+            //      kills with no crediting weapon.
+            if feed_suppress.contains(&idx) {
+                // Infector's one-shot death already narrated.
             } else {
-                let local = self.local_id == Some(killer_id);
-                let killer_name = if local {
-                    "You".to_string()
+                let enemy_arch = self.enemies[idx].archetype;
+                let enemy_brand = self.enemies[idx].brand_id;
+                let enemy_unit = self.enemies[idx].unit_id;
+                let victim = self.content.enemy_display_name_with_unit(
+                    enemy_arch,
+                    enemy_brand.as_ref().map(|t| t.as_str()),
+                    enemy_unit.as_ref().map(|t| t.as_str()),
+                );
+                let (killer_name, weapon_label, local_killer) = if killer_id == 0 {
+                    if let Some((attacker_arch, attacker_brand, weapon_label)) =
+                        enemy_kill_attribution.get(&idx)
+                    {
+                        // Attribution entry doesn't carry the unit
+                        // id today — so enemy-on-enemy kills display
+                        // the attacker's brand-default name (e.g.
+                        // "Rat" rather than a specific rat variant).
+                        // Future work: thread the attacker's unit_id
+                        // into the attribution map too.
+                        let name = self.content.enemy_display_name(
+                            *attacker_arch,
+                            attacker_brand.as_ref().map(|t| t.as_str()),
+                        );
+                        (name, (*weapon_label).to_string(), false)
+                    } else {
+                        ("—".to_string(), "bleed".to_string(), false)
+                    }
                 } else {
-                    format!("P{killer_id}")
+                    let local = self.local_id == Some(killer_id);
+                    let killer_name = if local {
+                        "You".to_string()
+                    } else {
+                        format!("P{killer_id}")
+                    };
+                    let weapon = self
+                        .player_index(killer_id)
+                        .and_then(|i| self.runtimes[i].active_weapon().map(|w| w.mode.label()))
+                        .unwrap_or("—")
+                        .to_string();
+                    (killer_name, weapon, local)
                 };
-                let weapon = self
-                    .player_index(killer_id)
-                    .and_then(|i| self.runtimes[i].active_weapon().map(|w| w.mode.label()))
-                    .unwrap_or("—")
-                    .to_string();
-                (killer_name, weapon, local)
-            };
-            self.push_kill_feed(KillFeedEntry {
-                killer: killer_name,
-                weapon: weapon_label,
-                victim,
-                ttl: KillFeedEntry::DEFAULT_TTL,
-                ttl_max: KillFeedEntry::DEFAULT_TTL,
-                local_killer,
-                local_victim: false,
-            });
+                self.push_kill_feed(KillFeedEntry {
+                    killer: killer_name,
+                    weapon: weapon_label,
+                    victim,
+                    ttl: KillFeedEntry::DEFAULT_TTL,
+                    ttl_max: KillFeedEntry::DEFAULT_TTL,
+                    local_killer,
+                    local_victim: false,
+                });
+            }
             // Credit Overdrive to the killer's active weapon, if any.
             // Also notify the player so perk-side kill hooks
             // (CorpsePulse heal, Rampage chain) fire.
@@ -3088,12 +3195,15 @@ impl Game {
             self.add_corruption(0.2);
             // Spawn a persistent corpse before swap_remove so the body
             // stays in the world for players to walk over, shoot up,
-            // etc. Carries the enemy's archetype for sprite lookup.
-            let (cx, cy, arch) = {
+            // etc. Carries archetype + brand + unit id so the corpse
+            // renders with the same sprite the enemy had in life —
+            // a Combine Soldier's body stays a Combine Soldier, not
+            // the archetype-default Marksman.
+            let (cx, cy, arch, cbrand, cunit) = {
                 let e = &self.enemies[idx];
-                (e.x, e.y, e.archetype)
+                (e.x, e.y, e.archetype, e.brand_id, e.unit_id)
             };
-            self.spawn_corpse(arch, cx, cy);
+            self.spawn_corpse(arch, cx, cy, cbrand, cunit);
             // Fire the death sample for this archetype; no-op if no
             // audio pool exists for it yet.
             crate::audio::emit(arch.audio_id(), "death", Some((cx, cy)));
@@ -3718,9 +3828,34 @@ impl Game {
         if victim_idx >= self.enemies.len() {
             return;
         }
-        let (x, y) = (self.enemies[victim_idx].x, self.enemies[victim_idx].y);
-        let stats = self.content.stats(into).clone();
-        self.enemies[victim_idx] = Enemy::spawn(into, &stats, x, y);
+        let (x, y, brand_id) = {
+            let v = &self.enemies[victim_idx];
+            (v.x, v.y, v.brand_id)
+        };
+        // BrandUnit resolution for the converted form. When the
+        // victim's brand has a unit whose `into` archetype matches
+        // the target, spawn the Stack-mode replacement using that
+        // unit's stats/sprite/behavior — so a half_life Combine
+        // Soldier becomes a half_life Zombie (with Combine-style
+        // sprite + stats), not a generic archetype-default Zombie.
+        // Falls back to archetype defaults when no matching brand
+        // unit exists.
+        let resolved = self.resolve_convert_into(brand_id, into);
+        let stats = resolved
+            .as_ref()
+            .map(|r| r.stats.clone())
+            .unwrap_or_else(|| self.content.stats(into).clone());
+        let ranged_override = resolved.as_ref().and_then(|r| {
+            r.ranged_profile.as_ref().map(|p| crate::enemy::RangedProfile {
+                tell: p.tell,
+                shot_cooldown: p.shot_cooldown,
+                mag_size: p.mag_size,
+                reload: p.reload,
+            })
+        });
+        let unit_id = resolved.as_ref().and_then(|r| r.unit_id);
+        self.enemies[victim_idx] = Enemy::spawn(into, &stats, x, y)
+            .with_brand_unit(brand_id, unit_id, ranged_override);
         // Puff of green gore to sell the transformation.
         let seed = self.next_seed((x as i32, y as i32));
         self.emit_blast((x, y), Pixel::rgb(150, 255, 140), seed, 1);
@@ -3737,11 +3872,58 @@ impl Game {
         if host_idx >= self.enemies.len() {
             return;
         }
-        let (x, y) = (self.enemies[host_idx].x, self.enemies[host_idx].y);
-        let stats = self.content.stats(into).clone();
-        self.enemies[host_idx] = Enemy::spawn(into, &stats, x, y);
+        let (x, y, brand_id) = {
+            let v = &self.enemies[host_idx];
+            (v.x, v.y, v.brand_id)
+        };
+        // Same brand-unit resolution as Stack mode — Headcrab bite
+        // on a half_life-branded Rusher should leave a half_life
+        // Zombie, not a sprite-drift-to-default Zombie.
+        let resolved = self.resolve_convert_into(brand_id, into);
+        let stats = resolved
+            .as_ref()
+            .map(|r| r.stats.clone())
+            .unwrap_or_else(|| self.content.stats(into).clone());
+        let ranged_override = resolved.as_ref().and_then(|r| {
+            r.ranged_profile.as_ref().map(|p| crate::enemy::RangedProfile {
+                tell: p.tell,
+                shot_cooldown: p.shot_cooldown,
+                mag_size: p.mag_size,
+                reload: p.reload,
+            })
+        });
+        let unit_id = resolved.as_ref().and_then(|r| r.unit_id);
+        self.enemies[host_idx] = Enemy::spawn(into, &stats, x, y)
+            .with_brand_unit(brand_id, unit_id, ranged_override);
         let seed = self.next_seed((x as i32, y as i32));
         self.emit_blast((x, y), Pixel::rgb(220, 160, 80), seed, 2);
+    }
+
+    /// Look for a BrandUnit in `brand_id` whose backing archetype
+    /// matches `into`. Returns the first match — when multiple units
+    /// in a brand back the same archetype (e.g. a brand with both
+    /// a "zombie" and a "fast_zombie" unit backed by the Zombie
+    /// archetype), the first-iterated one wins. Authors wanting a
+    /// specific variant on convert should disambiguate via the
+    /// Convert action's `into` field pointing at the unit id directly
+    /// — but the current Convert primitive stores archetype names,
+    /// not unit ids. Upgrading `Convert.into` to accept unit ids is
+    /// a future refinement; for now the first-match rule is stable
+    /// per brand TOML iteration order (HashMap, so technically not
+    /// stable — good enough for now).
+    fn resolve_convert_into(
+        &self,
+        brand_id: Option<crate::tag::Tag>,
+        into: Archetype,
+    ) -> Option<crate::content::ResolvedUnit> {
+        let brand_id = brand_id?;
+        let brand = self.content.brand(brand_id.as_str())?;
+        let into_snake = into.to_name();
+        let (unit_id, _unit) = brand
+            .units
+            .iter()
+            .find(|(_, u)| u.archetype == into_snake)?;
+        self.content.resolve_unit(brand_id.as_str(), unit_id)
     }
 
     /// B4.5: fire the infection terminal on the host at `host_idx`.
@@ -3778,12 +3960,24 @@ impl Game {
     ///
     /// Stack rule: only one active infection per host — a second
     /// Convert landing on an already-infected host is a no-op.
-    fn tick_generic_convert(&mut self) {
+    ///
+    /// Uses the shared spatial grid (built once per tick by
+    /// `tick_authoritative`) to drop victim search from O(n) per
+    /// attacker to O(k), where k is the 3×3-cell neighborhood size
+    /// — roughly O(density × cell_area). Zerg-tide-10k drops from
+    /// ~24 s/tick to sub-millisecond.
+    fn tick_generic_convert(
+        &mut self,
+        grid: &crate::spatial::SpatialGrid,
+        feed_suppress: &mut std::collections::HashSet<usize>,
+    ) {
         use crate::behavior::{
             Action, ConvertTrigger, InfectionState, OnHostDeath as OhD, Phase,
         };
         // Scan + collect; mutate after so the borrow checker is happy.
-        let mut installations: Vec<(usize, Box<InfectionState>)> = Vec::new();
+        // (victim_idx, infection_state, infector_idx) — infector_idx
+        // needed post-scan to build kill-feed attribution.
+        let mut installations: Vec<(usize, Box<InfectionState>, usize)> = Vec::new();
         let mut dying_infectors: Vec<usize> = Vec::new();
 
         for fi in 0..self.enemies.len() {
@@ -3925,37 +4119,45 @@ impl Game {
             let f_arch = self.enemies[fi].archetype;
             let f_hostiles = self.enemies[fi].hostiles.clone();
 
-            // Scan for the first valid victim in range.
+            // Spatial-grid narrowed scan for the first valid victim.
+            // The grid's 3×3 neighborhood covers trigger_range so
+            // long as ENEMY_INTERACT_CELL ≥ max trigger_range / 2
+            // (true for all B6 Converts; LeapAttach max is ~3.5).
+            let trigger_range_sq = trigger_range * trigger_range;
             let mut victim_idx: Option<usize> = None;
-            for vi in 0..self.enemies.len() {
+            grid.for_each_near(fx, fy, |vi_raw| {
+                if victim_idx.is_some() {
+                    return;
+                }
+                let vi = vi_raw as usize;
                 if vi == fi {
-                    continue;
+                    return;
+                }
+                if vi >= self.enemies.len() {
+                    return;
                 }
                 let v = &self.enemies[vi];
                 if v.hp <= 0 {
-                    continue;
+                    return;
                 }
                 if v.infection_state.is_some() {
-                    continue;
+                    return;
                 }
                 if v.archetype == f_arch {
-                    continue;
+                    return;
                 }
                 if v.archetype == into_arch {
-                    // Don't re-infect things that are already the
-                    // target archetype (e.g., Headcrab-on-Zombie).
-                    continue;
+                    return;
                 }
                 if !f_hostiles.has(v.team) {
-                    continue;
+                    return;
                 }
                 let dx = v.x - fx;
                 let dy = v.y - fy;
-                if dx * dx + dy * dy < trigger_range * trigger_range {
+                if dx * dx + dy * dy < trigger_range_sq {
                     victim_idx = Some(vi);
-                    break;
                 }
-            }
+            });
 
             let Some(vi) = victim_idx else { continue };
 
@@ -3971,17 +4173,60 @@ impl Game {
                 depth: 0,
                 chain_cap,
             });
-            installations.push((vi, state));
+            installations.push((vi, state, fi));
             dying_infectors.push(fi);
         }
 
-        for (vi, state) in installations {
-            if vi < self.enemies.len()
-                && self.enemies[vi].infection_state.is_none()
-                && self.enemies[vi].hp > 0
-            {
-                self.enemies[vi].infection_state = Some(state);
+        // Snapshot kill-feed entries to push outside the mutable loop.
+        // Each successful infection reads "Infector infected Victim"
+        // — telegraphs the threat before phases play out. Infectors
+        // that landed are added to `feed_suppress` so their eventual
+        // bleed-out doesn't produce a redundant "— bleed → Infector"
+        // line.
+        let mut feed_rows: Vec<(String, String, String, Option<crate::tag::Tag>)> = Vec::new();
+        for (vi, state, fi) in installations {
+            if vi >= self.enemies.len() || self.enemies[vi].infection_state.is_some() {
+                continue;
             }
+            if self.enemies[vi].hp <= 0 {
+                continue;
+            }
+            let victim_info = {
+                let v = &self.enemies[vi];
+                (v.archetype, v.brand_id)
+            };
+            let infector_info = self
+                .enemies
+                .get(fi)
+                .map(|f| (f.archetype, f.brand_id))
+                .unwrap_or((Archetype::Rusher, None));
+            self.enemies[vi].infection_state = Some(state);
+            feed_suppress.insert(fi);
+            let killer_name = self.content.enemy_display_name(
+                infector_info.0,
+                infector_info.1.as_ref().map(|t| t.as_str()),
+            );
+            let victim_name = self.content.enemy_display_name(
+                victim_info.0,
+                victim_info.1.as_ref().map(|t| t.as_str()),
+            );
+            feed_rows.push((
+                killer_name,
+                "infection".to_string(),
+                victim_name,
+                infector_info.1,
+            ));
+        }
+        for (killer, weapon, victim, _brand) in feed_rows {
+            self.push_kill_feed(KillFeedEntry {
+                killer,
+                weapon,
+                victim,
+                ttl: KillFeedEntry::DEFAULT_TTL,
+                ttl_max: KillFeedEntry::DEFAULT_TTL,
+                local_killer: false,
+                local_victim: false,
+            });
         }
         dying_infectors.sort();
         dying_infectors.dedup();
@@ -4037,11 +4282,20 @@ impl Game {
     /// - Excludes dead enemies (hp <= 0) on both sides.
     /// - Excludes enemies with hostiles == empty (no targets).
     ///
-    /// Perf: O(n²) over the enemies vec. For the typical ≤500 enemy
-    /// count this is ~250k distance checks per tick. If that becomes
-    /// a hotspot, the spatial grid at `self.spatial` can be wired in
-    /// for O(n·k) behavior where k is average near-neighbor count.
-    fn tick_enemy_melee(&mut self, status_kills: &mut Vec<usize>) {
+    /// Perf: O(n·k) via the shared spatial grid — each attacker's
+    /// victim search is a 3×3-cell neighborhood lookup. At 14-unit
+    /// cells + typical enemy density this is ~10-40 candidates per
+    /// attacker regardless of n; the Zerg-tide-10k scenario went
+    /// from ~24 s/tick (the naive O(n²) form) to sub-millisecond.
+    fn tick_enemy_melee(
+        &mut self,
+        status_kills: &mut Vec<usize>,
+        grid: &crate::spatial::SpatialGrid,
+        kill_attribution: &mut std::collections::HashMap<
+            usize,
+            (Archetype, Option<crate::tag::Tag>, &'static str),
+        >,
+    ) {
         let mut hits: Vec<(usize, i32)> = Vec::new();
         let mut bitten_attackers: Vec<usize> = Vec::new();
         let enemies_len = self.enemies.len();
@@ -4076,30 +4330,36 @@ impl Game {
             if !can_bite {
                 continue;
             }
-            // Pick the first valid victim in reach.
+            // Spatial-grid narrowed scan for first valid victim in
+            // reach. Closure sets victim_idx and returns early on
+            // subsequent candidates once a hit is found (for_each_near
+            // can't break, so we gate by the Option).
             let mut victim_idx: Option<usize> = None;
-            for bi in 0..enemies_len {
-                if bi == ai {
-                    continue;
+            grid.for_each_near(ax, ay, |bi_raw| {
+                if victim_idx.is_some() {
+                    return;
+                }
+                let bi = bi_raw as usize;
+                if bi == ai || bi >= enemies_len {
+                    return;
                 }
                 let b = &self.enemies[bi];
                 if b.hp <= 0 {
-                    continue;
+                    return;
                 }
                 if b.archetype == a_arch {
-                    continue;
+                    return;
                 }
                 if !a_hostiles.has(b.team) {
-                    continue;
+                    return;
                 }
                 let dx = b.x - ax;
                 let dy = b.y - ay;
                 let reach = a_reach + b.hit_radius();
                 if dx * dx + dy * dy <= reach * reach {
                     victim_idx = Some(bi);
-                    break;
                 }
-            }
+            });
             let Some(bi) = victim_idx else { continue };
             // Fire the bite (cooldown-gated; returns 0 if the
             // attacker is still on bite-cooldown).
@@ -4133,12 +4393,27 @@ impl Game {
         let hit_count = hits.len();
         let mut primitive_applications: Vec<(usize, usize)> = Vec::new();
         for (i, (idx, dmg)) in hits.iter().enumerate() {
+            let attacker_archetype_brand = if i < bitten_attackers.len() {
+                self.enemies
+                    .get(bitten_attackers[i])
+                    .map(|a| (a.archetype, a.brand_id))
+            } else {
+                None
+            };
             if let Some(e) = self.enemies.get_mut(*idx) {
                 if e.hp > 0 {
                     e.hp = e.hp.saturating_sub(*dmg);
                     e.hit_flash = 0.12;
                     if e.hp <= 0 {
                         status_kills.push(*idx);
+                        // Record attribution so the death cleanup's
+                        // kill feed entry reads "Rat [bite] → Rusher"
+                        // instead of the generic DoT "— bleed"
+                        // placeholder. Overwrite is fine — the last
+                        // bite this tick is the one that mattered.
+                        if let Some((arch, brand)) = attacker_archetype_brand {
+                            kill_attribution.insert(*idx, (arch, brand, "bite"));
+                        }
                     }
                 }
             }
@@ -4993,7 +5268,13 @@ impl Game {
                     c.hp = s.hp;
                 }
                 None => {
-                    let mut c = Corpse::new(s.id, arch, s.x, s.y);
+                    // Client snapshot corpse — brand/unit context
+                    // isn't yet serialized across the wire (net proto
+                    // only carries archetype kind). Corpse sprite
+                    // falls back to archetype default for snapshot-
+                    // sourced corpses until the proto learns brand
+                    // + unit ids. Host-side corpses keep fidelity.
+                    let mut c = Corpse::new(s.id, arch, s.x, s.y, None, None);
                     c.hp = s.hp;
                     self.corpses.push(c);
                 }
@@ -5001,10 +5282,18 @@ impl Game {
         }
     }
 
-    fn spawn_corpse(&mut self, archetype: Archetype, x: f32, y: f32) {
+    fn spawn_corpse(
+        &mut self,
+        archetype: Archetype,
+        x: f32,
+        y: f32,
+        brand_id: Option<crate::tag::Tag>,
+        unit_id: Option<crate::tag::Tag>,
+    ) {
         let id = self.next_corpse_id;
         self.next_corpse_id = self.next_corpse_id.saturating_add(1);
-        self.corpses.push(Corpse::new(id, archetype, x, y));
+        self.corpses
+            .push(Corpse::new(id, archetype, x, y, brand_id, unit_id));
     }
 
     /// Fire a named body reaction at `(x, y)`. Called on enemy death

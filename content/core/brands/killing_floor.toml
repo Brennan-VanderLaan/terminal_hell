@@ -1,48 +1,52 @@
-# Killing Floor — Zed Outbreak. Literal genre-sibling brand: timed
-# waves of Clots, Gorefasts, Stalkers, Husks, Sirens, Fleshpounds
-# escalating toward a boss. The "stay on the trader timer, mind the
-# husks" brand.
+# Killing Floor — Zed Outbreak. Timed waves of Clots grabbing, Gorefasts
+# rushing cleaver-first, Stalkers cloaking, Sirens screaming, Husks
+# flaming, Fleshpounds raging. The literal genre-sibling brand — stay
+# on the trader timer, watch the Husk flanking your healer.
+#
+# Converted to BrandUnit authoring shape with the KF1 zed roster as
+# the canonical cast.
 
 id = "killing_floor"
 name = "Killing Floor — Zed Outbreak"
 description = "Clots grab, Gorefasts rush, Sirens scream, Husks burn. The Patriarch is coming."
 
-spawn_pool = ["rusher", "charger", "leaper", "howler", "sapper", "pinkie"]
-miniboss = "miniboss"
+spawn_pool = [
+    "clot",
+    "gorefast",
+    "stalker",
+    "siren",
+    "husk",
+    "fleshpound",
+    "crawler",
+]
+miniboss = "patriarch"
 
-# Medic-syringe dash fantasy → Dash. Perks lean into the KF loop:
-# QuickHands because every weapon benefits from rate-of-fire perk in
-# KF, CorpsePulse for the "heal off the kills" feel, LastStand for
-# the "down to red, headshot the Husk, survive" moments.
 signature_traversal = "dash"
 signature_perks = ["quick_hands", "corpse_pulse", "last_stand"]
 
 [spawn_weights]
-# Clots — the grabby horde staple.
-rusher = 5
-# Gorefast / Bloat charge.
-charger = 4
-# Stalker / Crawler pounce — cloaking ambushers. Bumped.
-leaper = 4
-# Siren scream — noise-caller pulling the rest of the wave in.
-howler = 2
-# Husk flamer + Sirens' scream suicide-detonate-style feel.
-sapper = 2
-# Fleshpound — the bullet-sponge big hit.
-pinkie = 1
+clot = 5
+gorefast = 4
+stalker = 3
+crawler = 2
+siren = 2
+husk = 2
+fleshpound = 1
 
-# ── Brand sprite overrides ─────────────────────────────────────────
-# KF zeds — sickly green flesh, exposed bone, charred husks, iron
-# gauntlet fleshpounds. Art files live in content/core/art/killing_floor/.
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster.
+# ═══════════════════════════════════════════════════════════════════
 
-[sprite_overrides]
-rusher = "clot.art"
-charger = "gorefast.art"
-pinkie = "fleshpound.art"
-sapper = "husk.art"
-
-# Clot — gray-green grabby shambler, pleading arms outstretched.
-[sprite_palettes.rusher]
+# Clot — the grabby shambler. Default Rusher with pleading-arms
+# silhouette, slower than base to sell the "drags you in place" feel.
+[units.clot]
+archetype = "rusher"
+display_name = "Clot"
+hp = 50
+speed = 18.0
+touch_damage = 8
+sprite = "clot.art"
+[units.clot.palette]
 B = "#8ca878"
 D = "#3e5438"
 E = "#e84040"
@@ -50,8 +54,16 @@ F = "#1a1008"
 A = "#9cb888"
 S = "#2a2018"
 
-# Gorefast — one-armed cleaver zed. Pale flesh + meat blade.
-[sprite_palettes.charger]
+# Gorefast — one-armed cleaver zed. Charger-backed, committed forward
+# rush, big touch damage when it lands its swing.
+[units.gorefast]
+archetype = "charger"
+display_name = "Gorefast"
+hp = 90
+speed = 24.0
+touch_damage = 22
+sprite = "gorefast.art"
+[units.gorefast.palette]
 B = "#a8b894"
 D = "#4a5840"
 E = "#e03030"
@@ -60,8 +72,90 @@ W = "#d0d4c8"
 N = "#78281c"
 S = "#1e1812"
 
-# Fleshpound — hulking iron-gauntleted bullet sponge with chest rage core.
-[sprite_palettes.pinkie]
+# Stalker — cloaking leaper zed. Fast, fragile, ambush-commits from
+# out of sight. Pounces off the Leaper archetype.
+[units.stalker]
+archetype = "leaper"
+display_name = "Stalker"
+hp = 40
+speed = 20.0
+touch_damage = 16
+sprite = "stalker.art"
+[units.stalker.palette]
+B = "#6a6a78"
+D = "#1a1a24"
+E = "#c04080"
+W = "#9a98a8"
+C = "#40404a"
+
+# Crawler — quadruped scuttler. Zergling-backed for the "floor-level
+# horde" pressure, low HP, high speed.
+[units.crawler]
+archetype = "zergling"
+display_name = "Crawler"
+hp = 22
+speed = 34.0
+touch_damage = 6
+sprite = "crawler.art"
+[units.crawler.palette]
+B = "#4a4028"
+D = "#1a1408"
+E = "#ff3020"
+H = "#6a5830"
+C = "#0a0802"
+
+# Siren — banshee scream. Howler archetype (noise-caller) with the
+# tormented-woman silhouette. Doesn't attack directly; draws the
+# rest of the wave into her scream zone.
+[units.siren]
+archetype = "howler"
+display_name = "Siren"
+hp = 55
+sprite = "siren.art"
+[units.siren.palette]
+B = "#d8b8a0"
+D = "#3a2420"
+E = "#ff2020"
+M = "#1a0a08"
+W = "#e8d8c4"
+
+# Husk — charred fire-cannon zed. Rocketeer-backed because it fires
+# an arcing fireball at standoff range. Longer tell than the default
+# rocketeer — Husk shots are slow and telegraphed for dodging.
+[units.husk]
+archetype = "rocketeer"
+display_name = "Husk"
+hp = 110
+speed = 10.0
+preferred_distance = 30.0
+sprite = "husk.art"
+[units.husk.palette]
+C = "#3e2a20"
+B = "#ff7020"
+E = "#ffe040"
+M = "#0a0404"
+D = "#1a0a06"
+N = "#48281c"
+F = "#ffc040"
+S = "#1a0804"
+[units.husk.ranged_profile]
+# Heavy wind-up shriek, big fireball, long recovery — the "Husk from
+# the flank" kill moment needs that telegraph for players to react.
+tell = 1.1
+shot_cooldown = 3.2
+mag_size = 1
+reload = 0.0
+
+# Fleshpound — the bullet-sponge rage zed. Pinkie-backed with beefed
+# HP + damage for the "everyone focus the rage-core" trader moment.
+[units.fleshpound]
+archetype = "pinkie"
+display_name = "Fleshpound"
+hp = 340
+speed = 19.0
+touch_damage = 32
+sprite = "fleshpound.art"
+[units.fleshpound.palette]
 B = "#c8bc9c"
 D = "#5a4a38"
 E = "#f02020"
@@ -71,14 +165,9 @@ G = "#c82818"
 R = "#ffc040"
 S = "#241a10"
 
-# Husk — charred fire-cannon zed, cracked skin glows.
-[sprite_palettes.sapper]
-C = "#3e2a20"
-B = "#ff7020"
-E = "#ffe040"
-M = "#0a0404"
-D = "#1a0a06"
-N = "#48281c"
-F = "#ffc040"
-S = "#1a0804"
-
+# Patriarch — the boss. Miniboss archetype wrapper, hp bumped to read
+# as the KF Patriarch's "waltz into wave 10 with a chaingun" threat.
+[units.patriarch]
+archetype = "miniboss"
+display_name = "Patriarch"
+hp = 1200

@@ -1,78 +1,117 @@
-# Rimworld — Mechanoid Raid. Cold clean firing lines, centipedes
-# tanking + laying down hitscan suppression, scythers closing fast.
-# The "structural threat" brand — Juggernaut + Sentinel do the bulk
-# work, Breacher teardowns open your killbox from the wrong side.
+# Rimworld — Mechanoid Raid. Cold clean firing lines, Centipedes
+# tanking + laying down hitscan suppression, Scythers closing fast
+# with monosword arms, Centurions stomping into melee, Diaboluses
+# cracking wall-breaches, Pikemen sniping at extreme range. The
+# "structural threat" brand — mechs never panic.
+#
+# Converted to BrandUnit authoring shape. Each mechanoid gets a
+# distinct firing profile so the "triple Centipede wall of fire"
+# reads different from "a single Pikeman zapping you from across
+# the map."
 
 id = "rimworld_mechs"
 name = "Rimworld — Mechanoid Raid"
 description = "Clinical mech attackers. Suppressive fire + plate armor."
 
-spawn_pool = ["sentinel", "juggernaut", "marksman", "breacher", "rocketeer"]
-miniboss = "miniboss"
+spawn_pool = [
+    "centipede",
+    "centurion",
+    "scyther",
+    "diabolus",
+    "pikeman",
+    "lancer",
+]
+miniboss = "diabolus_heavy"
 
-# Teleport-psycast flavor → Blink. Perks are the RimWorld raid-prep
-# loadout: Survivor armor vest, Butcher because every corpse is a
-# loot shelf, QuickHands for the sustained shootout.
 signature_traversal = "blink"
 signature_perks = ["survivor", "butcher", "quick_hands"]
 
 [spawn_weights]
-sentinel = 3
-juggernaut = 2
-# Scyther-style marksmen.
-marksman = 3
-# Breacher — mechanoid diabolus breaching wall.
-breacher = 2
-rocketeer = 1
+centipede = 3
+centurion = 2
+scyther = 3
+pikeman = 2
+diabolus = 2
+lancer = 2
 
-# ── Brand sprite overrides ─────────────────────────────────────────
-# Mechanoid raid: pure constructed silhouettes — gunmetal steel +
-# warning-orange accents + single red eye slit per chassis. No
-# mandibles, no chitin, no curves. Every unit reads "machined."
-# Art lives in content/core/art/rimworld_mechs/.
-# Palette keys: P = armor plate, A = chassis, B = body core,
-# E = eye slit (red), W = weapon barrel, S = strut/servo leg,
-# G = warning accent, O = orange running light.
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster.
+# ═══════════════════════════════════════════════════════════════════
 
-[sprite_overrides]
-sentinel = "centipede.art"
-juggernaut = "centurion.art"
-marksman = "scyther.art"
-breacher = "diabolus.art"
-rocketeer = "pikeman.art"
-
-# Centipede — long segmented chassis, heavy chargun off the front,
-# three red eye slits along the spine, tread-servos beneath each seg.
-[sprite_palettes.sentinel]
+# Centipede — long segmented chassis with heavy chargun. Sentinel-
+# backed (stationary hitscan) with the chargun burst-fire profile —
+# sustained suppression across the kill-zone.
+[units.centipede]
+archetype = "sentinel"
+display_name = "Centipede"
+hp = 260
+ranged_damage = 14
+preferred_distance = 100.0
+sprite = "centipede.art"
+[units.centipede.palette]
 P = "#4a5058"
 E = "#ff2018"
 S = "#2a2a2e"
 W = "#5a5a60"
 G = "#ff8020"
 A = "#1a1a1e"
+[units.centipede.ranged_profile]
+# Chargun — 8-round burst, mid reload. That corner is a kill-zone.
+tell = 0.3
+shot_cooldown = 0.16
+mag_size = 8
+reload = 2.6
 
-# Centurion — massive quadrupedal bulk, heavy plate armor stacked in
-# concentric rings, orange running lights on each flank.
-[sprite_palettes.juggernaut]
+# Centurion — massive quadrupedal plate-armor bulk. Juggernaut-backed;
+# plows forward, smashes walls.
+[units.centurion]
+archetype = "juggernaut"
+display_name = "Centurion"
+hp = 540
+speed = 6.5
+touch_damage = 36
+sprite = "centurion.art"
+[units.centurion.palette]
 P = "#585e66"
 A = "#2a2e34"
 S = "#1a1a1e"
 E = "#ff2818"
 O = "#ff8020"
 
-# Scyther — thin bipedal, one blade arm (B) and one accelerator rifle
-# arm (W). Sterile silver plate with a red visor eye.
-[sprite_palettes.marksman]
+# Scyther — thin bipedal, one blade arm + one accelerator-rifle arm.
+# Marksman-backed with a precise accelerator profile (single shot,
+# long range, clean burst).
+[units.scyther]
+archetype = "marksman"
+display_name = "Scyther"
+hp = 110
+speed = 14.0
+ranged_damage = 22
+preferred_distance = 80.0
+sprite = "scyther.art"
+[units.scyther.palette]
 A = "#787880"
 B = "#484850"
 P = "#383840"
 E = "#ff2818"
 W = "#5a5a60"
 O = "#ff9030"
+[units.scyther.ranged_profile]
+tell = 0.5
+shot_cooldown = 1.8
+mag_size = 2
+reload = 1.6
 
-# Mech-Diabolus — stubby wall-shatter frame, massive hammer arm (W)
-# cantilevered off the right shoulder, twin running lights.
-[sprite_palettes.breacher]
+# Diabolus — stubby wall-shatter frame, hammer-cannon arm. Breacher-
+# backed (smashes walls, huge touch damage).
+[units.diabolus]
+archetype = "breacher"
+display_name = "Diabolus"
+hp = 240
+speed = 9.0
+touch_damage = 30
+sprite = "diabolus.art"
+[units.diabolus.palette]
 P = "#3a4048"
 A = "#1a1e24"
 E = "#ff2818"
@@ -80,9 +119,16 @@ W = "#6a5030"
 O = "#ff8020"
 S = "#0a0a0e"
 
-# Pikeman — tall thin mech with a charge-blaster pole weapon held
-# vertically along the right side (W = shaft, G = emitter crystal).
-[sprite_palettes.rocketeer]
+# Pikeman — tall thin mech with a charge-blaster pole weapon.
+# Rocketeer-backed with a slow heavy bolt (long-range artillery).
+[units.pikeman]
+archetype = "rocketeer"
+display_name = "Pikeman"
+hp = 140
+speed = 8.0
+preferred_distance = 90.0
+sprite = "pikeman.art"
+[units.pikeman.palette]
 A = "#68707a"
 B = "#38383e"
 P = "#484850"
@@ -90,3 +136,37 @@ E = "#ff2818"
 W = "#5a5a60"
 G = "#80c8ff"
 O = "#ff8020"
+[units.pikeman.ranged_profile]
+tell = 1.1
+shot_cooldown = 3.2
+mag_size = 1
+reload = 0.0
+
+# Lancer — the mid-tier ranged mech, holds a charge-rifle, closes on
+# survivors. PMC-backed with a charge-rifle burst profile.
+[units.lancer]
+archetype = "pmc"
+display_name = "Lancer"
+hp = 180
+speed = 12.0
+touch_damage = 16
+ranged_damage = 10
+preferred_distance = 34.0
+sprite = "lancer.art"
+[units.lancer.palette]
+A = "#6a6a74"
+B = "#3a3a42"
+P = "#4a4a52"
+E = "#ff2818"
+W = "#5a5a60"
+O = "#ff9030"
+[units.lancer.ranged_profile]
+tell = 0.3
+shot_cooldown = 0.18
+mag_size = 3
+reload = 2.0
+
+# Diabolus Heavy — the miniboss variant. Miniboss archetype wrapper.
+[units.diabolus_heavy]
+archetype = "miniboss"
+display_name = "Diabolus Heavy"

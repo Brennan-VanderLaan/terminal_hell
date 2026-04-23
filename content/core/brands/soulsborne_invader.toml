@@ -1,84 +1,151 @@
-# Soulsborne brand: Dark Souls / Elden Ring / Bloodborne invaders.
+# Soulsborne brand — Dark Souls / Elden Ring / Bloodborne invaders.
 # Rare but lethal. One wanders in and shifts the fight. Killa is the
 # definitional invader — heavy, armed to the teeth, aggressive
-# closure; used as the brand's miniboss. Marksman + Pmc fill the
-# "entourage" of lesser duelists. Juggernaut is the slow plate-armor
-# arbiter that demands respect. Low volume, high threat per spawn.
+# closure; used as the brand's miniboss. Black Knights, Painting
+# Archers, Havel Knights, and Basilisks fill the lesser-duelist
+# roles. Low volume, high threat per spawn.
+#
+# Converted to BrandUnit authoring shape.
 
 id = "soulsborne_invader"
 name = "Invader"
 description = "Rare but lethal duelists. One is already enough to worry about."
 
-spawn_pool = ["marksman", "pmc", "juggernaut", "killa"]
-# Killa IS the miniboss — boss-tier invader archetype.
-miniboss = "killa"
+spawn_pool = [
+    "black_knight",
+    "painting_archer",
+    "havel_knight",
+    "basilisk",
+    "silver_knight",
+    "giant_slave",
+]
+miniboss = "soulsborne_killa"
 
-# Grapple hook → hookshot-style pull matches Bloodborne's rally + the
-# DS grappling iron-finger vibe. Perks are duelist survival: LastStand
-# for the clutch health-chug frame, GloomShroud to resist the zone's
-# ambient drain, Adrenaline for the post-parry commit window.
 signature_traversal = "grapple"
 signature_perks = ["last_stand", "gloom_shroud", "adrenaline"]
 
 [spawn_weights]
-# Marksmen + PMCs fill the standard invader roles.
-marksman = 3
-pmc = 3
-# Juggernaut is the rare heavy — terrifying but predictable.
-juggernaut = 2
-# Killa as a regular spawn is the "oh no" moment.
-killa = 1
+black_knight = 3
+painting_archer = 3
+silver_knight = 2
+havel_knight = 2
+basilisk = 2
+giant_slave = 1
+soulsborne_killa = 1
 
-# ── Brand sprite overrides ─────────────────────────────────────────
-# Muted armor-gray-black with deep crimson accents + old-gold + cold
-# bronze-steel. Everything must feel HEAVY — silhouettes wider than
-# tall where possible, plated shoulders, grim posture.
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster.
+# ═══════════════════════════════════════════════════════════════════
 
-[sprite_overrides]
-pmc = "black_knight.art"
-marksman = "painting_archer.art"
-juggernaut = "havel_knight.art"
-killa = "killa.art"
-leaper = "basilisk.art"
-
-# Black Knight — full plate, greatsword on shoulder, cape.
-[sprite_palettes.pmc]
+# Black Knight — full plate, greatsword on shoulder, fluttering cape.
+# PMC-backed; armored, heavy melee, no ranged.
+[units.black_knight]
+archetype = "pmc"
+display_name = "Black Knight"
+hp = 260
+speed = 10.0
+touch_damage = 32
+ranged_damage = 0
+sprite = "black_knight.art"
+[units.black_knight.palette]
 B = "#3a3a44"
 D = "#18181e"
 E = "#ff3818"
 C = "#c8a648"
 S = "#60482a"
 
-# Painting Guardian — robed, crossbow, pale mask.
-[sprite_palettes.marksman]
+# Painting Archer — robed crossbow marksman. Marksman-backed with a
+# slow deliberate bolt (Painting Guardians fire on a long cadence).
+[units.painting_archer]
+archetype = "marksman"
+display_name = "Painting Archer"
+hp = 55
+speed = 8.0
+ranged_damage = 34
+preferred_distance = 90.0
+sprite = "painting_archer.art"
+[units.painting_archer.palette]
 M = "#e8e0c8"
 B = "#2a2028"
 D = "#18100c"
 E = "#181010"
 W = "#6a5030"
 S = "#402820"
+[units.painting_archer.ranged_profile]
+tell = 1.3
+shot_cooldown = 4.0
+mag_size = 1
+reload = 0.0
 
-# Havel — stone-dragon-tooth armor, huge shield and great-hammer.
-[sprite_palettes.juggernaut]
+# Silver Knight — the archer/swordsman that holds line positions.
+# Sentinel-backed variant (stationary hitscan with a greatbow profile).
+[units.silver_knight]
+archetype = "sentinel"
+display_name = "Silver Knight"
+hp = 180
+ranged_damage = 26
+preferred_distance = 110.0
+[units.silver_knight.ranged_profile]
+tell = 1.0
+shot_cooldown = 2.8
+mag_size = 1
+reload = 0.0
+
+# Havel Knight — stone-dragon-tooth armor, greatshield, great-hammer.
+# Juggernaut-backed; slow, plow-through-walls, monstrous HP.
+[units.havel_knight]
+archetype = "juggernaut"
+display_name = "Havel Knight"
+hp = 520
+speed = 6.0
+touch_damage = 38
+sprite = "havel_knight.art"
+[units.havel_knight.palette]
 B = "#4a4038"
 D = "#1a1410"
 E = "#d8a040"
 H = "#786050"
 S = "#3a2818"
 
-# Killa — crimson-cloaked invader overlord with unique helm + claymore.
-# Brand miniboss. Silhouette MUST read "oh no."
-[sprite_palettes.killa]
+# Basilisk — squat bulging-eye frog-thing, petrifying gaze. Leaper-
+# backed with the pounce-bite silhouette.
+[units.basilisk]
+archetype = "leaper"
+display_name = "Basilisk"
+hp = 60
+speed = 13.0
+touch_damage = 22
+sprite = "basilisk.art"
+[units.basilisk.palette]
+B = "#4a4a4a"
+D = "#1a1a1a"
+E = "#f8e8a0"
+
+# Giant Slave — hulking chained giant. Charger-backed.
+[units.giant_slave]
+archetype = "charger"
+display_name = "Giant Slave"
+hp = 200
+speed = 18.0
+touch_damage = 32
+sprite = "giant_slave.art"
+[units.giant_slave.palette]
+B = "#7a6048"
+D = "#2a1a0a"
+H = "#a88868"
+E = "#ff3020"
+C = "#3a2a18"
+
+# Soulsborne Killa — crimson-cloaked invader overlord. Killa archetype
+# wrapper for the "oh no, an invader in red" moment.
+[units.soulsborne_killa]
+archetype = "killa"
+display_name = "Crimson Invader"
+sprite = "killa.art"
+[units.soulsborne_killa.palette]
 R = "#902018"
 C = "#c8a648"
 B = "#2a2028"
 D = "#100808"
 E = "#ffb020"
 S = "#50382a"
-
-# Basilisk — squat bulging-eye frog-thing, petrifying gaze.
-[sprite_palettes.leaper]
-B = "#4a4a4a"
-D = "#1a1a1a"
-E = "#f8e8a0"
-

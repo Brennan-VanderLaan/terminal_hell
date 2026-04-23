@@ -1,74 +1,123 @@
-# Vampire Survivors — auto-battler swarm. Walls of enemies closing
-# the arena. The brand where you WILL be surrounded; your only job
-# is to carve a hole wide enough to breathe.
+# Vampire Survivors — Closing Walls. Auto-battler swarm. Walls of
+# enemies closing the arena. The brand where you WILL be surrounded;
+# your only job is to carve a hole wide enough to breathe.
+#
+# Converted to BrandUnit authoring shape with the 16-bit Halloween
+# silhouettes (bats, zombies, skeletons, witches).
 
 id = "vampire_survivors"
 name = "Vampire Survivors — Closing Walls"
 description = "Walls of hostile bats. You are always about to be surrounded."
 
-spawn_pool = ["swarmling", "rusher", "splitter", "leaper", "howler"]
-miniboss = "miniboss"
+spawn_pool = [
+    "pixel_bat",
+    "vs_zombie",
+    "big_bone",
+    "bat_spirit",
+    "vs_witch",
+    "skeleton_swarm",
+]
+miniboss = "death_reaper"
 
-# Nothing but a punch-through-the-wall feel → Dash. Perks are the
-# stat-stacking curve: Butcher to fatten the loot ticks, Rampage
-# because every frame is a chain-kill, CorpsePulse for the constant
-# drip HP from wave-clear.
 signature_traversal = "dash"
 signature_perks = ["butcher", "rampage", "corpse_pulse"]
 
 [spawn_weights]
-# Raw numbers. The point — bats + skeletons closing from every side.
-swarmling = 10
-rusher = 5
-# Splitters multiply the wall — every kill becomes more kills.
-splitter = 3
-leaper = 1
-howler = 1
+pixel_bat = 10
+vs_zombie = 5
+skeleton_swarm = 4
+big_bone = 3
+bat_spirit = 1
+vs_witch = 1
 
-# ── Brand sprite overrides ─────────────────────────────────────────
-# 16-bit Halloween palette — deep purples + bone-white + blood-orange
-# + green poison. Chunky silhouettes because VS itself is pixel-art,
-# so we lean into low-res SNES-era readability.
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster.
+# ═══════════════════════════════════════════════════════════════════
 
-[sprite_overrides]
-swarmling = "pixel_bat.art"
-rusher = "zombie.art"
-splitter = "big_bone.art"
-leaper = "bat_spirit.art"
-howler = "witch.art"
-
-# Pixel Bat — tiny winged silhouette, glowing eyes.
-[sprite_palettes.swarmling]
+# Pixel Bat — tiny winged silhouette, glowing eyes. Swarmling-backed
+# for the fill-the-screen feel. Lower HP so a single weapon swing
+# cleans up a row.
+[units.pixel_bat]
+archetype = "swarmling"
+display_name = "Pixel Bat"
+hp = 12
+sprite = "pixel_bat.art"
+[units.pixel_bat.palette]
 B = "#2a1038"
 W = "#602080"
 E = "#ff4030"
 
-# Shambling Zombie — rotten green flesh, bone teeth.
-[sprite_palettes.rusher]
+# Zombie — shambling green 16-bit zed. Rusher-backed, slower than base,
+# the "they keep coming" mid-tier.
+[units.vs_zombie]
+archetype = "rusher"
+display_name = "Zombie"
+hp = 45
+speed = 18.0
+touch_damage = 10
+sprite = "zombie.art"
+[units.vs_zombie.palette]
 B = "#6ea048"
 D = "#2a4018"
 E = "#ffe800"
 G = "#90c868"
 
-# Big Bone — bone-white skeleton, about to fragment.
-[sprite_palettes.splitter]
+# Big Bone — bone-white skeleton, fractures on death into more bones.
+# Splitter-backed for the cascade pressure.
+[units.big_bone]
+archetype = "splitter"
+display_name = "Big Bone"
+hp = 50
+sprite = "big_bone.art"
+[units.big_bone.palette]
 T = "#f8f4d8"
 B = "#c8c0a0"
 D = "#40381c"
 E = "#ff3020"
 
-# Bat Spirit — diagonal-flying claw-forward bat.
-[sprite_palettes.leaper]
+# Bat Spirit — diagonal-flying claw-forward bat. Leaper-backed, the
+# elite bat that pounces rather than drifting.
+[units.bat_spirit]
+archetype = "leaper"
+display_name = "Bat Spirit"
+hp = 45
+speed = 18.0
+touch_damage = 16
+sprite = "bat_spirit.art"
+[units.bat_spirit.palette]
 B = "#3a1050"
 W = "#8038b0"
 E = "#ff4020"
 C = "#f8d4a0"
 
-# Witch — wide hat, pale face, cackling.
-[sprite_palettes.howler]
+# VS Witch — wide-hat cackler. Howler-backed — calls more waves toward
+# her scream. Pulls the walls inward.
+[units.vs_witch]
+archetype = "howler"
+display_name = "Witch"
+hp = 45
+sprite = "witch.art"
+[units.vs_witch.palette]
 H = "#180820"
 B = "#d8c4a8"
 E = "#ff3020"
 D = "#402020"
 G = "#60b040"
 
+# Skeleton Swarm — the bone-rattler fodder. Zergling-backed for the
+# "dozens per wave" feel.
+[units.skeleton_swarm]
+archetype = "zergling"
+display_name = "Skeleton"
+hp = 10
+sprite = "skeleton_swarm.art"
+[units.skeleton_swarm.palette]
+B = "#f8f4d8"
+D = "#40381c"
+E = "#ff3020"
+
+# Death Reaper — the scythe-wielding miniboss. Miniboss archetype
+# wrapper; the "ascend" silhouette when time runs out.
+[units.death_reaper]
+archetype = "miniboss"
+display_name = "Death"

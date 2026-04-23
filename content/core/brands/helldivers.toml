@@ -1,57 +1,58 @@
-# Helldivers — Managed Democracy. Bug waves (Terminids) + Automaton
-# assault. Swarm bugs rushing in numbers, Rocketeer Automaton
-# devastators, Sentinel tower turrets. Brand that always feels
-# OUTSIDE of cover.
+# Helldivers — Managed Democracy. Two factions in one pool:
+# Terminid bug swarms (Hunters, Stalkers, Bile Titans, Warriors) +
+# Automaton war-machines (Devastators, Towers, Commissars, Berserkers).
+# The brand that always feels OUTSIDE of cover.
+#
+# Converted to BrandUnit authoring shape. Each faction gets its own
+# named units hung off the archetype that gives it the right sim feel
+# (Zergling for the Hunter stampede, Charger for the Bile Titan bowl,
+# Sentinel for the Automaton Tower).
 
 id = "helldivers"
 name = "Helldivers — Bug Breach"
 description = "Bug stampedes + Automaton devastators. Never out of the fight."
 
-spawn_pool = ["swarmling", "rocketeer", "sentinel", "sapper", "charger", "leaper", "marksman"]
-miniboss = "miniboss"
+spawn_pool = [
+    "hunter_terminid",
+    "warrior_terminid",
+    "stalker_terminid",
+    "bile_titan",
+    "bile_spewer",
+    "devastator",
+    "automaton_tower",
+    "commissar",
+    "hulk",
+]
+miniboss = "hulk"
 
-# Stim-injector slide → Slide verb matches Helldivers 2 diving for
-# cover. Perks are front-line democracy: Survivor armor, Rampage to
-# stack kills under pressure, QuickHands for the cross-open-ground
-# firefights that define this brand.
 signature_traversal = "slide"
 signature_perks = ["survivor", "rampage", "quick_hands"]
 
 [spawn_weights]
-# Terminid horde — the bug-breach "hunt from every angle" pressure.
-swarmling = 6
-# Stalker-class leapers closing from flanks — bumped so the
-# "something jumped over the rock" moment lands per wave.
-leaper = 4
-# Automaton long-range laser crossbow — snipers across the map.
-marksman = 3
-# Automaton fire support — rockets lobbed from far cover.
-rocketeer = 3
-# Automaton tower turrets — long-range dug-in positions.
-sentinel = 2
-# Bile titans / Chargers — committed bowling charges.
-charger = 3
-# Suicide spore-spewers.
-sapper = 1
+hunter_terminid = 6
+warrior_terminid = 3
+stalker_terminid = 3
+bile_titan = 2
+bile_spewer = 2
+devastator = 3
+automaton_tower = 2
+commissar = 2
+hulk = 1
 
-# ── Brand sprite overrides ─────────────────────────────────────────
-# Mixed-enemy brand: Terminid bugs (muted green-brown exoskeleton +
-# yellow mandible tips) plus Automaton war-machines (industrial black-
-# red, glowing eye slit). Silhouettes must never be confused: bug =
-# chitin + mandibles + multiple legs; Automaton = armor plates +
-# visible gun mount + single leg pair.
-# Art lives in content/core/art/helldivers/.
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster — Terminid faction.
+# ═══════════════════════════════════════════════════════════════════
 
-[sprite_overrides]
-swarmling = "hunter_terminid.art"
-leaper = "stalker.art"
-charger = "bile_titan.art"
-rocketeer = "devastator.art"
-sentinel = "automaton_tower.art"
-marksman = "commissar.art"
-
-# Hunter — quadruped Terminid scout, low-slung, mandibles splayed.
-[sprite_palettes.swarmling]
+# Hunter — low-slung quadruped scout that jumps at the squad. Zergling-
+# backed for the paper-HP swarm feel. Comes in numbers.
+[units.hunter_terminid]
+archetype = "zergling"
+display_name = "Hunter Terminid"
+hp = 22
+speed = 30.0
+touch_damage = 8
+sprite = "hunter_terminid.art"
+[units.hunter_terminid.palette]
 C = "#3a4a20"
 H = "#5a6830"
 E = "#ff4040"
@@ -59,9 +60,34 @@ M = "#d8c058"
 L = "#1a2010"
 D = "#0a0a02"
 
-# Stalker — cloaked chameleon bug mid-pounce, shimmer-pattern across
-# the carapace (C + H alternating), luminous predator eye.
-[sprite_palettes.leaper]
+# Warrior — larger bipedal terminid, the mid-tier bug threat. Swarmling-
+# backed but bumped to a heavier profile that reads as "step-up from
+# Hunter."
+[units.warrior_terminid]
+archetype = "swarmling"
+display_name = "Warrior Terminid"
+hp = 55
+speed = 22.0
+touch_damage = 14
+sprite = "warrior_terminid.art"
+[units.warrior_terminid.palette]
+C = "#3a4a20"
+H = "#6a7830"
+E = "#ff5030"
+M = "#d8c058"
+L = "#1a2010"
+D = "#0a0a02"
+
+# Stalker — chameleon-bug pounce from cover. Leaper-backed; the "WHERE
+# DID THAT COME FROM" moment.
+[units.stalker_terminid]
+archetype = "leaper"
+display_name = "Stalker"
+hp = 80
+speed = 20.0
+touch_damage = 26
+sprite = "stalker.art"
+[units.stalker_terminid.palette]
 C = "#2a3a1c"
 H = "#48582a"
 E = "#80ffc0"
@@ -69,9 +95,17 @@ M = "#c0a848"
 L = "#100a04"
 D = "#080402"
 
-# Bile Titan — colossal terminid, green mortar sac bulging off the
-# back, dripping acid, armored chitin slabs across the abdomen.
-[sprite_palettes.charger]
+# Bile Titan — colossal terminid, mortar-sac on its back. Charger-
+# backed with massive HP — reads as the "everyone focus the legs"
+# anchor of the bug breach.
+[units.bile_titan]
+archetype = "charger"
+display_name = "Bile Titan"
+hp = 380
+speed = 14.0
+touch_damage = 34
+sprite = "bile_titan.art"
+[units.bile_titan.palette]
 C = "#3a4a20"
 G = "#508040"
 A = "#80c848"
@@ -80,29 +114,75 @@ E = "#ff5030"
 L = "#1a0a04"
 D = "#0a0604"
 
-# Automaton Devastator — bipedal black-red war machine, rocket pod
-# bolted to the right shoulder, glowing eye slit.
-[sprite_palettes.rocketeer]
+# Bile Spewer — arcing bile lob at standoff range. Sapper-backed,
+# detonates on impact in a bile pool.
+[units.bile_spewer]
+archetype = "sapper"
+display_name = "Bile Spewer"
+hp = 65
+speed = 14.0
+sprite = "bile_spewer.art"
+[units.bile_spewer.palette]
+C = "#3a4a20"
+G = "#508040"
+A = "#80c848"
+E = "#ff5030"
+D = "#0a0604"
+
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster — Automaton faction.
+# ═══════════════════════════════════════════════════════════════════
+
+# Devastator — bipedal war machine with shoulder rockets. Rocketeer-
+# backed with the signature black-red armor palette + slow rocket
+# arcs.
+[units.devastator]
+archetype = "rocketeer"
+display_name = "Automaton Devastator"
+hp = 130
+speed = 9.0
+preferred_distance = 40.0
+sprite = "devastator.art"
+[units.devastator.palette]
 A = "#2a1a18"
 B = "#5a2820"
 E = "#ff3020"
 R = "#383028"
 W = "#181010"
 S = "#0a0604"
+[units.devastator.ranged_profile]
+# Rocket burst — 2 rockets in quick succession then a long reload.
+tell = 0.5
+shot_cooldown = 0.6
+mag_size = 2
+reload = 3.2
 
-# Automaton Tower — tripod sentinel emplacement, heavy MG muzzle
-# glowing hot, spotlight eye scanning.
-[sprite_palettes.sentinel]
-A = "#3a2a22"
-B = "#6a3020"
-E = "#ff4020"
-G = "#ffb040"
-W = "#281810"
-S = "#0a0604"
+# Automaton Tower — tripod sentinel with heavy MG. Sentinel-backed,
+# sustained suppression via extended burst (beltfed feel).
+[units.automaton_tower]
+archetype = "sentinel"
+display_name = "Automaton Tower"
+hp = 220
+ranged_damage = 12
+preferred_distance = 120.0
+[units.automaton_tower.ranged_profile]
+# Heavy MG beltfed — 10-round burst, long reload.
+tell = 0.3
+shot_cooldown = 0.14
+mag_size = 10
+reload = 3.0
 
-# Automaton Commissar — tall bipedal sniper unit, crimson robe-armor
-# plating, laser rifle at the shoulder.
-[sprite_palettes.marksman]
+# Commissar — tall sniper unit with laser rifle. Marksman-backed, long
+# deliberate shot; crimson robe-armor silhouette.
+[units.commissar]
+archetype = "marksman"
+display_name = "Automaton Commissar"
+hp = 80
+speed = 9.0
+ranged_damage = 34
+preferred_distance = 100.0
+sprite = "commissar.art"
+[units.commissar.palette]
 A = "#2a1818"
 B = "#7a2a20"
 E = "#ff3020"
@@ -110,3 +190,15 @@ R = "#1a0808"
 W = "#382820"
 G = "#ff6030"
 S = "#0a0402"
+[units.commissar.ranged_profile]
+tell = 1.0
+shot_cooldown = 3.0
+mag_size = 1
+reload = 0.0
+
+# Hulk — the miniboss stomper. Miniboss archetype wrapper, heavy
+# armor, flamethrower arm silhouette.
+[units.hulk]
+archetype = "miniboss"
+display_name = "Automaton Hulk"
+hp = 1100

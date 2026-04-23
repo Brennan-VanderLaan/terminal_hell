@@ -1,72 +1,70 @@
-# Aliens — Xenomorph Hive Infestation. Facehuggers convert, drones
-# skitter out of ceiling vents, warriors flank in packs, carriers
-# burst into more facehuggers, chestbursters tear out of downed
-# bodies. Black-biomechanical nightmare with the same conversion
-# engine the Flood brand uses but a tighter, more claustrophobic
-# texture.
+# Aliens — Xenomorph Hive Infestation. Facehuggers convert, Drones
+# skitter out of ceiling vents, Warriors flank in packs, Carriers
+# burst into more Facehuggers, the Queen looms. Black-biomechanical
+# nightmare with the same conversion engine the Flood brand uses but
+# a tighter, more claustrophobic texture.
+#
+# Converted to BrandUnit authoring shape. Each unit ties an LV-426-
+# canonical silhouette to the backing sim archetype that gives it the
+# right sim feel (Floodling conversion for facehuggers, Leaper pounce
+# for the warrior skitter, Phaser flicker for the ceiling-drop).
 
 id = "xenomorph_hive"
 name = "Aliens — Xenomorph Hive"
 description = "Facehuggers convert, warriors flank, carriers burst. The hive breathes."
 
 spawn_pool = [
-    "floodling",
-    "flood",
-    "flood_carrier",
-    "leaper",
-    "charger",
-    "pinkie",
-    "phaser",
+    "facehugger",
+    "xeno_drone",
+    "xeno_warrior",
+    "chestburster",
+    "xeno_runner",
+    "xeno_praetorian",
+    "xeno_stalker",
 ]
-miniboss = "pinkie"
+miniboss = "xeno_queen"
 
-# Alien acrobatics / drop-from-ceiling → Phase. Perks for the
-# survival-horror loop: GloomShroud for the resin-walled dread,
-# LastStand for the "one bite from death" squeeze, IronWill to
-# resist the psionic pressure of the hive.
 signature_traversal = "phase"
 signature_perks = ["gloom_shroud", "last_stand", "iron_will"]
 
 [spawn_weights]
-# Facehuggers — the conversion engine.
-floodling = 5
-# Xenomorph Drone — post-conversion combat form.
-flood = 3
-# Praetorian / carrier bursting chestbursters.
-flood_carrier = 2
-# Warrior leap — skittering out of walls EVERY wave.
-leaper = 5
-# Crusher — mass charge with armored head plate.
-charger = 3
-# Drone drop-from-ceiling phase — the "it was on the ceiling the
-# whole time" jumpscare.
-phaser = 2
-# Queen — the endgame silhouette.
-pinkie = 1
+facehugger = 5
+xeno_drone = 3
+xeno_warrior = 5
+chestburster = 2
+xeno_runner = 3
+xeno_praetorian = 2
+xeno_stalker = 2
 
-# ── Brand sprite overrides ─────────────────────────────────────────
-# Xenomorph silhouettes: low spider-legged Facehuggers, tall smooth-
-# skulled Drones, crested Warriors mid-pounce, and the spindly head-
-# crowned Queen. Black chitin + smokey dark-gray + bio-green ichor.
-# Art lives in content/core/art/xenomorph_hive/.
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster.
+# ═══════════════════════════════════════════════════════════════════
 
-[sprite_overrides]
-floodling = "facehugger.art"
-flood = "xeno_drone.art"
-leaper = "xeno_warrior.art"
-pinkie = "xeno_queen.art"
-
-# Facehugger — bone-pale sac with twin eye spots, splayed spider
-# legs, and a tail trailing behind. L = leg, T = tail, E = eye spot.
-[sprite_palettes.floodling]
+# Facehugger — the conversion engine. Floodling-backed, sprints at
+# hosts and attaches. Faster than the default Floodling (canon: they
+# move FAST) and uses the parasite team tagging.
+[units.facehugger]
+archetype = "floodling"
+display_name = "Facehugger"
+speed = 32.0
+sprite = "facehugger.art"
+[units.facehugger.palette]
 B = "#d8c8a0"
 E = "#1a0a14"
 L = "#6a5a48"
 T = "#4a3a28"
 
-# Xenomorph Drone — jet-black chitin, elongated smooth skull, curled
-# tail segment behind the spine. S = inner-mouth glisten, T = tail.
-[sprite_palettes.flood]
+# Xenomorph Drone — post-conversion combat form. Flood-archetype backed
+# for the "team=flood, attacks everyone" chaos. Sleek black chitin,
+# elongated skull, tail thrash.
+[units.xeno_drone]
+archetype = "flood"
+display_name = "Xenomorph Drone"
+hp = 95
+speed = 20.0
+touch_damage = 24
+sprite = "xeno_drone.art"
+[units.xeno_drone.palette]
 H = "#3a3a44"
 B = "#0a0a14"
 S = "#4a8a60"
@@ -74,9 +72,17 @@ T = "#1a1a24"
 D = "#000004"
 C = "#000000"
 
-# Xenomorph Warrior — ridged skull-crest distinguishes it from the
-# Drone. R = dorsal ridge crest, T = trailing tail, S = inner jaw.
-[sprite_palettes.leaper]
+# Xenomorph Warrior — the ridged-skull pouncer. Leaper-backed for the
+# "out-of-nowhere skitter-pounce" moment. Ridged dorsal crest
+# distinguishes it from the smoother Drone.
+[units.xeno_warrior]
+archetype = "leaper"
+display_name = "Xenomorph Warrior"
+hp = 80
+speed = 18.0
+touch_damage = 26
+sprite = "xeno_warrior.art"
+[units.xeno_warrior.palette]
 R = "#3a3a44"
 B = "#0a0a14"
 S = "#4a8a60"
@@ -84,9 +90,83 @@ T = "#1a1a24"
 D = "#000004"
 C = "#000000"
 
-# Xenomorph Queen — enormous flat head-crown (R) fanning out above a
-# slender crowned skull. S = inner maw glisten, T = secondary tongue.
-[sprite_palettes.pinkie]
+# Chestburster — the freshly-emerged young form. FloodCarrier-backed
+# because it bursts into more Facehuggers on death (same venting
+# mechanic as the Flood brand). Fragile but spawns pressure.
+[units.chestburster]
+archetype = "flood_carrier"
+display_name = "Chestburster"
+hp = 35
+speed = 22.0
+sprite = "chestburster.art"
+[units.chestburster.palette]
+B = "#d8c0a8"
+D = "#3a281c"
+S = "#6a1828"
+T = "#8a7048"
+C = "#1a0a08"
+
+# Xenomorph Runner — quadruped dog-alien from the Alien 3 lineage.
+# Zergling-backed (paper HP, blazing speed) — reads as the swarm
+# that hits like a truck when they cluster.
+[units.xeno_runner]
+archetype = "zergling"
+display_name = "Xenomorph Runner"
+hp = 28
+speed = 32.0
+touch_damage = 10
+sprite = "xeno_runner.art"
+[units.xeno_runner.palette]
+H = "#2a2a34"
+B = "#080810"
+S = "#4a8a60"
+T = "#14141c"
+C = "#000000"
+
+# Xenomorph Praetorian — charged armored bull-form from the hive
+# lineage. Charger-backed — pure ram-through-walls threat.
+[units.xeno_praetorian]
+archetype = "charger"
+display_name = "Xenomorph Praetorian"
+hp = 150
+speed = 22.0
+touch_damage = 24
+sprite = "xeno_praetorian.art"
+[units.xeno_praetorian.palette]
+H = "#38384a"
+B = "#0a0a14"
+S = "#4a8a60"
+T = "#1a1a24"
+D = "#000004"
+P = "#60606a"
+C = "#000000"
+
+# Xenomorph Stalker — ceiling-drop ambusher. Phaser-backed so it
+# flickers across the arena and lands next to the player. The "it
+# was on the ceiling the whole time" jumpscare.
+[units.xeno_stalker]
+archetype = "phaser"
+display_name = "Xenomorph Stalker"
+hp = 55
+speed = 10.0
+touch_damage = 22
+sprite = "xeno_stalker.art"
+[units.xeno_stalker.palette]
+H = "#2a2a38"
+B = "#080810"
+S = "#4a8a60"
+T = "#14141c"
+C = "#000000"
+
+# Xenomorph Queen — the hive matriarch. Miniboss archetype wrapper.
+[units.xeno_queen]
+archetype = "miniboss"
+display_name = "Xenomorph Queen"
+hp = 1100
+speed = 8.0
+touch_damage = 42
+sprite = "xeno_queen.art"
+[units.xeno_queen.palette]
 R = "#2a2a38"
 B = "#080810"
 S = "#4a8a60"

@@ -1,64 +1,54 @@
 # Gears of War — Locust Emergence. Ground-level horde rising out of
-# emergence holes: Drones with Lancers, Wretches scuttling low,
-# Boomers lobbing grenades, Berserkers smashing walls, Kantus
-# support. Chainsaw bayonets, cover-to-cover combat, roadie-run
-# energy. The "bullet sponge + brutal melee" brand.
+# emergence holes: Drones with Lancers, Therons with torque bows,
+# Wretches scuttling low, Boomers lobbing grenades, Tickers as walking
+# bombs, Bloodmounts as mounted chargers, Berserkers smashing walls.
+# Chainsaw bayonets, cover-to-cover, roadie-run energy.
+#
+# Converted to BrandUnit authoring shape.
 
 id = "gears_locust"
 name = "Gears of War — Locust Emergence"
 description = "Drones with Lancers, Wretches scuttling, Boomers lobbing, Berserkers smashing walls."
 
 spawn_pool = [
-    "pmc",
-    "marksman",
-    "leaper",
-    "rocketeer",
-    "breacher",
-    "sapper",
-    "pinkie",
-    "charger",
+    "locust_drone",
+    "theron_guard",
+    "wretch",
+    "boomer",
+    "ticker",
+    "bloodmount",
+    "corpser",
 ]
-miniboss = "pinkie"
+miniboss = "berserker"
 
-# Roadie run + shoulder-charge through cover → Slide. Perks are Delta
-# Squad kit: Survivor armor, Butcher because every Locust drops a
-# weapon, Adrenaline for the "close the gap with the chainsaw"
-# moments.
 signature_traversal = "slide"
 signature_perks = ["survivor", "butcher", "adrenaline"]
 
 [spawn_weights]
-# Locust Drone — rifles + numbers.
-pmc = 4
-# Theron Guard sniper / Sharpshooter — long-range torque bows.
-marksman = 4
-# Wretch — scuttling leaper from the emergence hole. Bumped so the
-# jump-from-emergence-hole moment lands every wave.
-leaper = 4
-# Bloodmount charge — committed bowling rush.
-charger = 3
-# Boomer / Mauler — shoulder-launcher lobs from standoff distance.
-rocketeer = 3
-# Kantus / Corpser — digs through walls.
-breacher = 2
-# Tickers — walking bombs.
-sapper = 1
-# Berserker — blind, smashes walls, huge HP pool.
-pinkie = 1
+locust_drone = 4
+theron_guard = 4
+wretch = 4
+bloodmount = 3
+boomer = 3
+corpser = 2
+ticker = 1
 
-# Brand-specific sprite overrides. Drones with chunky plated armor +
-# Lancer rifles, Therons in hooded robes with torque bows, Wretches
-# scuttling low, Boomers with shoulder cannons, blind Berserkers
-# with crested spikes. Palette: grim gray-green armor, bone-pale
-# horns, crimson emergence-omen accents.
-[sprite_overrides]
-pmc = "locust_drone.art"
-marksman = "theron_guard.art"
-leaper = "wretch.art"
-rocketeer = "boomer.art"
-pinkie = "berserker.art"
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster.
+# ═══════════════════════════════════════════════════════════════════
 
-[sprite_palettes.pmc]
+# Locust Drone — chunky-plated grunt with Lancer. PMC-backed with a
+# Lancer burst-fire profile (5-round chainsaw-rifle bursts).
+[units.locust_drone]
+archetype = "pmc"
+display_name = "Locust Drone"
+hp = 200
+speed = 11.0
+touch_damage = 22
+ranged_damage = 6
+preferred_distance = 24.0
+sprite = "locust_drone.art"
+[units.locust_drone.palette]
 H = "#d8d2b8"
 B = "#4a5246"
 D = "#1e241f"
@@ -67,8 +57,24 @@ A = "#6a7265"
 R = "#2a2a2a"
 T = "#8a6030"
 C = "#a01820"
+[units.locust_drone.ranged_profile]
+# Lancer assault rifle — 5-round bursts, modest reload.
+tell = 0.25
+shot_cooldown = 0.12
+mag_size = 5
+reload = 1.8
 
-[sprite_palettes.marksman]
+# Theron Guard — hooded torque-bow sniper. Marksman-backed with a
+# slow arcing torque-bow profile (long wind-up, heavy damage).
+[units.theron_guard]
+archetype = "marksman"
+display_name = "Theron Guard"
+hp = 75
+speed = 9.0
+ranged_damage = 34
+preferred_distance = 80.0
+sprite = "theron_guard.art"
+[units.theron_guard.palette]
 H = "#6a5040"
 B = "#3a4238"
 D = "#1a1e1a"
@@ -76,15 +82,37 @@ E = "#ff4040"
 A = "#4a5246"
 R = "#b8a078"
 C = "#a01820"
+[units.theron_guard.ranged_profile]
+tell = 1.2
+shot_cooldown = 3.4
+mag_size = 1
+reload = 0.0
 
-[sprite_palettes.leaper]
+# Wretch — scuttling low pouncer. Leaper-backed, the "emergence-hole"
+# jump moment.
+[units.wretch]
+archetype = "leaper"
+display_name = "Wretch"
+hp = 45
+speed = 20.0
+touch_damage = 18
+sprite = "wretch.art"
+[units.wretch.palette]
 H = "#d8c8a8"
 B = "#4a4838"
 D = "#1a1814"
 E = "#ff3030"
 
-
-[sprite_palettes.rocketeer]
+# Boomer — shoulder-cannon lobs from standoff range. Rocketeer-backed;
+# slow deliberate grenade arc.
+[units.boomer]
+archetype = "rocketeer"
+display_name = "Boomer"
+hp = 150
+speed = 8.0
+preferred_distance = 36.0
+sprite = "boomer.art"
+[units.boomer.palette]
 H = "#d8d2b8"
 B = "#4a5246"
 D = "#1e241f"
@@ -93,8 +121,70 @@ A = "#6a7265"
 R = "#3a3a3a"
 T = "#1a1a1a"
 C = "#a01820"
+[units.boomer.ranged_profile]
+# "Boom!" — long tell, heavy single shot, long reload.
+tell = 1.0
+shot_cooldown = 3.0
+mag_size = 1
+reload = 0.0
 
-[sprite_palettes.pinkie]
+# Ticker — walking bomb. Sapper-backed, scuttles at the player then
+# detonates.
+[units.ticker]
+archetype = "sapper"
+display_name = "Ticker"
+hp = 30
+speed = 24.0
+sprite = "ticker.art"
+[units.ticker.palette]
+H = "#d8c8a8"
+B = "#4a4838"
+D = "#1a1814"
+E = "#ff3030"
+R = "#a01820"
+
+# Bloodmount — the Locust cavalry charger. Charger-backed.
+[units.bloodmount]
+archetype = "charger"
+display_name = "Bloodmount"
+hp = 160
+speed = 26.0
+touch_damage = 24
+sprite = "bloodmount.art"
+[units.bloodmount.palette]
+H = "#8a6848"
+B = "#4a3828"
+D = "#1a1008"
+E = "#ff3020"
+A = "#6a5040"
+R = "#a01820"
+
+# Corpser — the wall-smashing tunneler. Breacher-backed; reshapes the
+# arena by chewing through walls to flank survivors.
+[units.corpser]
+archetype = "breacher"
+display_name = "Corpser"
+hp = 220
+speed = 9.0
+touch_damage = 26
+sprite = "corpser.art"
+[units.corpser.palette]
+H = "#3a2a1c"
+B = "#2a1e14"
+D = "#0a0604"
+E = "#ff3030"
+W = "#1a0f08"
+
+# Berserker — blind horn-crested bull-form. Pinkie-backed with massive
+# HP. Wall-shatter on hit, the "keep moving" moment.
+[units.berserker]
+archetype = "miniboss"
+display_name = "Berserker"
+hp = 1400
+speed = 13.0
+touch_damage = 40
+sprite = "berserker.art"
+[units.berserker.palette]
 H = "#e8d8b8"
 B = "#6a5848"
 D = "#2a1a14"

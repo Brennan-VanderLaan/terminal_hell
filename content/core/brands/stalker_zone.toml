@@ -1,54 +1,60 @@
-# STALKER — The Zone. Bloodsuckers pouncing from cover, anomalies +
-# mutants, paranoid hiding mercs. Sneak + Leaper heavy — every shape
-# on your screen is either predator or prey.
+# STALKER — The Zone. Mercs with scoped Mosins, Monolithians chanting
+# with AKs, Bloodsuckers pouncing from cover, floating electro/fire
+# anomalies, Controllers teleporting through the haze, Pseudogiants
+# stomping across the wasteland. Every shape on your screen is either
+# predator or prey.
+#
+# Converted to BrandUnit authoring shape. Mercs get a scoped Mosin
+# profile (deliberate single heavy shot, same as Tarkov's Scav Sniper),
+# while the Monolithian gets an under-slung GP-25 burst profile to
+# differentiate the two Marksman-backed threats.
 
 id = "stalker_zone"
 name = "STALKER — The Zone"
 description = "Cover-hugging mercs, pouncing mutants, radiation paranoia."
 
-spawn_pool = ["marksman", "leaper", "pinkie", "pmc", "howler", "orb", "phaser", "sentinel"]
-miniboss = "miniboss"
+spawn_pool = [
+    "merc_sniper",
+    "monolithian",
+    "bloodsucker",
+    "pseudogiant",
+    "anomaly",
+    "controller",
+    "poltergeist",
+    "watchtower_sniper",
+]
+miniboss = "chimera"
 
-# Anomaly-walking flavor → Phase (slip through one radiation wall
-# before it melts you). Perks lean into the Zone's attrition loop:
-# GloomShroud because the Zone LEAKS, IronWill for sanity regen
-# during the night walks, Bloodhound to heal off the blood trails
-# you leave behind.
 signature_traversal = "phase"
 signature_perks = ["gloom_shroud", "iron_will", "bloodhound"]
 
 [spawn_weights]
-# Snipers across the wasteland — Zone riflemen at extreme range.
-marksman = 4
-# Bloodsuckers + Controllers pouncing from cover. The signature
-# archetype of this brand — bumped so jumps land every wave.
-leaper = 5
-# Pinkie-class mutants.
-pinkie = 2
-# Monolith / bandit squads.
-pmc = 2
-# Distant anomaly shrieks drawing the swarm.
-howler = 1
-# Floating anomalies.
-orb = 2
-# Controller-style psychic phase — the Zone plays tricks.
-phaser = 3
-# Fixed Monolith marksman in a watchtower.
-sentinel = 1
+merc_sniper = 4
+monolithian = 2
+bloodsucker = 5
+pseudogiant = 2
+poltergeist = 1
+anomaly = 2
+controller = 3
+watchtower_sniper = 1
 
-# Brand-specific sprite overrides. Gas-masked mercs with scoped
-# Mosins, white-hooded Monolithians with GP-25-underslung AKs,
-# tentacle-faced Bloodsuckers in translucent cloaks, gorilla-armed
-# Pseudogiants, shimmering anomaly orbs. Palette: muted olive,
-# concrete gray, sickly radiation yellow-green.
-[sprite_overrides]
-marksman = "merc.art"
-pmc = "monolithian.art"
-leaper = "bloodsucker.art"
-pinkie = "pseudogiant.art"
-orb = "anomaly.art"
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster.
+# ═══════════════════════════════════════════════════════════════════
 
-[sprite_palettes.marksman]
+# Merc Sniper — scoped Mosin across the wasteland. Marksman-backed,
+# deliberate long-range single shot, doesn't reposition once set up.
+# Same profile as the Tarkov Scav Sniper — feels the same because it
+# IS the same. Tell the players apart with fashion + brand.
+[units.merc_sniper]
+archetype = "marksman"
+display_name = "Zone Merc"
+hp = 55
+speed = 7.0
+ranged_damage = 38
+preferred_distance = 115.0
+sprite = "merc.art"
+[units.merc_sniper.palette]
 D = "#181a14"
 M = "#3a3830"
 E = "#8a9048"
@@ -56,8 +62,26 @@ F = "#4a4838"
 B = "#4a5038"
 A = "#6a7048"
 R = "#2a2820"
+[units.merc_sniper.ranged_profile]
+tell = 1.0
+shot_cooldown = 3.8
+mag_size = 1
+reload = 0.0
 
-[sprite_palettes.pmc]
+# Monolithian — white-hooded cultist with an AK-74 + under-slung GP-25.
+# PMC-backed (armored, close combat AND ranged) with a GP-25 grenade-
+# launcher burst: slower cadence than Operator AK fire, heavier per-
+# round damage, 3-round bursts feel like a grenadier.
+[units.monolithian]
+archetype = "pmc"
+display_name = "Monolithian"
+hp = 230
+speed = 11.0
+touch_damage = 20
+ranged_damage = 14
+preferred_distance = 30.0
+sprite = "monolithian.art"
+[units.monolithian.palette]
 W = "#d8d0b8"
 D = "#1a1c16"
 E = "#b8b098"
@@ -65,22 +89,93 @@ B = "#4a4a3a"
 A = "#6a6a4a"
 R = "#2a2820"
 G = "#4a3018"
+[units.monolithian.ranged_profile]
+tell = 0.4
+shot_cooldown = 0.25
+mag_size = 3
+reload = 2.6
 
-[sprite_palettes.leaper]
+# Bloodsucker — translucent-cloaked mutant pouncing from cover. Leaper-
+# backed, big damage on contact, cloaks between attacks.
+[units.bloodsucker]
+archetype = "leaper"
+display_name = "Bloodsucker"
+hp = 85
+speed = 16.0
+touch_damage = 30
+sprite = "bloodsucker.art"
+[units.bloodsucker.palette]
 C = "#2a2a20"
 B = "#68604a"
 T = "#3a3028"
 E = "#c86830"
 D = "#141410"
 
-[sprite_palettes.pinkie]
+# Pseudogiant — gorilla-built wasteland brute. Pinkie-backed bulk,
+# slow slam-forward gait, brutal touch damage.
+[units.pseudogiant]
+archetype = "pinkie"
+display_name = "Pseudogiant"
+hp = 240
+speed = 11.0
+touch_damage = 30
+sprite = "pseudogiant.art"
+[units.pseudogiant.palette]
 B = "#3a3a28"
 D = "#14140a"
 E = "#906030"
 A = "#5a4a28"
 
-[sprite_palettes.orb]
+# Anomaly — floating electro/fire field. Orb-backed, volatile on death
+# (chain-shocks). The "drifting glow that kills you if you walk into
+# it" pressure.
+[units.anomaly]
+archetype = "orb"
+display_name = "Anomaly"
+sprite = "anomaly.art"
+[units.anomaly.palette]
 S = "#2a3018"
 G = "#8a9038"
 E = "#e8e060"
 
+# Controller — psychic stalker that teleports through the haze.
+# Phaser-backed.
+[units.controller]
+archetype = "phaser"
+display_name = "Controller"
+hp = 60
+speed = 10.0
+touch_damage = 26
+sprite = "controller.art"
+[units.controller.palette]
+B = "#6a503a"
+D = "#1a140a"
+E = "#8050a8"
+H = "#906848"
+F = "#3a2418"
+
+# Poltergeist — unseen Zone presence, screams pull the swarm toward
+# the player. Howler-backed. No silhouette visible — emitter-only.
+[units.poltergeist]
+archetype = "howler"
+display_name = "Poltergeist"
+hp = 35
+
+# Watchtower Sniper — fixed Monolith marksman in a tower. Sentinel-
+# backed, hitscan, deliberate single shots at extreme range.
+[units.watchtower_sniper]
+archetype = "sentinel"
+display_name = "Watchtower Sniper"
+hp = 150
+ranged_damage = 26
+preferred_distance = 130.0
+[units.watchtower_sniper.ranged_profile]
+tell = 0.8
+shot_cooldown = 2.6
+mag_size = 1
+reload = 0.0
+
+# Chimera — the rare apex predator miniboss. Generic miniboss wrapper.
+[units.chimera]
+archetype = "miniboss"
+display_name = "Chimera"

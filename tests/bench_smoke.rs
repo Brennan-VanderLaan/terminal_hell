@@ -294,6 +294,13 @@ fn bench_rat_feast_grows_into_dire_rats() {
     // death on their own. The player is parked out of combat purely
     // so the scenario measures the Rat↔Rusher interaction, not
     // player-fire-produced corpses.
+    // Mirrors the bench catalogue's `rat_feast` scenario exactly —
+    // that config reliably produces DireRats in bench runs, so it's
+    // a known-good reference for the test. Each rat needs 5 corpses
+    // (30 HP threshold / 6 HP hp_gain) to grow; with rats clumped
+    // at the south edge rolling into the Rusher grid, the clumping
+    // naturally concentrates eating on the few rats that reach the
+    // kill site first.
     let scenario = Scenario {
         name: "smoke_rat_feast",
         summary: "",

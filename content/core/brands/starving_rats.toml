@@ -1,45 +1,55 @@
 # Starving Rats — Undercity Vermin.
 #
-# B4 second first-content brand: a plague swarm on team "swarm",
-# hostile to every living faction on the map — survivors, horde,
-# flood, parasite. Unlike Flood (which converts hosts to its side),
-# rats eat hosts: the Consume primitive's growth_into/growth_threshold
-# fields turn a Rat into a DireRat after 30 HP of consumed fodder.
+# Plague swarm on team "swarm", hostile to every living faction —
+# survivors, horde, flood, parasite. Unlike Flood (which converts
+# hosts to its side), rats EAT hosts: the Consume primitive's
+# growth_into/growth_threshold fields turn a Rat into a DireRat
+# after 30 HP of consumed fodder.
 #
-# Pairs with the Half-Life brand (B4 first content) to demonstrate
-# the same palette handling two very different fiction shapes — one
-# conversion-via-attach, one conversion-via-hunger.
+# Converted to BrandUnit authoring shape. Rat behavior lives in the
+# archetype TOML (rat + dire_rat already define their Consume +
+# growth_into blocks); these unit entries just bind the brand-local
+# display names + the direct-spawn swarmling that fills the wave
+# between rat bursts.
 
 id = "starving_rats"
 name = "Starving Rats — Undercity Vermin"
 description = "Plague rats that eat everything, grow larger with every meal."
 
-# DireRat as miniboss: the natural apex of the brand's growth ladder.
-# Direct-spawn at 1/(8+1+3) ≈ 8% rate for variety; most DireRats in
-# play will have grown from feeding rather than spawned directly.
 spawn_pool = [
-    "rat",
+    "plague_rat",
     "dire_rat",
-    "swarmling",
+    "roach_swarm",
 ]
 miniboss = "dire_rat"
 
-# Dash fits the vermin flavor — quick scurry-out-of-the-way over
-# long-range blink. Perks lean hp/sanity regen — surviving a rat
-# swarm is about keeping your head together and patching bites.
 signature_traversal = "dash"
 signature_perks = ["iron_will", "survivor", "quick_hands"]
 
 [spawn_weights]
-# Rats dominate the pool — density is the threat.
-rat = 12
-# Direct DireRat spawns are rare; most emerge from feeding.
+plague_rat = 12
 dire_rat = 1
-# Swarmlings pad the horde with non-rat bodies so the swarm doesn't
-# feel monotonous.
-swarmling = 4
+roach_swarm = 4
 
-# No sprite overrides — rats reuse their default art (Swarmling /
-# Splitter silhouettes) until dedicated art lands. Dedicated
-# rat.art + dire_rat.art go under content/core/art/starving_rats/
-# when someone draws them.
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster.
+# ═══════════════════════════════════════════════════════════════════
+
+# Plague Rat — the base vermin. Rat archetype (carries Consume +
+# growth_into = "dire_rat"). Sprite + name branded; stats inherit.
+[units.plague_rat]
+archetype = "rat"
+display_name = "Plague Rat"
+
+# Dire Rat — grown form. DireRat archetype (the growth target). Most
+# DireRats in play will have grown via Consume rather than direct
+# spawn, but the direct spawn at weight=1 adds variety.
+[units.dire_rat]
+archetype = "dire_rat"
+display_name = "Dire Rat"
+
+# Roach Swarm — the non-rat filler body. Swarmling-backed so the
+# swarm doesn't read as pure rats when density goes up.
+[units.roach_swarm]
+archetype = "swarmling"
+display_name = "Roach Swarm"

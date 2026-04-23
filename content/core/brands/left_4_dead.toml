@@ -1,57 +1,82 @@
-# Left 4 Dead — Parish Infected. Horde + Specials. Common infected
-# rush in packs; Specials (Charger, Smoker-style Leaper, Boomer-style
-# Howler + Sapper detonator) punish a broken squad.
+# Left 4 Dead — Parish Infected. Horde of Common Infected rushing in
+# packs; Specials (Charger, Hunter pounce, Smoker tongue, Boomer
+# bile, Witch scream) punishing a broken squad. The "hold the door,
+# revive your bro" co-op brand.
+#
+# Converted to BrandUnit authoring shape with the full L4D specials
+# roster. Hunter + Charger + Boomer + Witch + Smoker all hang off
+# distinct archetypes so each Special reads as its own threat.
 
 id = "left_4_dead"
-name = "Left 4 Dead — Infected Parish"
+name = "Left 4 Dead — Parish Infected"
 description = "Horde of common infected + Specials that hunt stragglers."
 
-spawn_pool = ["rusher", "swarmling", "charger", "howler", "sapper", "leaper"]
-miniboss = "miniboss"
+spawn_pool = [
+    "common_infected",
+    "runner",
+    "l4d_charger",
+    "hunter",
+    "boomer",
+    "witch",
+    "smoker",
+]
+miniboss = "tank"
 
-# Smoker tongue → Grapple. Perks lean into the "move as a pack,
-# revive your bro" loop: Bloodhound regen from the constant blood
-# trails, Butcher for pills + adrenaline shots, CorpsePulse so
-# killing the horde passively tops you off between specials.
 signature_traversal = "grapple"
 signature_perks = ["bloodhound", "butcher", "corpse_pulse"]
 
 [spawn_weights]
-# The horde.
-rusher = 5
-swarmling = 3
-# Charger special — bumped so its signature "locked-in bowling
-# charge" actually shows up every couple waves, not once per run.
-charger = 4
-# Howler = Witch scream calling the horde.
-howler = 1
-# Sapper = Boomer explosion.
-sapper = 1
-# Hunter pounce = the Left 4 Dead sound effect. Bumped so jumps
-# happen often enough to be the brand's signature moment.
-leaper = 4
+common_infected = 5
+runner = 3
+l4d_charger = 4
+hunter = 4
+boomer = 1
+witch = 1
+smoker = 1
 
-# ── Brand sprite overrides ─────────────────────────────────────────
-# L4D Infected — grim browns + greens for common, bile yellow Boomer,
-# pale ghostly Witch, iconic asymmetric Charger silhouette.
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster.
+# ═══════════════════════════════════════════════════════════════════
 
-[sprite_overrides]
-rusher = "common_infected.art"
-charger = "l4d_charger.art"
-leaper = "hunter.art"
-howler = "witch.art"
-sapper = "boomer.art"
-
-# Common infected — tattered shirt, messed hair, pale sickly skin.
-[sprite_palettes.rusher]
+# Common Infected — tattered-clothes shamblers in packs. Rusher-backed,
+# lower HP than base (one shotgun blast kills), higher speed (L4D
+# commons sprint).
+[units.common_infected]
+archetype = "rusher"
+display_name = "Common Infected"
+hp = 40
+speed = 26.0
+touch_damage = 8
+sprite = "common_infected.art"
+[units.common_infected.palette]
 B = "#6e5a3c"
 D = "#2e2418"
 E = "#c82820"
 H = "#8a7458"
 R = "#a82818"
 
-# L4D Charger — giant knotted right arm, stunted left arm.
-[sprite_palettes.charger]
+# Runner — the lighter-weight swarm filler. Swarmling-backed, pure
+# density; the "back of the horde" padding.
+[units.runner]
+archetype = "swarmling"
+display_name = "Runner"
+sprite = "runner.art"
+[units.runner.palette]
+B = "#5a4830"
+D = "#1a1008"
+E = "#ff2020"
+
+# L4D Charger — the "bowling from across the map" special. Charger-
+# backed with exaggerated one-armed silhouette. Commits hard; the
+# lockdown is the threat.
+[units.l4d_charger]
+archetype = "charger"
+display_name = "Charger"
+hp = 220
+speed = 26.0
+touch_damage = 28
+sprite = "l4d_charger.art"
+[units.l4d_charger.palette]
 B = "#5a4a30"
 D = "#241c10"
 H = "#826a44"
@@ -59,25 +84,31 @@ E = "#c82020"
 A = "#302414"
 F = "#eae0c8"
 
-# Hunter — zipped hoodie, coiled claws, masked face.
-[sprite_palettes.leaper]
+# Hunter — zipped-hoodie pouncer. Leaper-backed, the "LIGHT SOUND OF
+# A HUNTER NEARBY" moment. Low HP, devastating pinning pounce.
+[units.hunter]
+archetype = "leaper"
+display_name = "Hunter"
+hp = 55
+speed = 18.0
+touch_damage = 24
+sprite = "hunter.art"
+[units.hunter.palette]
 H = "#3a4028"
 B = "#50563a"
 D = "#1e2010"
 E = "#ffe030"
 C = "#705030"
 
-# Witch — stringy white hair, pale flesh, red claws, huddled grief.
-[sprite_palettes.howler]
-W = "#e8e4d8"
-B = "#e8d8c4"
-P = "#8a6a50"
-E = "#ff2020"
-D = "#4a2820"
-C = "#b02418"
-
-# Boomer — bloated bile-green, gas vents, oozing green spots.
-[sprite_palettes.sapper]
+# Boomer — bile-bloated walking grenade. Sapper-backed, detonates on
+# contact spewing bile (reads as the sapper's explosion in-sim).
+[units.boomer]
+archetype = "sapper"
+display_name = "Boomer"
+hp = 50
+speed = 14.0
+sprite = "boomer.art"
+[units.boomer.palette]
 B = "#a8a838"
 D = "#3a3a10"
 Y = "#e8d838"
@@ -85,3 +116,49 @@ G = "#58782a"
 E = "#ff2020"
 M = "#2a2010"
 
+# Witch — the "crying in the corner" ambient threat. Howler-backed
+# (draws the horde toward her scream) with the pale-hair silhouette.
+[units.witch]
+archetype = "howler"
+display_name = "Witch"
+hp = 70
+sprite = "witch.art"
+[units.witch.palette]
+W = "#e8e4d8"
+B = "#e8d8c4"
+P = "#8a6a50"
+E = "#ff2020"
+D = "#4a2820"
+C = "#b02418"
+
+# Smoker — long-tongue grapple from distance. Marksman-backed (ranged
+# threat) with a slow but guaranteed "tongue-lock" profile — single
+# long-range shot, big wind-up.
+[units.smoker]
+archetype = "marksman"
+display_name = "Smoker"
+hp = 60
+speed = 10.0
+ranged_damage = 20
+preferred_distance = 60.0
+sprite = "smoker.art"
+[units.smoker.palette]
+B = "#4a4030"
+D = "#1a1408"
+E = "#ff2020"
+F = "#5a5038"
+H = "#2a2418"
+S = "#706050"
+[units.smoker.ranged_profile]
+tell = 0.9
+shot_cooldown = 3.0
+mag_size = 1
+reload = 0.0
+
+# Tank — the lumbering miniboss. Pinkie-backed with absolute chonk HP.
+[units.tank]
+archetype = "miniboss"
+display_name = "Tank"
+hp = 1400
+speed = 11.0
+touch_damage = 46

@@ -1,70 +1,127 @@
 # Zerg Tide — StarCraft homage. Pure biomass swarm. Zerglings by the
-# literal dozens, Swarmlings filling any gap, the occasional Splitter
-# cascading into more. Rhythm: wave doesn't ramp, wave drowns.
+# literal dozens, Swarmlings filling any gap, Banelings rolling in as
+# acid bombs, Hydralisks as spine-launching riflemen, Ultralisks as
+# the apex charger. Rhythm: wave doesn't ramp, wave drowns.
+#
+# Converted to BrandUnit authoring shape.
 
 id = "zerg_tide"
 name = "Zerg Tide"
 description = "Zergling rush, biomass density, nothing survives alone."
 
-spawn_pool = ["zergling", "swarmling", "splitter", "leaper"]
-miniboss = "miniboss"
+spawn_pool = [
+    "zergling",
+    "larva",
+    "hydralisk",
+    "baneling",
+    "ultralisk",
+    "roach",
+]
+miniboss = "ultralisk"
 
-# Marine stim → Slide. Perks are the bunkered-up outpost kit:
-# Adrenaline so every scratch gives you the gap to reposition,
-# Rampage kills stacking with the tide, CorpsePulse so the tsunami
-# keeps topping you off.
 signature_traversal = "slide"
 signature_perks = ["adrenaline", "rampage", "corpse_pulse"]
 
 [spawn_weights]
 zergling = 8
-swarmling = 4
-splitter = 3
-leaper = 2
+larva = 4
+baneling = 3
+hydralisk = 2
+roach = 2
+ultralisk = 1
 
-# ── Brand sprite overrides ─────────────────────────────────────────
-# Zerg biomass — dark purple carapace, acid-green underside, bone-cream
-# claws, red-wet flesh glimpses. Everything LOW-SLUNG and HUNGRY.
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster.
+# ═══════════════════════════════════════════════════════════════════
 
-[sprite_overrides]
-zergling = "zergling.art"
-swarmling = "larva.art"
-leaper = "hydralisk.art"
-splitter = "baneling.art"
-charger = "ultralisk.art"
-
-# Zergling — low-slung alien, scythe claws, carapace.
-[sprite_palettes.zergling]
+# Zergling — low-slung alien, scythe claws. Zergling archetype
+# default — the "40 on screen" centerpiece of the brand.
+[units.zergling]
+archetype = "zergling"
+display_name = "Zergling"
+sprite = "zergling.art"
+[units.zergling.palette]
 B = "#401860"
 C = "#f4e4b0"
 E = "#ff3020"
 G = "#80c830"
 
-# Larva — small writhing biomass baby.
-[sprite_palettes.swarmling]
+# Larva — writhing biomass baby. Swarmling-backed; fills gaps between
+# Zergling bursts.
+[units.larva]
+archetype = "swarmling"
+display_name = "Larva"
+hp = 14
+sprite = "larva.art"
+[units.larva.palette]
 B = "#a04068"
 G = "#a8d040"
 E = "#ffd820"
 
-# Hydralisk — reared cobra body, spine-launcher arms.
-[sprite_palettes.leaper]
+# Hydralisk — reared-up cobra body, spine-launcher arms. Marksman-
+# backed with a machine-gun spine profile (short tell, wide burst).
+[units.hydralisk]
+archetype = "marksman"
+display_name = "Hydralisk"
+hp = 80
+speed = 14.0
+ranged_damage = 9
+preferred_distance = 50.0
+sprite = "hydralisk.art"
+[units.hydralisk.palette]
 B = "#502070"
 C = "#f0dca0"
 E = "#ff4020"
 R = "#a01818"
 G = "#80c830"
+[units.hydralisk.ranged_profile]
+# Spine launcher — 4-round rapid burst, short reload.
+tell = 0.3
+shot_cooldown = 0.14
+mag_size = 4
+reload = 1.8
 
-# Baneling — green rolling ball of acid, wet-sac.
-[sprite_palettes.splitter]
+# Baneling — green rolling acid bomb. Sapper-backed (detonates on
+# contact in a big acid splash).
+[units.baneling]
+archetype = "sapper"
+display_name = "Baneling"
+hp = 50
+speed = 22.0
+sprite = "baneling.art"
+[units.baneling.palette]
 B = "#c0f050"
 G = "#608020"
 E = "#ff3020"
 
-# Ultralisk — massive quadruped, scimitar tusks.
-[sprite_palettes.charger]
+# Roach — armored, burrowing bruiser. Breacher-backed (smashes walls,
+# flanks survivors).
+[units.roach]
+archetype = "breacher"
+display_name = "Roach"
+hp = 160
+speed = 11.0
+touch_damage = 22
+sprite = "roach.art"
+[units.roach.palette]
+B = "#602030"
+C = "#f0dca0"
+E = "#ff4020"
+R = "#a01818"
+G = "#80c830"
+
+# Ultralisk — massive quadruped, scimitar tusks. Miniboss archetype
+# wrapper. The "oh no" apex at the top of the tide.
+[units.ultralisk]
+archetype = "miniboss"
+display_name = "Ultralisk"
+hp = 1200
+speed = 11.0
+touch_damage = 40
+sprite = "ultralisk.art"
+[units.ultralisk.palette]
 B = "#381050"
 C = "#f8ecb8"
 E = "#ff3020"
 R = "#9a1818"
 G = "#78b830"
-

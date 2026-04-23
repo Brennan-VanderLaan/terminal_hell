@@ -1,51 +1,53 @@
 # Dead Space — Ishimura Necromorph. Limb-specific body horror,
-# bursting hosts, floating shapes. Splitters are the signature here
-# — every kill multiplies the threat unless you aim for the right
-# limbs.
+# bursting hosts, floating shapes. Splitters are the signature —
+# every kill multiplies the threat unless you aim for the right
+# limbs. Bio-yellow flesh + torn-red meat + black decay shadow.
+#
+# Converted to BrandUnit authoring shape.
 
 id = "dead_space"
 name = "Dead Space — Ishimura Necromorph"
 description = "Body-horror mutation. Every kill makes it worse."
 
-spawn_pool = ["leaper", "splitter", "pinkie", "orb", "howler", "floodling", "phaser"]
-miniboss = "miniboss"
+spawn_pool = [
+    "slasher",
+    "pregnant",
+    "brute",
+    "lurker",
+    "infector",
+    "twitcher",
+    "divider",
+    "swarmer",
+]
+miniboss = "hive_mind"
 
-# Claustrophobic corridors + mutation dread → Phase so survivors can
-# slip into a vent one tile deep. Perks lean into the horror loop:
-# LastStand to survive ambushes, Butcher for the loot-hunt flow,
-# GloomShroud to tolerate the Carcosa bleed.
 signature_traversal = "phase"
 signature_perks = ["last_stand", "butcher", "gloom_shroud"]
 
 [spawn_weights]
-# Slashers + Leapers dominate — jumps from every vent.
-leaper = 5
-# Pregnants + Guardians.
-splitter = 3
-# Brutes.
-pinkie = 2
-# Floating Lurkers.
-orb = 2
-# Divider shriek.
-howler = 1
-# Infector parasites.
-floodling = 2
-# Twitcher / Stalker teleport-shimmer — archaic-horror vibe.
-phaser = 2
+slasher = 5
+pregnant = 3
+brute = 2
+lurker = 2
+divider = 1
+infector = 2
+twitcher = 2
+swarmer = 2
 
-# Brand-specific sprite overrides. Blade-armed jittery Slashers,
-# Pregnants with swollen drop-tentacle sacs, plate-fronted red-
-# backed Brutes, baby-bodied Lurkers with whipping tentacles,
-# needle-nosed Infector spiders. Palette: bio-yellow flesh,
-# torn-red meat, gray bone-armor, black decay shadow.
-[sprite_overrides]
-leaper = "slasher.art"
-splitter = "pregnant.art"
-pinkie = "brute.art"
-orb = "lurker.art"
-floodling = "infector.art"
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster.
+# ═══════════════════════════════════════════════════════════════════
 
-[sprite_palettes.leaper]
+# Slasher — blade-armed jittery necromorph. Leaper-backed; the jerky
+# pounce that defines Dead Space. Torn-red meat palette.
+[units.slasher]
+archetype = "leaper"
+display_name = "Slasher"
+hp = 65
+speed = 16.0
+touch_damage = 24
+sprite = "slasher.art"
+[units.slasher.palette]
 B = "#8a7040"
 D = "#141008"
 E = "#ff2020"
@@ -53,7 +55,15 @@ F = "#b8803a"
 R = "#5a1a10"
 K = "#d8d0a8"
 
-[sprite_palettes.splitter]
+# Pregnant — swollen drop-tentacle sac. Splitter-backed; gut-shot into
+# sub-parasites that come after you.
+[units.pregnant]
+archetype = "splitter"
+display_name = "Pregnant"
+hp = 80
+speed = 11.0
+sprite = "pregnant.art"
+[units.pregnant.palette]
 B = "#8a7040"
 D = "#141008"
 E = "#ff2020"
@@ -62,23 +72,92 @@ R = "#a82010"
 S = "#ffe040"
 T = "#681810"
 
-[sprite_palettes.pinkie]
+# Brute — plate-fronted ram-forward necromorph. Pinkie-backed with
+# big HP, heavy touch damage.
+[units.brute]
+archetype = "pinkie"
+display_name = "Brute"
+hp = 260
+speed = 12.0
+touch_damage = 30
+sprite = "brute.art"
+[units.brute.palette]
 A = "#a89868"
 B = "#8a7040"
 D = "#141008"
 E = "#ff2020"
 R = "#a82010"
 
-[sprite_palettes.orb]
+# Lurker — baby-bodied, whipping tentacles, floating. Orb-backed
+# (volatile arcane shockwave on death reads as psychic lash).
+[units.lurker]
+archetype = "orb"
+display_name = "Lurker"
+hp = 75
+sprite = "lurker.art"
+[units.lurker.palette]
 B = "#b8a060"
 D = "#141008"
 E = "#ff2020"
 T = "#681810"
 
-[sprite_palettes.floodling]
+# Infector — needle-nosed parasite that converts dead hosts.
+# Floodling-backed (conversion vector).
+[units.infector]
+archetype = "floodling"
+display_name = "Infector"
+speed = 26.0
+sprite = "infector.art"
+[units.infector.palette]
 B = "#8a7040"
 D = "#141008"
 R = "#a82010"
 L = "#3a2810"
 N = "#d8c0a0"
 
+# Twitcher — formerly CEC soldier, jittering hyperspeed necromorph.
+# Phaser-backed; flicker-dashes across the arena to land a big swing.
+[units.twitcher]
+archetype = "phaser"
+display_name = "Twitcher"
+hp = 60
+speed = 12.0
+touch_damage = 26
+sprite = "twitcher.art"
+[units.twitcher.palette]
+B = "#8a7040"
+D = "#141008"
+E = "#ff2020"
+F = "#b8803a"
+R = "#5a1a10"
+
+# Divider — shrieking caller, splits into head + limb forms. Howler-
+# backed; the off-screen shriek draws the horde.
+[units.divider]
+archetype = "howler"
+display_name = "Divider"
+hp = 55
+sprite = "divider.art"
+[units.divider.palette]
+B = "#b8a060"
+D = "#141008"
+E = "#ff2020"
+T = "#681810"
+
+# Swarmer — finger-sized crawling cluster. Swarmling-backed for the
+# "floor boils with them" moment.
+[units.swarmer]
+archetype = "swarmling"
+display_name = "Swarmer"
+hp = 14
+sprite = "swarmer.art"
+[units.swarmer.palette]
+B = "#b8803a"
+D = "#141008"
+E = "#ff2020"
+R = "#5a1a10"
+
+# Hive Mind — the final boss silhouette. Miniboss archetype wrapper.
+[units.hive_mind]
+archetype = "miniboss"
+display_name = "Hive Mind"

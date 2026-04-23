@@ -1,13 +1,30 @@
-# Doom — Hell Inferno. Imps, pinkies, revenants, cacodemons.
-# Fast chase + rocket-launcher skeletons + charging pinkies. The
-# "boot up the shotgun" brand.
+# Doom — Hell Inferno. Imps chucking fireballs, pinkies bowling into
+# you, hell knights charging, revenants raining homing rockets, lost
+# souls careening as suicide flaming skulls, archviles teleporting in
+# to resurrect, cacodemons floating overhead. The "rip and tear"
+# brand; every unit has something dangerous on its own.
+#
+# Converted to BrandUnit authoring shape. The classic-Doom roster
+# splits each role into its own unit so a pinkie reads as a pinkie,
+# not as a generic "pinkie archetype." Revenant's archetype default
+# is already Doom-tuned (2-round rocket burst @ 0.5s cadence with a
+# 2.0s reload) — the Revenant unit entry just inherits.
 
 id = "doom_inferno"
 name = "Doom — Hell Inferno"
-description = "Imps, pinkies, revenants. Fast aggressive demons."
+description = "Imps, pinkies, hell knights, revenants. Rip and tear."
 
-spawn_pool = ["rusher", "pinkie", "charger", "revenant", "leaper", "sapper", "rocketeer", "phaser"]
-miniboss = "miniboss"
+spawn_pool = [
+    "imp",
+    "pinkie_demon",
+    "hell_knight",
+    "revenant",
+    "lost_soul",
+    "cacodemon",
+    "archvile",
+    "pain_elemental",
+]
+miniboss = "cyberdemon"
 
 # Rip-and-tear → dash verb. Perks lean aggressive: Rampage stacks,
 # Adrenaline on hit, QuickHands to pump more SSG shells per minute.
@@ -15,35 +32,28 @@ signature_traversal = "dash"
 signature_perks = ["rampage", "adrenaline", "quick_hands"]
 
 [spawn_weights]
-# Imps charging in.
-rusher = 4
-# Pinkies for the "bullet sponge that eats SSG" moment.
-pinkie = 2
-# Chargers — hell-knight roar-and-charge.
-charger = 3
-# Revenant homing rockets + cacodemon-shriek long-range.
+imp = 4
+pinkie_demon = 2
+hell_knight = 3
 revenant = 3
-# Lost Soul / imp pounce — gotta see jumps every wave.
-leaper = 3
-# Gore Nest spore / Pain Elemental pop.
-sapper = 1
-# Archvile shadow-step — teleports toward player then swings.
-phaser = 2
-# Revenant rocket-artillery.
-rocketeer = 2
+lost_soul = 3
+cacodemon = 2
+archvile = 2
+pain_elemental = 1
 
-# ── Brand sprite overrides ─────────────────────────────────────────
-# Doom-branded enemies render with hellish silhouettes instead of
-# the generic defaults. Art files live in content/core/art/doom_inferno/.
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster.
+# ═══════════════════════════════════════════════════════════════════
 
-[sprite_overrides]
-rusher = "imp.art"
-pinkie = "pinkie_demon.art"
-revenant = "revenant.art"
-charger = "hell_knight.art"
-
-# Imp — fiery red demon, curling bone horns, glowing eyes, claws.
-[sprite_palettes.rusher]
+# Imp — the classic demon fodder. Default Rusher stats with a fiery
+# silhouette + slightly faster closure to sell the fireball-thrower's
+# agitation.
+[units.imp]
+archetype = "rusher"
+display_name = "Imp"
+speed = 24.0
+sprite = "imp.art"
+[units.imp.palette]
 H = "#f0d8a8"
 D = "#782418"
 B = "#e03820"
@@ -51,8 +61,15 @@ E = "#ffe070"
 F = "#3a0a08"
 C = "#a8947a"
 
-# Pinkie — pink-fleshed bull demon with gaping tusked maw.
-[sprite_palettes.pinkie]
+# Pinkie Demon — wide pink bull-demon. Bigger reach than the default
+# Pinkie archetype because its tusked maw really does bite at range.
+[units.pinkie_demon]
+archetype = "pinkie"
+display_name = "Pinkie Demon"
+hp = 160
+speed = 17.0
+sprite = "pinkie_demon.art"
+[units.pinkie_demon.palette]
 B = "#ff7ca0"
 D = "#9a3860"
 E = "#ffd848"
@@ -62,8 +79,31 @@ W = "#ffb0c8"
 A = "#ffc4d8"
 H = "#4a1020"
 
-# Revenant — boney skeletal caster with shoulder rocket tubes.
-[sprite_palettes.revenant]
+# Hell Knight — armored imp. Default Charger stats with beefed HP for
+# the "takes two SSG shells" feel.
+[units.hell_knight]
+archetype = "charger"
+display_name = "Hell Knight"
+hp = 120
+speed = 24.0
+touch_damage = 22
+sprite = "hell_knight.art"
+[units.hell_knight.palette]
+H = "#f4e0b0"
+D = "#5a1610"
+B = "#d04020"
+E = "#ffd848"
+A = "#2a0a06"
+C = "#ac9880"
+
+# Revenant — skeletal rocket skeleton. Archetype default already tuned
+# to the Doom Revenant twin-cannon cadence (2-round burst @ 0.5s
+# cadence, 2.0s reload). The BrandUnit entry binds sprite + name.
+[units.revenant]
+archetype = "revenant"
+display_name = "Revenant"
+sprite = "revenant.art"
+[units.revenant.palette]
 B = "#e6ead8"
 D = "#5a5040"
 E = "#ff9030"
@@ -72,12 +112,83 @@ R = "#3c3a44"
 G = "#78c4ff"
 C = "#d6d8c4"
 
-# Hell Knight — bigger imp, armored shoulders, dual horn crown.
-[sprite_palettes.charger]
-H = "#f4e0b0"
-D = "#5a1610"
-B = "#d04020"
-E = "#ffd848"
-A = "#2a0a06"
-C = "#ac9880"
+# Lost Soul — flaming skull that pounces. Low HP, suicidal charge via
+# Leaper archetype. Fast tell, fragile; one hit from the SSG is all
+# it takes but when it lands it hurts.
+[units.lost_soul]
+archetype = "leaper"
+display_name = "Lost Soul"
+hp = 32
+speed = 18.0
+touch_damage = 16
+sprite = "lost_soul.art"
+[units.lost_soul.palette]
+B = "#f8ecc0"
+D = "#3a2410"
+E = "#ffb020"
+F = "#ff6020"
+C = "#8a4020"
 
+# Cacodemon — floating one-eyed lobbed-fireball demon. Rocketeer-backed
+# but fires a slower, telegraphed plasma lob rather than a fast rocket
+# stream — sell the floating menace.
+[units.cacodemon]
+archetype = "rocketeer"
+display_name = "Cacodemon"
+hp = 130
+speed = 8.0
+preferred_distance = 34.0
+sprite = "cacodemon.art"
+[units.cacodemon.palette]
+B = "#c02828"
+D = "#5a1010"
+E = "#ffe040"
+M = "#2a0806"
+H = "#8a1818"
+F = "#ffa820"
+[units.cacodemon.ranged_profile]
+# Heavy wind-up lob, slow recharge — the "shriek then spit" rhythm.
+tell = 0.9
+shot_cooldown = 2.4
+mag_size = 1
+reload = 0.0
+
+# Archvile — the resurrector. Phaser-backed for the "teleport on top
+# of the player, swing, teleport out" harassment loop. Fragile but
+# punishing when it lands a swing.
+[units.archvile]
+archetype = "phaser"
+display_name = "Archvile"
+hp = 60
+speed = 11.0
+touch_damage = 26
+sprite = "archvile.art"
+[units.archvile.palette]
+B = "#e8d0a0"
+D = "#4a2a10"
+E = "#ffe040"
+F = "#ff6020"
+H = "#2a1008"
+C = "#8a4820"
+
+# Pain Elemental — floating sphere that coughs out Lost Souls. Sapper-
+# backed — explodes on contact, the blast reads as a burst of souls
+# rather than a grenade.
+[units.pain_elemental]
+archetype = "sapper"
+display_name = "Pain Elemental"
+hp = 55
+speed = 12.0
+sprite = "pain_elemental.art"
+[units.pain_elemental.palette]
+B = "#7a3838"
+D = "#2a0808"
+E = "#ffe040"
+F = "#ff6020"
+H = "#1a0404"
+
+# Cyberdemon — the miniboss silhouette. Heavy Miniboss archetype
+# wrapper so the brand has its own named top-tier threat.
+[units.cyberdemon]
+archetype = "miniboss"
+display_name = "Cyberdemon"

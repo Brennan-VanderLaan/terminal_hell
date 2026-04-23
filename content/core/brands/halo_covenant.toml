@@ -1,58 +1,57 @@
 # Halo — Covenant Strike. The main Halo combat experience: Grunt
-# squads with plasma pistols, Jackal sniper lines behind energy
-# shields, Elites closing with plasma rifles + shields, Brutes
-# steamrolling the front. Distinct from the Flood brand — this is
-# the "disciplined alien military" flavor, not the conversion-horror
-# one.
+# squads with plasma pistols, Jackal snipers behind shield gauntlets,
+# Elites closing with plasma rifles + personal shields, Brute
+# Chieftains roaring gravity hammers, Hunters paired with fuel-rod
+# cannons. Disciplined alien military — distinct from the Flood
+# brand's conversion-horror flavor.
+#
+# Converted to BrandUnit authoring shape. Jackal Snipers get the
+# precise-beam-rifle profile (single deliberate shot, long range).
+# Elites get a plasma rifle burst cadence. Both are Marksman-adjacent
+# archetypes but the ranged profiles make them feel like different
+# weapons.
 
 id = "halo_covenant"
 name = "Halo — Covenant Strike"
 description = "Grunt squads, Jackal snipers, Elites closing behind shields, Brute chargers."
 
 spawn_pool = [
-    "swarmling",
-    "marksman",
-    "pmc",
-    "charger",
-    "rocketeer",
-    "sentinel",
+    "grunt",
+    "jackal_sniper",
+    "jackal_shield",
+    "elite_minor",
+    "brute_chieftain",
+    "hunter_fuel_rod",
+    "shade_turret",
 ]
-miniboss = "pmc"
+miniboss = "elite_zealot"
 
-# Energy-sword lunge + Active Camo flavor → Blink. Perks lean into
-# the "push the line" Covenant aggression: Rampage for the combined
-# fire pressure, QuickHands for the plasma cadence, Survivor because
-# MJOLNIR plates the hits.
 signature_traversal = "blink"
 signature_perks = ["rampage", "quick_hands", "survivor"]
 
 [spawn_weights]
-# Grunts — the methane-breathing fodder.
-swarmling = 5
-# Jackal snipers behind shield gauntlets.
-marksman = 3
-# Elite Minor — plasma rifle + personal shields.
-pmc = 3
-# Brute Chieftain — gravity-hammer charge.
-charger = 2
-# Wraith mortars / fuel rod gunners.
-rocketeer = 1
-# Covenant turret emplacement.
-sentinel = 1
+grunt = 5
+jackal_sniper = 3
+jackal_shield = 2
+elite_minor = 3
+brute_chieftain = 2
+hunter_fuel_rod = 1
+shade_turret = 1
 
-# ── Brand sprite overrides ─────────────────────────────────────────
-# Covenant silhouettes: squat Grunts, shielded Jackals, tall Elites,
-# hulking Brute Chieftains. Art lives in content/core/art/halo_covenant/.
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster.
+# ═══════════════════════════════════════════════════════════════════
 
-[sprite_overrides]
-swarmling = "grunt.art"
-marksman = "jackal_sniper.art"
-pmc = "elite_minor.art"
-charger = "brute_chieftain.art"
-
-# Grunt — squat orange alien, methane tank riding on the back, dark
-# triangular breather mask slung over the face.
-[sprite_palettes.swarmling]
+# Grunt — squat orange methane-breather. Swarmling-backed, the
+# "dozens running in panic when the Elite dies" Halo moment.
+[units.grunt]
+archetype = "swarmling"
+display_name = "Unggoy Grunt"
+hp = 22
+speed = 20.0
+touch_damage = 6
+sprite = "grunt.art"
+[units.grunt.palette]
 H = "#ffa040"
 B = "#c05010"
 E = "#ffe678"
@@ -60,9 +59,19 @@ T = "#3a5a74"
 A = "#2a2218"
 D = "#1a0a04"
 
-# Jackal sniper — purple-shelled scavenger crouched behind a scoped
-# beam rifle. S is the long barrel/scope, W is the rifle grip.
-[sprite_palettes.marksman]
+# Jackal Sniper — scoped beam rifle behind a perch. Marksman-backed
+# with a precise long-range single-shot profile. Very similar to
+# Scav Sniper / UNSC — that's the point; the player reads Jackal
+# by the purple carapace silhouette.
+[units.jackal_sniper]
+archetype = "marksman"
+display_name = "Kig-Yar Sniper"
+hp = 50
+speed = 8.0
+ranged_damage = 40
+preferred_distance = 110.0
+sprite = "jackal_sniper.art"
+[units.jackal_sniper.palette]
 H = "#6a2890"
 B = "#8a38b0"
 E = "#ff3040"
@@ -70,10 +79,50 @@ W = "#3c2040"
 S = "#202028"
 D = "#2a1034"
 A = "#1a0820"
+[units.jackal_sniper.ranged_profile]
+tell = 0.95
+shot_cooldown = 3.6
+mag_size = 1
+reload = 0.0
 
-# Elite Minor — tall cobalt-armored warrior, split mandible face, and
-# armored gauntlets flaring from the shoulders.
-[sprite_palettes.pmc]
+# Jackal Shield — crouched behind an energy shield, plasma pistol. PMC-
+# backed (armored, close-in) but with a plasma-pistol short-range
+# profile — holds a line rather than sniping.
+[units.jackal_shield]
+archetype = "pmc"
+display_name = "Kig-Yar Skirmisher"
+hp = 150
+speed = 10.0
+touch_damage = 14
+ranged_damage = 8
+preferred_distance = 22.0
+sprite = "jackal_shield.art"
+[units.jackal_shield.palette]
+H = "#6a2890"
+B = "#8a38b0"
+E = "#ff3040"
+W = "#3c2040"
+S = "#80c8ff"
+D = "#2a1034"
+A = "#1a0820"
+[units.jackal_shield.ranged_profile]
+tell = 0.3
+shot_cooldown = 0.35
+mag_size = 2
+reload = 1.4
+
+# Elite Minor — tall cobalt-armored warrior with plasma rifle. PMC-
+# backed with plasma-rifle burst-fire profile (4-round bursts).
+[units.elite_minor]
+archetype = "pmc"
+display_name = "Sangheili Minor"
+hp = 220
+speed = 12.0
+touch_damage = 22
+ranged_damage = 7
+preferred_distance = 30.0
+sprite = "elite_minor.art"
+[units.elite_minor.palette]
 H = "#283c78"
 B = "#3a5ab8"
 A = "#1c2850"
@@ -82,10 +131,23 @@ M = "#181020"
 E = "#ffe080"
 D = "#0c1428"
 C = "#3a4868"
+[units.elite_minor.ranged_profile]
+# Plasma rifle overheat pattern — 4-shot burst then coolant pause.
+tell = 0.25
+shot_cooldown = 0.13
+mag_size = 4
+reload = 2.0
 
-# Brute Chieftain — iron-gray mountain with a gravity hammer (S =
-# shaft, W = flanged head, G = blue energy glow between the flanges).
-[sprite_palettes.charger]
+# Brute Chieftain — iron-gray mountain with gravity hammer. Charger-
+# backed, monstrous HP, slam-forward silhouette.
+[units.brute_chieftain]
+archetype = "charger"
+display_name = "Brute Chieftain"
+hp = 280
+speed = 18.0
+touch_damage = 36
+sprite = "brute_chieftain.art"
+[units.brute_chieftain.palette]
 H = "#504a3a"
 A = "#38342a"
 B = "#706858"
@@ -96,3 +158,45 @@ C = "#58503e"
 S = "#2a1a0a"
 W = "#8a7040"
 G = "#60c8ff"
+
+# Hunter — paired fuel-rod gunner. Rocketeer-backed; arcing green
+# plasma bolt from standoff range, heavy armor, big HP.
+[units.hunter_fuel_rod]
+archetype = "rocketeer"
+display_name = "Mgalekgolo Hunter"
+hp = 320
+speed = 7.0
+preferred_distance = 38.0
+sprite = "hunter_fuel_rod.art"
+[units.hunter_fuel_rod.palette]
+H = "#284a28"
+B = "#486848"
+E = "#60ff80"
+M = "#182818"
+D = "#0a1408"
+W = "#2a3824"
+[units.hunter_fuel_rod.ranged_profile]
+tell = 0.8
+shot_cooldown = 3.0
+mag_size = 1
+reload = 0.0
+
+# Shade Turret — Covenant plasma emplacement. Sentinel-backed,
+# sustained plasma fire (short burst + quick reload).
+[units.shade_turret]
+archetype = "sentinel"
+display_name = "Shade Turret"
+hp = 180
+ranged_damage = 10
+preferred_distance = 100.0
+[units.shade_turret.ranged_profile]
+tell = 0.25
+shot_cooldown = 0.18
+mag_size = 6
+reload = 2.2
+
+# Elite Zealot — the miniboss silhouette, ornate gold-armor Elite with
+# an energy sword. Miniboss archetype wrapper.
+[units.elite_zealot]
+archetype = "miniboss"
+display_name = "Sangheili Zealot"

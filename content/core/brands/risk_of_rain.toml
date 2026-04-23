@@ -1,50 +1,53 @@
-# Risk of Rain — Escalating density. Starts calm, ramps to chaos.
-# Fast Lemurians (rushers), Greater Wisps (orbs), Jellyfish
-# (floating orbs), Elder Lemurians (chargers).
+# Risk of Rain — Escalating Chaos. Starts calm, ramps to chaos. Fast
+# Lemurians throwing fireballs, Greater Wisps + Jellyfish floating
+# overhead, Elder Lemurians breathing columns of flame, Magma Worms
+# burrowing, Parents teleporting, Imp Overlords committing charges.
+#
+# Converted to BrandUnit authoring shape with the RoR2 canon roster.
 
 id = "risk_of_rain"
 name = "Risk of Rain — Escalating Chaos"
 description = "Slow boil. Each wave is messier than the last."
 
-spawn_pool = ["rusher", "charger", "orb", "swarmling", "leaper", "rocketeer", "phaser"]
-miniboss = "miniboss"
+spawn_pool = [
+    "lemurian",
+    "elder_lemurian",
+    "greater_wisp",
+    "jellyfish",
+    "magma_worm",
+    "parent",
+    "imp",
+    "beetle",
+]
+miniboss = "stone_titan"
 
-# Item-stacking roguelike → Dash (the character kit feel). Perks are
-# stack-harder-faster: Rampage because kill chains ARE Risk of Rain,
-# Bloodhound to bleed the map for regen, Butcher to multiply the
-# chest density.
 signature_traversal = "dash"
 signature_perks = ["rampage", "bloodhound", "butcher"]
 
 [spawn_weights]
-rusher = 3
-# Elder Lemurians + Imp Overlords locking in charges.
-charger = 3
-# Floating orb elites (Greater Wisps, Jellyfish).
-orb = 2
-swarmling = 3
-# Lemurian Archer + Clay Templar leaps.
-leaper = 3
-# Magma worm rocketeers.
-rocketeer = 2
-# Parent/Clay Dunestrider — teleports toward the player.
-phaser = 2
+lemurian = 3
+elder_lemurian = 3
+greater_wisp = 2
+jellyfish = 3
+magma_worm = 2
+parent = 2
+imp = 3
+beetle = 3
 
-# ── Brand sprite overrides ─────────────────────────────────────────
-# Saturated indie-roguelike palette — purples, oranges, teals. Chunky
-# silhouettes first, readable outlines, everything reads "escalating
-# density" even in the corner of the screen.
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster.
+# ═══════════════════════════════════════════════════════════════════
 
-[sprite_overrides]
-rusher = "lemurian.art"
-charger = "elder_lemurian.art"
-orb = "greater_wisp.art"
-leaper = "jellyfish.art"
-rocketeer = "magma_worm.art"
-phaser = "parent.art"
-
-# Lemurian — orange bipedal lizard, mid-fireball arc.
-[sprite_palettes.rusher]
+# Lemurian — bipedal fire-lizard chucking fireballs. Rusher-backed for
+# the "close and bite" melee fallback; orange scales + fireball arc.
+[units.lemurian]
+archetype = "rusher"
+display_name = "Lemurian"
+hp = 60
+speed = 22.0
+touch_damage = 12
+sprite = "lemurian.art"
+[units.lemurian.palette]
 H = "#ffc060"
 B = "#d05820"
 E = "#fff0a0"
@@ -52,8 +55,16 @@ D = "#401808"
 F = "#ff8020"
 C = "#6a2810"
 
-# Elder Lemurian — huge purple lizard, breath-fire pose.
-[sprite_palettes.charger]
+# Elder Lemurian — big purple lizard, breath-fire charge. Charger-
+# backed; the "oh no it's red" escalation moment.
+[units.elder_lemurian]
+archetype = "charger"
+display_name = "Elder Lemurian"
+hp = 160
+speed = 22.0
+touch_damage = 26
+sprite = "elder_lemurian.art"
+[units.elder_lemurian.palette]
 H = "#d8a040"
 B = "#6820a0"
 E = "#ffe080"
@@ -61,32 +72,98 @@ D = "#2a0838"
 F = "#ff6030"
 C = "#3a1050"
 
-# Greater Wisp — spectral floating head, single eye, flames.
-[sprite_palettes.orb]
+# Greater Wisp — floating spectral head, single flaming eye. Orb-
+# backed, pops into a violet shock-chain on death.
+[units.greater_wisp]
+archetype = "orb"
+display_name = "Greater Wisp"
+hp = 70
+sprite = "greater_wisp.art"
+[units.greater_wisp.palette]
 B = "#2a1840"
 E = "#70e0ff"
 D = "#fff8c0"
 F = "#ff9028"
 
-# Jellyfish — floating bell with dangling tendrils.
-[sprite_palettes.leaper]
+# Jellyfish — floating bell with dangling tendrils. Leaper-backed for
+# the lunge-and-shock silhouette; pale-blue body.
+[units.jellyfish]
+archetype = "leaper"
+display_name = "Jellyfish"
+hp = 45
+speed = 13.0
+touch_damage = 18
+sprite = "jellyfish.art"
+[units.jellyfish.palette]
 B = "#90e8ff"
 E = "#ffffff"
 D = "#20607a"
 T = "#e060c0"
 
-# Magma Worm — segmented burrowing worm, arced.
-[sprite_palettes.rocketeer]
+# Magma Worm — segmented burrowing worm. Rocketeer-backed for the
+# arcing magma bolt from standoff range.
+[units.magma_worm]
+archetype = "rocketeer"
+display_name = "Magma Worm"
+hp = 120
+speed = 8.0
+preferred_distance = 42.0
+sprite = "magma_worm.art"
+[units.magma_worm.palette]
 B = "#3a1a08"
 D = "#180804"
 F = "#ff8020"
 E = "#ffffa0"
+[units.magma_worm.ranged_profile]
+tell = 0.7
+shot_cooldown = 2.4
+mag_size = 1
+reload = 0.0
 
-# Parent — grotesque humanoid mid-teleport.
-[sprite_palettes.phaser]
+# Parent — grotesque humanoid teleport-stalker. Phaser-backed for the
+# "disappears, reappears on top of you" ambush.
+[units.parent]
+archetype = "phaser"
+display_name = "Parent"
+hp = 80
+touch_damage = 24
+sprite = "parent.art"
+[units.parent.palette]
 B = "#d898ff"
 E = "#ffe040"
 D = "#2a0a48"
 F = "#70e0ff"
 H = "#3a1060"
 
+# Imp — hell-red leaping teleport-imp. Leaper-backed variant.
+[units.imp]
+archetype = "leaper"
+display_name = "Imp"
+hp = 50
+speed = 16.0
+touch_damage = 22
+sprite = "imp.art"
+[units.imp.palette]
+B = "#7a1010"
+D = "#2a0404"
+E = "#ffe040"
+H = "#a81818"
+C = "#380808"
+
+# Beetle — quadruped shelled crawler. Swarmling-backed for the
+# opening-wave fodder.
+[units.beetle]
+archetype = "swarmling"
+display_name = "Beetle"
+hp = 22
+sprite = "beetle.art"
+[units.beetle.palette]
+B = "#604838"
+D = "#1a1008"
+H = "#806040"
+E = "#ff3020"
+
+# Stone Titan — the towering boss. Miniboss archetype wrapper.
+[units.stone_titan]
+archetype = "miniboss"
+display_name = "Stone Titan"

@@ -1,56 +1,77 @@
 # Factorio — Biter Wave. Pollution brought them. Small biters first,
-# big biters + spitters behind. Chewing through the walls, painting
-# your base in green gore. Wall-breakers heavy.
+# big biters + spitters behind. Chewing through walls, painting your
+# base in green gore. Wall-breakers heavy.
+#
+# Converted to BrandUnit authoring shape.
 
 id = "factorio_biters"
 name = "Factorio — Biter Wave"
 description = "Bug swarm chewing through the perimeter."
 
-spawn_pool = ["swarmling", "breacher", "sapper", "charger", "rocketeer"]
-miniboss = "miniboss"
+spawn_pool = [
+    "small_biter",
+    "medium_biter",
+    "big_biter",
+    "behemoth_biter",
+    "spitter",
+    "suicide_biter",
+]
+miniboss = "behemoth_biter"
 
-# Engineer-kit flavor → Dash for that exoskeleton-leg burst. Perks
-# are all efficiency / throughput: Survivor armor, QuickHands for
-# the fire-rate curve, IronWill so the pollution tide doesn't drop
-# your sanity into red.
 signature_traversal = "dash"
 signature_perks = ["survivor", "quick_hands", "iron_will"]
 
 [spawn_weights]
-# Small biters.
-swarmling = 6
-# Medium/Big biters breaching.
-breacher = 3
-# Behemoth spitters — arcing AoE attacks.
-rocketeer = 1
-sapper = 1
-# Charger-class big biter.
-charger = 2
+small_biter = 6
+medium_biter = 3
+big_biter = 2
+behemoth_biter = 1
+spitter = 1
+suicide_biter = 1
 
-# ── Brand sprite overrides ─────────────────────────────────────────
-# Factorio biter wave: pollution-stained biomass, sickly yellow-green
-# carapace, chitin-black limbs, jet-black mandible tips. Behemoth is
-# the wall-cracker. Spitter rears up to arc acid.
-# Art lives in content/core/art/factorio_biters/.
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster.
+# ═══════════════════════════════════════════════════════════════════
 
-[sprite_overrides]
-swarmling = "small_biter.art"
-charger = "big_biter.art"
-breacher = "behemoth_biter.art"
-rocketeer = "spitter.art"
-sapper = "suicide_biter.art"
-
-# Small Biter — scurrying fodder, red eye dots, bone mandibles.
-[sprite_palettes.swarmling]
+# Small Biter — scurrying fodder. Swarmling-backed for the
+# wall-breach perimeter wave.
+[units.small_biter]
+archetype = "swarmling"
+display_name = "Small Biter"
+sprite = "small_biter.art"
+[units.small_biter.palette]
 B = "#1a1208"
 H = "#a89040"
 E = "#ff4030"
 M = "#281808"
 D = "#080402"
 
-# Big Biter — yellow-green armored plates over the back, larger
-# scissor jaws.
-[sprite_palettes.charger]
+# Medium Biter — bigger chunkier-mandibles biter. Rusher-backed for
+# the mid-tier charger between waves.
+[units.medium_biter]
+archetype = "rusher"
+display_name = "Medium Biter"
+hp = 55
+speed = 22.0
+touch_damage = 12
+sprite = "medium_biter.art"
+[units.medium_biter.palette]
+B = "#1a1208"
+H = "#b0a050"
+E = "#ff3820"
+M = "#1e1008"
+D = "#080402"
+
+# Big Biter — yellow-green armored plates, scissor jaws. Charger-
+# backed for the committed forward rush.
+[units.big_biter]
+archetype = "charger"
+display_name = "Big Biter"
+hp = 140
+speed = 20.0
+touch_damage = 22
+sprite = "big_biter.art"
+[units.big_biter.palette]
 B = "#1a1208"
 H = "#c0a848"
 A = "#707020"
@@ -58,28 +79,53 @@ E = "#ff3020"
 M = "#1a0a04"
 D = "#080402"
 
-# Behemoth — massive wall-cracker, pollution-green armor slabs, jaws
-# crunching the base wall.
-[sprite_palettes.breacher]
+# Behemoth Biter — massive wall-cracker. Breacher-backed; the
+# "tore the defensive line" moment.
+[units.behemoth_biter]
+archetype = "breacher"
+display_name = "Behemoth Biter"
+hp = 280
+speed = 11.0
+touch_damage = 32
+sprite = "behemoth_biter.art"
+[units.behemoth_biter.palette]
 B = "#201810"
 H = "#809038"
 E = "#ff5020"
 M = "#0a0402"
 D = "#0a0604"
 
-# Spitter — rearing posture, distended acid-gland sac under the jaws,
-# green toxin pooling in the mouth opening.
-[sprite_palettes.rocketeer]
+# Spitter — acid-lob ranged biter. Rocketeer-backed with an arcing
+# acid globule profile.
+[units.spitter]
+archetype = "rocketeer"
+display_name = "Spitter"
+hp = 75
+speed = 9.0
+preferred_distance = 34.0
+sprite = "spitter.art"
+[units.spitter.palette]
 B = "#2a2818"
 H = "#a89030"
 G = "#78c040"
 A = "#b0ff50"
 E = "#ff4020"
 D = "#0a0604"
+[units.spitter.ranged_profile]
+tell = 0.6
+shot_cooldown = 2.0
+mag_size = 1
+reload = 0.0
 
-# Suicide Biter — pollution-green, swollen with explosive biomass
-# sacs, crimson core glowing through translucent skin.
-[sprite_palettes.sapper]
+# Suicide Biter — swollen explosive biomass sac. Sapper-backed —
+# detonates on contact in a green acid splash.
+[units.suicide_biter]
+archetype = "sapper"
+display_name = "Suicide Biter"
+hp = 45
+speed = 24.0
+sprite = "suicide_biter.art"
+[units.suicide_biter.palette]
 G = "#78c040"
 P = "#b0ff50"
 B = "#201810"

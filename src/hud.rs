@@ -237,6 +237,7 @@ fn short_brand(id: &str) -> &str {
         "gears_locust" => "GEARS",
         "borderlands_pandora" => "BL",
         "xenomorph_hive" => "XENO",
+        "starving_rats" => "RATS",
         other => other,
     }
 }
@@ -278,6 +279,8 @@ fn brand_rgb(id: &str) -> (u8, u8, u8) {
         "borderlands_pandora" => (255, 200, 50),
         // Xenomorph — acid-green blood on black chitin.
         "xenomorph_hive" => (60, 220, 100),
+        // Starving rats — sickly bile yellow, sewer-underlit.
+        "starving_rats" => (200, 170, 60),
         _ => (220, 220, 220),
     }
 }

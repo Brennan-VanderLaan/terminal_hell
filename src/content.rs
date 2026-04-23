@@ -103,20 +103,114 @@ pub struct BrandDef {
     /// player already has all of them, fall back to any unowned perk.
     #[serde(default)]
     pub signature_perks: Option<Vec<String>>,
-    /// Optional per-archetype sprite overrides. When an enemy spawns
-    /// from this brand and renders, the render path checks for a
-    /// brand-specific sprite first, then the archetype default, then
-    /// the hardcoded builder. Entry format: `archetype_snake_name →
-    /// art_filename.art`, with the corresponding palette declared in
-    /// `sprite_palettes`. Art files live in
-    /// `content/core/art/<brand_id>/`.
+    /// Legacy per-archetype sprite overrides. Entry format:
+    /// `archetype_snake_name → art_filename.art`, paired with a
+    /// matching `[sprite_palettes.<arch>]` table. Deprecated in favor
+    /// of `[units.*]` BrandUnit entries which carry their own sprite
+    /// + palette alongside stat + behavior overrides. Kept working
+    /// so un-converted brands continue to load.
     #[serde(default)]
     pub sprite_overrides: HashMap<String, String>,
-    /// Palettes for each sprite override — mirrors the archetype-
-    /// level `palette` field. Keyed by the same archetype snake
-    /// name as `sprite_overrides`. Values are {char → hex} maps.
     #[serde(default)]
     pub sprite_palettes: HashMap<String, HashMap<String, String>>,
+    /// Brand-authored unit roster. Keys are unit ids (e.g.
+    /// "pistol_scav", "combine_soldier") that the brand's
+    /// `spawn_pool` + `spawn_weights` reference. Each entry merges
+    /// stat + behavior + sprite overrides onto a backing sim
+    /// archetype, so one brand can ship multiple distinct units
+    /// that share an archetype's AI loop (e.g. three flavors of
+    /// Rusher in a single brand, each with its own hp/speed/fire
+    /// profile).
+    ///
+    /// See also: `BrandUnit`. Brands that don't declare `[units.*]`
+    /// tables still work — their `spawn_pool` is read as raw
+    /// archetype snake names and the resolver returns synthetic
+    /// ResolvedUnits using archetype defaults.
+    #[serde(default)]
+    pub units: HashMap<String, BrandUnit>,
+}
+
+/// Per-brand authored unit. Combines a backing sim-mechanic
+/// `archetype` with per-unit overrides for stats, behavior, sprite,
+/// and ranged-fire cadence. Resolved at spawn time via
+/// [`ContentDb::resolve_unit`] into a [`ResolvedUnit`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct BrandUnit {
+    /// Which sim archetype backs this unit. Must be a valid
+    /// `Archetype::from_name` result; validated at content load.
+    pub archetype: String,
+    /// HUD-facing name. Used in the kill feed + brand strip. When
+    /// absent, the unit id is humanized (e.g. `"pistol_scav"` →
+    /// `"Pistol Scav"`).
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub hp: Option<i32>,
+    #[serde(default)]
+    pub speed: Option<f32>,
+    #[serde(default)]
+    pub touch_damage: Option<i32>,
+    #[serde(default)]
+    pub hit_radius: Option<f32>,
+    #[serde(default)]
+    pub reach: Option<f32>,
+    #[serde(default)]
+    pub preferred_distance: Option<f32>,
+    #[serde(default)]
+    pub ranged_damage: Option<i32>,
+    /// Archetype TOML tags override. When Some, replaces the
+    /// archetype's tag list entirely — this is what the
+    /// interaction-matrix keys off of, so merging would be
+    /// semantically weird (a unit that adds "armored" on top of
+    /// "biological" is authored by repeating both).
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub body_on_death: Option<String>,
+    #[serde(default)]
+    pub gore_profile: Option<String>,
+    #[serde(default)]
+    pub signature_primitives: Option<Vec<String>>,
+    #[serde(default)]
+    pub signature_fire_mode: Option<String>,
+    /// Sprite art filename (relative to `content/core/art/<brand_id>/`
+    /// or `content/core/art/`).
+    #[serde(default)]
+    pub sprite: Option<String>,
+    #[serde(default)]
+    pub palette: Option<HashMap<String, String>>,
+    /// Optional [`BehaviorToml`] override. Merges over the archetype's
+    /// registered default (same semantics as the archetype-level
+    /// [stats].behavior block at B1's apply_toml — fields set here
+    /// override; unset fields inherit).
+    #[serde(default)]
+    pub behavior: Option<BehaviorToml>,
+    /// Optional per-unit ranged-fire cadence override. Swaps the
+    /// default Enemy::ranged_profile() result at spawn time. Lets
+    /// Half-Life's Combine Soldier fire 4-round bursts while
+    /// Tarkov's Scav Sniper uses the deliberate single-shot sniper
+    /// cadence, even though both are backed by the Marksman
+    /// archetype.
+    #[serde(default)]
+    pub ranged_profile: Option<RangedProfileToml>,
+}
+
+/// TOML schema for a ranged-fire cadence override. Resolves to an
+/// `enemy::RangedProfile` at spawn time.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RangedProfileToml {
+    pub tell: f32,
+    pub shot_cooldown: f32,
+    /// 1 = single-shot rhythm; >1 = burst-fire with `reload` lockout
+    /// after the mag empties.
+    #[serde(default = "ranged_default_mag_size")]
+    pub mag_size: u16,
+    #[serde(default)]
+    pub reload: f32,
+}
+
+fn ranged_default_mag_size() -> u16 {
+    1
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -141,12 +235,37 @@ pub struct ContentDb {
     /// Optional ASCII-art sprites keyed by archetype. When present,
     /// sprite.rs uses these instead of the hardcoded builders.
     pub archetype_sprites: HashMap<Archetype, crate::sprite::Sprite>,
-    /// Brand-specific sprite overrides: `(brand_id, archetype) →
-    /// Sprite`. When an enemy spawned from a specific brand renders,
-    /// the lookup tries this first; falls back to `archetype_sprites`
-    /// and then the hardcoded builder. Authored via each brand's
-    /// `sprite_overrides` + `sprite_palettes` TOML sections.
+    /// Legacy brand-specific sprite overrides: `(brand_id, archetype)
+    /// → Sprite`. Authored via each brand's `sprite_overrides` +
+    /// `sprite_palettes` TOML sections. Deprecated in favor of per-
+    /// unit sprites in `brand_unit_sprites`; still consulted as a
+    /// fallback for un-converted brands.
     pub brand_sprites: HashMap<(String, Archetype), crate::sprite::Sprite>,
+    /// Per-unit sprite cache: `(brand_id, unit_id) → Sprite`. Built
+    /// from each BrandUnit's `sprite` + `palette` at content load.
+    /// Consulted first by the sprite lookup path — an enemy carrying
+    /// a unit_id gets its unit-specific art regardless of archetype
+    /// and independent of how many distinct units a brand hangs off
+    /// the same backing archetype.
+    pub brand_unit_sprites: HashMap<(String, String), crate::sprite::Sprite>,
+}
+
+/// Resolved spawn-time unit definition. Merges archetype defaults
+/// with per-unit overrides; the callers (wave director, convert
+/// swap, etc.) use this to construct an `Enemy` + annotate it with
+/// the unit_id + brand_id that keep sprite/display lookups coherent
+/// across the enemy's lifetime (and past death, for the corpse).
+#[derive(Debug, Clone)]
+pub struct ResolvedUnit {
+    pub archetype: Archetype,
+    /// `Some(tag)` when this came from a brand `[units.<id>]` entry.
+    /// `None` for the legacy archetype-id-in-spawn-pool path.
+    pub unit_id: Option<crate::tag::Tag>,
+    pub brand_id: Option<crate::tag::Tag>,
+    pub stats: ArchetypeStats,
+    pub display_name: String,
+    pub behavior: Option<crate::behavior::BehaviorToml>,
+    pub ranged_profile: Option<RangedProfileToml>,
 }
 
 impl std::fmt::Debug for ContentDb {
@@ -210,10 +329,32 @@ impl ContentDb {
             let text = file.contents_utf8().context("brand not UTF-8")?;
             let brand: BrandDef = toml::from_str(text)
                 .with_context(|| format!("parse {}", file.path().display()))?;
-            // Validate archetype references.
+            // Validate spawn_pool + miniboss references. Each entry
+            // must resolve to EITHER a brand-unit id (a key in
+            // `brand.units`) OR a raw archetype snake name.
+            // ContentDb::resolve_unit handles both at spawn time;
+            // we mirror that precedence here at load so typos fail
+            // loud.
             for name in brand.spawn_pool.iter().chain(std::iter::once(&brand.miniboss)) {
-                archetype_from_name(name)
-                    .with_context(|| format!("brand {} references unknown archetype `{name}`", brand.id))?;
+                let ok = brand.units.contains_key(name)
+                    || Archetype::from_name(name).is_some();
+                if !ok {
+                    return Err(anyhow!(
+                        "brand {} references unknown unit/archetype `{name}`",
+                        brand.id
+                    ));
+                }
+            }
+            // Validate BrandUnit archetype references so a typo in a
+            // brand roster is caught at load, not at spawn.
+            for (unit_id, unit) in &brand.units {
+                if Archetype::from_name(&unit.archetype).is_none() {
+                    return Err(anyhow!(
+                        "brand {} unit `{unit_id}` references unknown archetype `{}`",
+                        brand.id,
+                        unit.archetype
+                    ));
+                }
             }
             brands.insert(brand.id.clone(), brand);
         }
@@ -382,6 +523,70 @@ impl ContentDb {
             }
         }
 
+        // BrandUnit sprite loading. Each unit's optional `sprite` +
+        // `palette` fields produce a per-`(brand_id, unit_id)` sprite
+        // entry that's consulted first in the render path. Missing
+        // art / palette / parse failures are warn-only — the unit
+        // still works, just falls through to the archetype default
+        // at render time.
+        let mut brand_unit_sprites: HashMap<(String, String), crate::sprite::Sprite> =
+            HashMap::new();
+        for (brand_id, brand) in &brands {
+            let Some(dir) = art_dir else { continue };
+            for (unit_id, unit) in &brand.units {
+                let (Some(art_filename), Some(pal_map)) =
+                    (unit.sprite.as_ref(), unit.palette.as_ref())
+                else {
+                    continue;
+                };
+                let sub = format!("art/{brand_id}/{art_filename}");
+                let Some(file) = dir
+                    .get_file(&sub)
+                    .or_else(|| dir.get_file(format!("art/{art_filename}")))
+                else {
+                    tracing::warn!(
+                        brand = %brand_id,
+                        unit = %unit_id,
+                        art = %art_filename,
+                        "BrandUnit art file missing"
+                    );
+                    continue;
+                };
+                let text = match file.contents_utf8() {
+                    Some(t) => t,
+                    None => {
+                        tracing::warn!(
+                            brand = %brand_id,
+                            unit = %unit_id,
+                            "BrandUnit art file not UTF-8"
+                        );
+                        continue;
+                    }
+                };
+                let palette = match crate::art::palette_from_toml(pal_map) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        tracing::warn!(
+                            brand = %brand_id, unit = %unit_id, %e,
+                            "BrandUnit palette parse failed"
+                        );
+                        continue;
+                    }
+                };
+                let sprite = match crate::art::parse_art(text, &palette) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::warn!(
+                            brand = %brand_id, unit = %unit_id, %e,
+                            "BrandUnit art parse failed"
+                        );
+                        continue;
+                    }
+                };
+                brand_unit_sprites.insert((brand_id.clone(), unit_id.clone()), sprite);
+            }
+        }
+
         Ok(Self {
             archetypes,
             brands,
@@ -392,6 +597,77 @@ impl ContentDb {
             fire_id,
             archetype_sprites,
             brand_sprites,
+            brand_unit_sprites,
+        })
+    }
+
+    /// Resolve a `spawn_pool` id from a given brand into a
+    /// `ResolvedUnit` carrying the merged stats + behavior + sprite
+    /// hooks needed to spawn an Enemy. The id is tried first as a
+    /// brand-unit id (a key in `brand.units`); if that misses, fall
+    /// back to treating the id as a raw archetype snake name
+    /// (the pre-BrandUnit content authoring shape).
+    ///
+    /// Returns None when the id names neither a brand unit nor a
+    /// known archetype.
+    pub fn resolve_unit(&self, brand_id: &str, id: &str) -> Option<ResolvedUnit> {
+        let brand_tag = crate::tag::Tag::new(brand_id);
+        // Path 1 — id is a brand-unit id.
+        if let Some(brand) = self.brands.get(brand_id) {
+            if let Some(unit) = brand.units.get(id) {
+                let archetype = Archetype::from_name(&unit.archetype)?;
+                let base = self.stats(archetype).clone();
+                let stats = ArchetypeStats {
+                    hp: unit.hp.unwrap_or(base.hp),
+                    speed: unit.speed.unwrap_or(base.speed),
+                    touch_damage: unit.touch_damage.unwrap_or(base.touch_damage),
+                    hit_radius: unit.hit_radius.unwrap_or(base.hit_radius),
+                    reach: unit.reach.or(base.reach),
+                    preferred_distance: unit.preferred_distance.or(base.preferred_distance),
+                    ranged_damage: unit.ranged_damage.or(base.ranged_damage),
+                    art: base.art.clone(),
+                    palette: base.palette.clone(),
+                    tags: unit.tags.clone().or(base.tags.clone()),
+                    body_on_death: unit.body_on_death.clone().or(base.body_on_death.clone()),
+                    gore_profile: unit.gore_profile.clone().or(base.gore_profile.clone()),
+                    signature_primitives: unit
+                        .signature_primitives
+                        .clone()
+                        .or(base.signature_primitives.clone()),
+                    signature_fire_mode: unit
+                        .signature_fire_mode
+                        .clone()
+                        .or(base.signature_fire_mode.clone()),
+                    behavior: base.behavior.clone(),
+                };
+                let display_name = unit
+                    .display_name
+                    .clone()
+                    .unwrap_or_else(|| humanize_snake(id));
+                return Some(ResolvedUnit {
+                    archetype,
+                    unit_id: Some(crate::tag::Tag::new(id)),
+                    brand_id: Some(brand_tag),
+                    stats,
+                    display_name,
+                    behavior: unit.behavior.clone(),
+                    ranged_profile: unit.ranged_profile.clone(),
+                });
+            }
+        }
+        // Path 2 — legacy: id is an archetype snake name directly in
+        // the spawn_pool (every brand pre-BrandUnit).
+        let archetype = Archetype::from_name(id)?;
+        let stats = self.stats(archetype).clone();
+        let display_name = self.enemy_display_name(archetype, Some(brand_id));
+        Some(ResolvedUnit {
+            archetype,
+            unit_id: None,
+            brand_id: Some(brand_tag),
+            stats,
+            display_name,
+            behavior: None,
+            ranged_profile: None,
         })
     }
 
@@ -433,9 +709,36 @@ impl ContentDb {
         archetype: Archetype,
         brand_id: Option<&str>,
     ) -> String {
+        self.enemy_display_name_with_unit(archetype, brand_id, None)
+    }
+
+    /// BrandUnit-aware display name. Lookup order:
+    ///   1. BrandUnit's explicit `display_name` (e.g. "Combine Soldier").
+    ///   2. Humanized unit id (e.g. "pistol_scav" → "Pistol Scav").
+    ///   3. Legacy `sprite_overrides` filename-stem fallback.
+    ///   4. Archetype Debug name.
+    /// Used by the kill feed + brand strip so a player sees
+    /// "Combine Soldier" or "Pistol Scav" in chat, not "Marksman"
+    /// or "Rusher".
+    pub fn enemy_display_name_with_unit(
+        &self,
+        archetype: Archetype,
+        brand_id: Option<&str>,
+        unit_id: Option<&str>,
+    ) -> String {
+        if let (Some(bid), Some(uid)) = (brand_id, unit_id) {
+            if let Some(brand) = self.brands.get(bid) {
+                if let Some(unit) = brand.units.get(uid) {
+                    if let Some(name) = unit.display_name.as_deref() {
+                        return name.to_string();
+                    }
+                    return humanize_snake(uid);
+                }
+            }
+        }
         let arch_snake = archetype.to_name();
-        if let Some(brand_id) = brand_id {
-            if let Some(brand) = self.brands.get(brand_id) {
+        if let Some(bid) = brand_id {
+            if let Some(brand) = self.brands.get(bid) {
                 if let Some(art) = brand.sprite_overrides.get(arch_snake) {
                     let stem = std::path::Path::new(art)
                         .file_stem()
@@ -574,4 +877,110 @@ fn read_embedded(path: &str) -> Result<String> {
         .contents_utf8()
         .with_context(|| format!("{path} not UTF-8"))?
         .to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// BrandUnit TOML round-trips through serde with all the fields
+    /// the brand-rewrite pass uses.
+    #[test]
+    fn brand_unit_toml_parses() {
+        let src = r#"
+            archetype = "marksman"
+            display_name = "Combine Soldier"
+            hp = 90
+            speed = 13.0
+            ranged_damage = 6
+
+            [ranged_profile]
+            tell = 0.25
+            shot_cooldown = 0.12
+            mag_size = 4
+            reload = 1.8
+        "#;
+        let u: BrandUnit = toml::from_str(src).unwrap();
+        assert_eq!(u.archetype, "marksman");
+        assert_eq!(u.display_name.as_deref(), Some("Combine Soldier"));
+        assert_eq!(u.hp, Some(90));
+        assert_eq!(u.speed, Some(13.0));
+        assert_eq!(u.ranged_damage, Some(6));
+        let rp = u.ranged_profile.expect("ranged_profile should parse");
+        assert_eq!(rp.tell, 0.25);
+        assert_eq!(rp.mag_size, 4);
+    }
+
+    /// Resolve Half-Life's combine_soldier — a real brand unit that
+    /// ships in core content. Merged stats pull the unit's HP/speed/
+    /// damage override, preserve archetype defaults for unset fields,
+    /// and carry the ranged_profile for burst-fire dispatch.
+    #[test]
+    fn resolve_unit_merges_half_life_combine_soldier() {
+        let db = ContentDb::load_core().expect("core content loads");
+        let r = db
+            .resolve_unit("half_life", "combine_soldier")
+            .expect("half_life/combine_soldier resolves");
+        assert_eq!(r.archetype, Archetype::Marksman);
+        assert_eq!(r.stats.hp, 90);
+        assert_eq!(r.stats.speed, 13.0);
+        assert_eq!(r.stats.ranged_damage, Some(6));
+        assert_eq!(r.display_name, "Combine Soldier");
+        assert_eq!(r.unit_id.map(|t| t.as_str()), Some("combine_soldier"));
+        assert_eq!(r.brand_id.map(|t| t.as_str()), Some("half_life"));
+        let rp = r.ranged_profile.expect("combine_soldier has burst profile");
+        assert_eq!(rp.mag_size, 4);
+    }
+
+    /// Tarkov's scav_sniper + Half-Life's combine_soldier both use
+    /// the Marksman archetype but resolve to very different stats +
+    /// ranged profiles. This is the showcase assertion: same sim
+    /// archetype, two distinctly-authored units with independent
+    /// brand identities.
+    #[test]
+    fn marksman_differs_across_brands() {
+        let db = ContentDb::load_core().expect("core content loads");
+        let combine = db
+            .resolve_unit("half_life", "combine_soldier")
+            .expect("combine_soldier");
+        let scav = db
+            .resolve_unit("tarkov_scavs", "scav_sniper")
+            .expect("scav_sniper");
+        // Same backing archetype.
+        assert_eq!(combine.archetype, scav.archetype);
+        assert_eq!(combine.archetype, Archetype::Marksman);
+        // Distinctly-tuned stats.
+        assert_ne!(combine.stats.hp, scav.stats.hp);
+        assert_ne!(combine.stats.speed, scav.stats.speed);
+        // Distinctly-tuned fire cadence — combine bursts, scav snipes.
+        let c_rp = combine.ranged_profile.as_ref().unwrap();
+        let s_rp = scav.ranged_profile.as_ref().unwrap();
+        assert!(c_rp.mag_size > 1, "combine_soldier should burst-fire");
+        assert_eq!(s_rp.mag_size, 1, "scav_sniper should be single-shot");
+        assert!(c_rp.shot_cooldown < s_rp.shot_cooldown);
+    }
+
+    /// Legacy fallback: a brand that ships no `[units.*]` tables
+    /// still resolves via the archetype-snake-name path. This is the
+    /// backward-compat promise for un-converted brands.
+    #[test]
+    fn resolve_unit_falls_back_to_archetype_name() {
+        let db = ContentDb::load_core().expect("core content loads");
+        // doom_inferno hasn't been converted to BrandUnit yet —
+        // spawn_pool still uses archetype names.
+        let r = db
+            .resolve_unit("doom_inferno", "rusher")
+            .expect("legacy archetype id resolves");
+        assert_eq!(r.archetype, Archetype::Rusher);
+        assert!(r.unit_id.is_none(), "legacy fallback has no unit_id");
+    }
+
+    /// Unknown ids return None — both for unknown unit ids AND
+    /// unknown archetype names.
+    #[test]
+    fn resolve_unit_rejects_unknown_ids() {
+        let db = ContentDb::load_core().expect("core content loads");
+        assert!(db.resolve_unit("half_life", "not_a_unit").is_none());
+        assert!(db.resolve_unit("half_life", "not_an_archetype").is_none());
+    }
 }

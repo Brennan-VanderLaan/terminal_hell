@@ -1,61 +1,68 @@
-# Deep Rock Galactic — Hollow Bough. Glyphid swarm from every
-# direction, praetorian (heavy) slams, Menace-style leaping bugs.
-# Claustrophobic brand — feels like tunnels.
+# Deep Rock Galactic — Hollow Bough. Glyphid swarms from every tunnel
+# mouth, Praetorians slamming, Menaces leaping acid-first, Exploders
+# detonating, Grunt Slashers splitting into more Grunts. The "rock
+# and stone" brand — close quarters, teeth-first.
+#
+# Converted to BrandUnit authoring shape. Each glyphid variant hangs
+# off its canonical DRG name + silhouette.
 
 id = "deep_rock"
 name = "Deep Rock — Glyphid Tunnels"
 description = "Bugs from every tunnel mouth. Close quarters, teeth-first."
 
-spawn_pool = ["swarmling", "charger", "leaper", "breacher", "sapper", "splitter"]
-miniboss = "miniboss"
+spawn_pool = [
+    "glyphid_grunt",
+    "glyphid_praetorian",
+    "glyphid_menace",
+    "glyphid_exploder",
+    "glyphid_slasher",
+    "glyphid_webspitter",
+    "glyphid_acidspitter",
+]
+miniboss = "glyphid_dreadnought"
 
-# Scout grapple is in the DNA → grapple verb. Perks lean into long
-# runs between cave rooms: Survivor for plate-armor, IronWill to
-# regen sanity under pressure, CorpsePulse to keep topped up as the
-# swarm bleeds you.
 signature_traversal = "grapple"
 signature_perks = ["survivor", "iron_will", "corpse_pulse"]
 
 [spawn_weights]
-# Grunts — the tunnel-mouth swarm.
-swarmling = 6
-# Praetorian slam.
-charger = 2
-# Menace leapers.
-leaper = 2
-# Breacher — glyphids chewing through walls.
-breacher = 2
-# Exploder / suicide bug pops into swarmlings.
-splitter = 2
-# Exploder (Menace) suicide bug.
-sapper = 1
+glyphid_grunt = 6
+glyphid_praetorian = 2
+glyphid_menace = 2
+glyphid_exploder = 2
+glyphid_slasher = 2
+glyphid_webspitter = 2
+glyphid_acidspitter = 1
 
-# ── Brand sprite overrides ─────────────────────────────────────────
-# Glyphid silhouettes: all chitin-black + acid-green glands + bone-
-# yellow carapace ridges. Art lives in content/core/art/deep_rock/.
-# Palette keys: C = chitin shell, H = carapace ridge (head plate),
-# E = eye cluster, M = mandible tip, A = acid maw, G = acid gland,
-# P = armor plate, W = wing, D = dark underside.
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster.
+# ═══════════════════════════════════════════════════════════════════
 
-[sprite_overrides]
-swarmling = "glyphid_grunt.art"
-charger = "glyphid_praetorian.art"
-leaper = "glyphid_menace.art"
-breacher = "glyphid_exploder.art"
-splitter = "glyphid_slasher.art"
-
-# Grunt — chunky chitinous bug, bone-yellow head plate, mandibles
-# flared, acid-green eye cluster.
-[sprite_palettes.swarmling]
+# Grunt — the tunnel-mouth fodder. Swarmling-backed, chunky chitin
+# silhouette, mandibles flared.
+[units.glyphid_grunt]
+archetype = "swarmling"
+display_name = "Glyphid Grunt"
+hp = 25
+speed = 28.0
+touch_damage = 8
+sprite = "glyphid_grunt.art"
+[units.glyphid_grunt.palette]
 C = "#1a1008"
 H = "#c8b060"
 E = "#80ff40"
 M = "#e8d080"
 D = "#0a0604"
 
-# Praetorian — huge armored glyphid, yellow-ridged plates across the
-# back, gaping green acid maw at the head.
-[sprite_palettes.charger]
+# Praetorian — huge armored glyphid. Charger-backed, slam-slow, big
+# HP pool. The "eat your ammo while the others flank you" threat.
+[units.glyphid_praetorian]
+archetype = "charger"
+display_name = "Glyphid Praetorian"
+hp = 180
+speed = 18.0
+touch_damage = 26
+sprite = "glyphid_praetorian.art"
+[units.glyphid_praetorian.palette]
 C = "#1a1008"
 P = "#8a4820"
 H = "#d8b860"
@@ -65,9 +72,16 @@ E = "#ffff80"
 M = "#f0d890"
 D = "#080402"
 
-# Menace — leaping acid spitter with bat-like wing flaps, acid gland
-# distended under the jaw.
-[sprite_palettes.leaper]
+# Menace — leaping acid spitter. Leaper-backed, low HP, devastating
+# pounce; wing-flap silhouette distinct from the Grunt.
+[units.glyphid_menace]
+archetype = "leaper"
+display_name = "Glyphid Menace"
+hp = 55
+speed = 17.0
+touch_damage = 24
+sprite = "glyphid_menace.art"
+[units.glyphid_menace.palette]
 C = "#1a1008"
 H = "#b0a058"
 E = "#80ff40"
@@ -77,18 +91,31 @@ M = "#d8c070"
 W = "#3a2810"
 D = "#080402"
 
-# Exploder — bulbous sac dominates the body, tiny head, green acid
-# skin stretched tight over the gas bladder.
-[sprite_palettes.breacher]
+# Exploder — bulbous gas-sac bug. Breacher-backed (walks into walls
+# AND players, detonates on contact). Translucent acid skin.
+[units.glyphid_exploder]
+archetype = "breacher"
+display_name = "Glyphid Exploder"
+hp = 80
+speed = 16.0
+touch_damage = 30
+sprite = "glyphid_exploder.art"
+[units.glyphid_exploder.palette]
 G = "#60d040"
 A = "#a8ff60"
 H = "#c8b060"
 E = "#ffff60"
 D = "#0a0604"
 
-# Grunt Slasher — variant with long sickle-mandibles. Splits into
-# more on death.
-[sprite_palettes.splitter]
+# Slasher — sickle-mandible variant. Splitter-backed; on death
+# fragments into more Grunts, cascading pressure.
+[units.glyphid_slasher]
+archetype = "splitter"
+display_name = "Glyphid Slasher"
+hp = 60
+speed = 15.0
+sprite = "glyphid_slasher.art"
+[units.glyphid_slasher.palette]
 C = "#2a1810"
 H = "#c8b060"
 E = "#ff6040"
@@ -96,3 +123,47 @@ M = "#f8e090"
 A = "#402010"
 W = "#8a7038"
 D = "#0a0604"
+
+# Webspitter — ranged webshot glyphid. Marksman-backed; short tell,
+# moderate range, sticky-shot damage profile.
+[units.glyphid_webspitter]
+archetype = "marksman"
+display_name = "Glyphid Webspitter"
+hp = 55
+speed = 12.0
+ranged_damage = 12
+preferred_distance = 45.0
+sprite = "glyphid_webspitter.art"
+[units.glyphid_webspitter.palette]
+C = "#2a2010"
+H = "#d8b860"
+E = "#80ff40"
+A = "#40ff60"
+M = "#e8d080"
+D = "#080402"
+[units.glyphid_webspitter.ranged_profile]
+tell = 0.4
+shot_cooldown = 1.4
+mag_size = 1
+reload = 0.0
+
+# Acidspitter — stationary acid launcher. Sentinel-backed, longer
+# range, arcing acid bolts.
+[units.glyphid_acidspitter]
+archetype = "sentinel"
+display_name = "Glyphid Acidspitter"
+hp = 140
+ranged_damage = 16
+preferred_distance = 100.0
+[units.glyphid_acidspitter.ranged_profile]
+tell = 0.6
+shot_cooldown = 2.0
+mag_size = 1
+reload = 0.0
+
+# Dreadnought — the miniboss. Massive chitin frame, rock-and-stone
+# breathing apex.
+[units.glyphid_dreadnought]
+archetype = "miniboss"
+display_name = "Glyphid Dreadnought"
+hp = 1100

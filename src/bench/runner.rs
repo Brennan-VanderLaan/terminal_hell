@@ -402,7 +402,7 @@ fn apply_substance_paint(game: &mut Game, paint: &crate::bench::scenario::Scenar
     let w = game.arena.width as i32;
     let h = game.arena.height as i32;
     let in_bounds = |x: i32, y: i32| x >= 0 && y >= 0 && x < w && y < h;
-    let mut stamp = |g: &mut Game, x: i32, y: i32| {
+    let stamp = |g: &mut Game, x: i32, y: i32| {
         if in_bounds(x, y) && g.arena.is_passable(x, y) {
             g.arena.set_substance(x, y, id, paint.state);
         }

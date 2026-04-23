@@ -1,61 +1,54 @@
 # Borderlands — Pandora Bandit Raid. Cel-shaded comic violence —
-# Psychos screaming with buzz-axes, Midget Goliaths riding bigger
-# ones, Skag packs leaping from dunes, Badass variants that just
-# won't die, suicide Psychos lighting themselves on fire. The
-# "loot-and-yell" brand, pure tonal counterweight to the horror
-# brands.
+# Psychos screaming with buzz-axes, Marauders laying SMG fire, Skag
+# packs leaping from dunes, Goliaths tanking shotgun blasts, Nomad
+# warchiefs howling to rally the pack, Suicide Psychos running at
+# you with lit grenades. The "loot-and-yell" brand — pure tonal
+# counterweight to the horror brands.
+#
+# Converted to BrandUnit authoring shape.
 
 id = "borderlands_pandora"
 name = "Borderlands — Pandora Bandit Raid"
 description = "Psychos scream, Skags leap, Badass variants won't die, suicide Psychos ignite."
 
 spawn_pool = [
-    "rusher",
-    "leaper",
-    "charger",
-    "marksman",
-    "sapper",
-    "pinkie",
-    "howler",
+    "psycho",
+    "marauder",
+    "goliath",
+    "skag",
+    "suicide_psycho",
+    "badass_goliath",
+    "nomad",
 ]
-miniboss = "pinkie"
+miniboss = "badass_goliath"
 
-# Digi-struct / Decepti0n fantasy → Blink. Perks lean full Vault
-# Hunter: Butcher (every Psycho drops loot), Rampage (stacking
-# kills for the damage ramp every Borderlands class loves),
-# QuickHands for the fire-rate curve.
 signature_traversal = "blink"
 signature_perks = ["butcher", "rampage", "quick_hands"]
 
 [spawn_weights]
-# Psycho — running at you with a buzz-axe.
-rusher = 5
-# Skag leap — the pack animals.
-leaper = 3
-# Goliath / Bruiser charge.
-charger = 2
-# Marauder / Nomad with SMG.
-marksman = 3
-# Suicide Psycho — grenade-strapped.
-sapper = 2
-# Badass Goliath — the bullet-sponge.
-pinkie = 1
-# Nomad war chief screaming to rally the pack.
-howler = 1
+psycho = 5
+skag = 3
+goliath = 2
+marauder = 3
+suicide_psycho = 2
+badass_goliath = 1
+nomad = 1
 
-# Brand-specific sprite overrides. Cel-shaded comic violence —
-# buzz-axe Psychos, goggled Marauders with rifles, helmet-caged
-# Goliaths, quadruped Skags with hinged mouths, grenade-strapped
-# suicide Psychos. Palette: MAXIMUM saturation yellows/oranges,
-# thick black outlines, red meat tones.
-[sprite_overrides]
-rusher = "psycho.art"
-marksman = "marauder.art"
-charger = "goliath.art"
-leaper = "skag.art"
-sapper = "suicide_psycho.art"
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster.
+# ═══════════════════════════════════════════════════════════════════
 
-[sprite_palettes.rusher]
+# Psycho — buzz-axe screaming sprinter. Rusher-backed, bumped speed
+# for the committed sprint, a little more HP because Psychos absorb
+# more than bandit grunts.
+[units.psycho]
+archetype = "rusher"
+display_name = "Psycho"
+hp = 70
+speed = 26.0
+touch_damage = 14
+sprite = "psycho.art"
+[units.psycho.palette]
 D = "#0a0a0a"
 M = "#f0f0e8"
 E = "#101010"
@@ -63,29 +56,74 @@ B = "#e8a060"
 A = "#b85020"
 X = "#808080"
 
-[sprite_palettes.marksman]
+# Marauder — goggled SMG bandit. Marksman-backed with an SMG-burst
+# profile (fast, wide, short-range). Wears the "Badass" goggle +
+# bandit mask silhouette.
+[units.marauder]
+archetype = "marksman"
+display_name = "Marauder"
+hp = 70
+speed = 13.0
+ranged_damage = 6
+preferred_distance = 26.0
+sprite = "marauder.art"
+[units.marauder.palette]
 D = "#0a0a0a"
 B = "#e8b038"
 E = "#40e0ff"
 G = "#202020"
 J = "#8a4020"
 R = "#303030"
+[units.marauder.ranged_profile]
+# SMG spray — 5-round fast burst, quick reload. Different from
+# Tarkov Operator AK (3-round at 0.14) by having wider burst but
+# less per-round damage.
+tell = 0.2
+shot_cooldown = 0.1
+mag_size = 5
+reload = 1.8
 
-[sprite_palettes.charger]
+# Goliath — caged-helmet tank. Charger-backed with big HP for the
+# "enrage when you knock off the helmet" Borderlands moment.
+[units.goliath]
+archetype = "charger"
+display_name = "Goliath"
+hp = 180
+speed = 20.0
+touch_damage = 24
+sprite = "goliath.art"
+[units.goliath.palette]
 D = "#0a0a0a"
 H = "#808080"
 E = "#ff3020"
 B = "#f0a830"
 A = "#b8601a"
 
-[sprite_palettes.leaper]
+# Skag — quadruped hinged-jaw pack beast. Leaper-backed for the
+# mid-air lunge.
+[units.skag]
+archetype = "leaper"
+display_name = "Skag"
+hp = 55
+speed = 18.0
+touch_damage = 22
+sprite = "skag.art"
+[units.skag.palette]
 D = "#0a0a0a"
 B = "#d87030"
 M = "#8a1a10"
 E = "#ffe030"
 S = "#403020"
 
-[sprite_palettes.sapper]
+# Suicide Psycho — grenade-strapped screamer. Sapper-backed; detonates
+# on contact in a breach-style explosion.
+[units.suicide_psycho]
+archetype = "sapper"
+display_name = "Suicide Psycho"
+hp = 40
+speed = 22.0
+sprite = "suicide_psycho.art"
+[units.suicide_psycho.palette]
 D = "#0a0a0a"
 M = "#f0f0e8"
 E = "#101010"
@@ -93,3 +131,34 @@ B = "#e8a060"
 G = "#50a030"
 X = "#ff4020"
 
+# Badass Goliath — the miniboss. Pinkie-backed with absurd HP — the
+# "you emptied a full mag into it, why is it still running" moment.
+[units.badass_goliath]
+archetype = "pinkie"
+display_name = "Badass Goliath"
+hp = 380
+speed = 18.0
+touch_damage = 30
+[units.badass_goliath.palette]
+D = "#0a0a0a"
+H = "#a8a8a8"
+E = "#ff2020"
+B = "#f8c040"
+A = "#c86820"
+T = "#806030"
+W = "#ffe060"
+M = "#302418"
+
+# Nomad — warchief with a shield, screaming to rally the pack.
+# Howler-backed.
+[units.nomad]
+archetype = "howler"
+display_name = "Nomad"
+hp = 90
+touch_damage = 0
+[units.nomad.palette]
+D = "#0a0a0a"
+B = "#e8a060"
+A = "#b85020"
+E = "#ff2020"
+G = "#303030"

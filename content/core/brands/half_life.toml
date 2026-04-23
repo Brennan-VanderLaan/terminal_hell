@@ -3,6 +3,13 @@
 # paramilitary (Overwatch, Metrocops). The conversion chain mirrors
 # our Floodling system — parasites convert fodder into stronger
 # zombies. The "cascade was your fault" brand.
+#
+# Converted to the BrandUnit authoring shape: each spawn_pool entry
+# is a unit id that resolves to (archetype, stat overrides, behavior
+# overrides, sprite + palette). Stats + fire-rate + sprite are all
+# brand-scoped, so a Combine Soldier (Marksman-backed) fires 4-round
+# SMG bursts while a Tarkov Scav Sniper (also Marksman-backed) takes
+# deliberate single shots.
 
 id = "half_life"
 name = "Half-Life — Black Mesa Incident"
@@ -11,49 +18,47 @@ description = "Headcrabs convert, zombies stagger, Combine close in with rifles.
 spawn_pool = [
     "headcrab",
     "zombie",
-    "marksman",
-    "pmc",
-    "leaper",
+    "combine_soldier",
+    "combine_elite",
+    "fast_zombie",
 ]
-miniboss = "pmc"
+miniboss = "combine_elite"
 
-# Long-jump module + gravity-gun lore → Blink. Perks lean tactical:
-# QuickHands (9mm AR cadence), Survivor (HEV suit plates), IronWill
-# (the anomalous materials drain sanity).
 signature_traversal = "blink"
 signature_perks = ["quick_hands", "survivor", "iron_will"]
 
 [spawn_weights]
-# Headcrab parasites — leap-attach → zombie conversion after gestation.
-# B4 upgraded from skinned Floodlings to the dedicated Headcrab
-# archetype so the brand's canonical behavior lives in its own registry
-# entry, not shared with the Flood faction.
 headcrab = 4
-# Converted shamblers — marines post-gestation. Dedicated Zombie
-# archetype replaces the skinned Rusher so its stats + behavior are
-# self-describing and can be tuned without touching Rusher.
 zombie = 3
-# Combine Soldier / Metrocop — ranged riflemen.
-marksman = 3
-# Elite Combine / Overwatch — heavier armored push.
-pmc = 2
-# Fast Zombie / Houndeye pounce.
-leaper = 2
+combine_soldier = 3
+combine_elite = 2
+fast_zombie = 2
 
-# ── Brand sprite overrides ─────────────────────────────────────────
-# Half-Life: Xen biology (headcrab crown) + Combine paramilitary
-# (cold blue-black armor, orange visor slit). Art lives in
-# content/core/art/half_life/.
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster — each entry overrides backing archetype defaults.
+# ═══════════════════════════════════════════════════════════════════
 
-[sprite_overrides]
-zombie = "headcrab_zombie.art"
-marksman = "combine_soldier.art"
-pmc = "combine_elite.art"
-headcrab = "headcrab.art"
-leaper = "fast_zombie.art"
+# Headcrab — the parasite that starts the whole conversion chain.
+# Stats pulled straight from the Headcrab archetype since that was
+# authored specifically for Half-Life; the BrandUnit entry is mostly
+# a passthrough that binds sprite + display name.
+[units.headcrab]
+archetype = "headcrab"
+display_name = "Headcrab"
+sprite = "headcrab.art"
+[units.headcrab.palette]
+L = "#7a2814"
+B = "#c85038"
+E = "#ffe040"
+M = "#1a0806"
+D = "#4a1408"
 
-# Headcrab Zombie — shambling host with the crab clinging to its skull.
-[sprite_palettes.zombie]
+# Headcrab Zombie — the shambling post-conversion marine.
+[units.zombie]
+archetype = "zombie"
+display_name = "Headcrab Zombie"
+sprite = "headcrab_zombie.art"
+[units.zombie.palette]
 H = "#c84830"
 C = "#3a1008"
 E = "#ffe040"
@@ -64,8 +69,18 @@ R = "#7a1a14"
 D = "#4a5036"
 S = "#241810"
 
-# Combine Soldier — cold blue-black tactical with the orange goggle eye.
-[sprite_palettes.marksman]
+# Combine Soldier — Overwatch rifleman. Burst-firing SMG cadence is
+# the canonical Combine feel (vs the old deliberate Marksman shot
+# every 3.5s). 4-round bursts @ ~8 rounds/sec, then a 1.8s reload.
+[units.combine_soldier]
+archetype = "marksman"
+display_name = "Combine Soldier"
+hp = 90
+speed = 13.0
+ranged_damage = 6
+preferred_distance = 32.0
+sprite = "combine_soldier.art"
+[units.combine_soldier.palette]
 H = "#283040"
 V = "#ff7820"
 M = "#141820"
@@ -76,9 +91,27 @@ A = "#1e2230"
 E = "#78e0ff"
 R = "#1a1410"
 S = "#0c0c10"
+[units.combine_soldier.ranged_profile]
+# Short shoulder-up tell on burst start, 4 rapid rounds, reload.
+tell = 0.25
+shot_cooldown = 0.12
+mag_size = 4
+reload = 1.8
 
-# Combine Elite — stark white armor, glowing shield core.
-[sprite_palettes.pmc]
+# Combine Elite — white-armor Overwatch. Heavier plates, slower to
+# reposition, fires a tighter 3-round burst with more damage per
+# round. Carries the shield-break primitive on melee for the
+# "energy-ball pulse" reference.
+[units.combine_elite]
+archetype = "pmc"
+display_name = "Combine Elite"
+hp = 240
+speed = 10.0
+touch_damage = 24
+ranged_damage = 10
+preferred_distance = 36.0
+sprite = "combine_elite.art"
+[units.combine_elite.palette]
 H = "#e4e8ec"
 V = "#ff8830"
 M = "#2c3040"
@@ -90,17 +123,24 @@ E = "#80ecff"
 C = "#ffb040"
 R = "#1a1410"
 S = "#14141a"
+[units.combine_elite.ranged_profile]
+# Longer tell, fewer rounds per burst, longer reload — reads as
+# heavier and more deliberate than the grunt.
+tell = 0.4
+shot_cooldown = 0.18
+mag_size = 3
+reload = 2.5
 
-# Headcrab alone — four splayed legs, curled maw.
-[sprite_palettes.headcrab]
-L = "#7a2814"
-B = "#c85038"
-E = "#ffe040"
-M = "#1a0806"
-D = "#4a1408"
-
-# Fast Zombie — flayed red meat, skeletal ribs exposed.
-[sprite_palettes.leaper]
+# Fast Zombie — ribcage-exposed, sprint-lunge attacker. Speed boost
+# over the default Leaper + lower HP (the flayed biology is fragile).
+[units.fast_zombie]
+archetype = "leaper"
+display_name = "Fast Zombie"
+hp = 48
+speed = 19.0
+touch_damage = 18
+sprite = "fast_zombie.art"
+[units.fast_zombie.palette]
 B = "#c8281c"
 E = "#ffd848"
 M = "#2a0404"
@@ -108,4 +148,3 @@ D = "#5a0a06"
 W = "#eae0c4"
 R = "#7a1410"
 C = "#30d8ff"
-

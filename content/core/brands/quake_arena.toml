@@ -1,40 +1,51 @@
-# Quake — Arena death-match. Fast twitchy enemies with
-# rocket-jumping logic pressure. Rocketeers + Chargers dominate;
-# sparse Sentinel placements gate sightlines.
+# Quake — Arena death-match. Fast twitchy enemies with rocket-jumping
+# logic pressure. Gladiators sprinting, Knights saw-arming forward,
+# Rocketeer Grunts spamming RL, Railgun Snipers holding sightlines,
+# Tank Jr quad-leg bio-tanks pouncing.
+#
+# Converted to BrandUnit authoring shape.
 
 id = "quake_arena"
 name = "Quake — Arena"
 description = "Rocket-spam + hyper-aggressive chargers. Twitch combat."
 
-spawn_pool = ["rusher", "charger", "rocketeer", "sentinel", "leaper"]
-miniboss = "miniboss"
+spawn_pool = [
+    "gladiator",
+    "knight",
+    "railgun_sniper",
+    "grunt_rl",
+    "tank_jr",
+    "vore",
+    "fiend",
+]
+miniboss = "cyberdemon"
 
-# The original twitch-dash game → Dash. Perks max out cadence:
-# QuickHands for rail-time, Adrenaline stacking with every hit,
-# Rampage stacking with every frag. Pure aggression loop.
 signature_traversal = "dash"
 signature_perks = ["quick_hands", "adrenaline", "rampage"]
 
 [spawn_weights]
-rusher = 3
-charger = 3
-rocketeer = 2
-sentinel = 1
-leaper = 2
+gladiator = 3
+knight = 3
+grunt_rl = 2
+railgun_sniper = 1
+tank_jr = 2
+vore = 1
+fiend = 2
 
-# ── Brand sprite overrides ─────────────────────────────────────────
-# Quake-branded enemies render as Id-FPS arena gladiators — chrome
-# plating, blood-red flesh, industrial grays, bright plasma accents.
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster.
+# ═══════════════════════════════════════════════════════════════════
 
-[sprite_overrides]
-rusher = "gladiator.art"
-charger = "knight.art"
-marksman = "railgun_sniper.art"
-rocketeer = "grunt_rl.art"
-leaper = "tank_jr.art"
-
-# Gladiator rusher — spiked chrome armor over red muscle, sprinting.
-[sprite_palettes.rusher]
+# Gladiator — spiked chrome armor over red muscle. Rusher-backed with
+# arena sprint speed.
+[units.gladiator]
+archetype = "rusher"
+display_name = "Gladiator"
+hp = 70
+speed = 28.0
+touch_damage = 14
+sprite = "gladiator.art"
+[units.gladiator.palette]
 B = "#b82418"
 D = "#5a1008"
 E = "#ffd038"
@@ -42,8 +53,16 @@ S = "#d8dae0"
 H = "#f0f2f6"
 R = "#ff4028"
 
-# Knight charger — bigger gladiator with whirling saw-blade arm.
-[sprite_palettes.charger]
+# Knight — larger gladiator with a whirling saw-blade arm. Charger-
+# backed.
+[units.knight]
+archetype = "charger"
+display_name = "Knight"
+hp = 130
+speed = 26.0
+touch_damage = 26
+sprite = "knight.art"
+[units.knight.palette]
 B = "#a01c14"
 D = "#500c06"
 E = "#ff2020"
@@ -52,29 +71,99 @@ H = "#808890"
 R = "#ffe040"
 W = "#e8ecf0"
 
-# Railgun sniper — tall chrome cyborg, glowing plasma coils.
-[sprite_palettes.marksman]
+# Railgun Sniper — tall chrome cyborg, glowing plasma coils.
+# Marksman-backed; hitscan railgun with a distinctive slug profile
+# (fast fire, huge damage, quick recovery — Quake rails are brutal).
+[units.railgun_sniper]
+archetype = "marksman"
+display_name = "Railgun Sniper"
+hp = 60
+speed = 9.0
+ranged_damage = 44
+preferred_distance = 110.0
+sprite = "railgun_sniper.art"
+[units.railgun_sniper.palette]
 B = "#909098"
 D = "#3a3c44"
 E = "#40e8ff"
 S = "#d8dae0"
 P = "#80f0ff"
 R = "#ff2020"
+[units.railgun_sniper.ranged_profile]
+# Rail whip-crack — 0.5s tell, 2s cooldown. Faster than a human
+# sniper because this is Quake; the arcing plasma is CALCULATED.
+tell = 0.5
+shot_cooldown = 2.0
+mag_size = 1
+reload = 0.0
 
-# Grunt rocketeer — chunky red armor plates, shoulder launcher.
-[sprite_palettes.rocketeer]
+# Grunt RL — chunky red armor plates, shoulder rocket launcher.
+# Rocketeer-backed with a faster rocket cadence (Quake RL-spam).
+[units.grunt_rl]
+archetype = "rocketeer"
+display_name = "Rocket Grunt"
+hp = 90
+speed = 12.0
+preferred_distance = 36.0
+sprite = "grunt_rl.art"
+[units.grunt_rl.palette]
 B = "#b02018"
 D = "#5a1008"
 E = "#ffd038"
 S = "#b0b4bc"
 R = "#404248"
 P = "#ff8020"
+[units.grunt_rl.ranged_profile]
+tell = 0.3
+shot_cooldown = 1.6
+mag_size = 1
+reload = 0.0
 
-# Tank Jr. leaper — squat quad-leg bio-tank, plasma core.
-[sprite_palettes.leaper]
+# Tank Jr — squat quad-leg bio-tank with plasma core. Leaper-backed
+# for the lunge silhouette.
+[units.tank_jr]
+archetype = "leaper"
+display_name = "Tank Jr."
+hp = 85
+speed = 15.0
+touch_damage = 24
+sprite = "tank_jr.art"
+[units.tank_jr.palette]
 B = "#8a2418"
 D = "#401008"
 E = "#ffe040"
 S = "#b0b4bc"
 P = "#60f0ff"
 
+# Vore — spiked purple ball-gun floater. Orb-backed; chains on death.
+[units.vore]
+archetype = "orb"
+display_name = "Vore"
+hp = 110
+sprite = "vore.art"
+[units.vore.palette]
+B = "#6a20a0"
+D = "#2a0840"
+E = "#ffe040"
+F = "#ff8020"
+
+# Fiend — saber-tooth demon. Phaser-backed for the signature Quake
+# Fiend "leap across half the arena" move.
+[units.fiend]
+archetype = "phaser"
+display_name = "Fiend"
+hp = 80
+speed = 14.0
+touch_damage = 28
+sprite = "fiend.art"
+[units.fiend.palette]
+B = "#8a2418"
+D = "#2a0808"
+E = "#ffe040"
+H = "#c84020"
+C = "#400808"
+
+# Cyberdemon — the arena apex miniboss.
+[units.cyberdemon]
+archetype = "miniboss"
+display_name = "Cyberdemon"

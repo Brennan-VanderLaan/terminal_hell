@@ -1,52 +1,65 @@
 # Tarkov — Scavs + PMCs. Patient riflemen, armored operators,
 # occasional Killa boss encounters. The "loud shots, loot the mag"
 # brand.
+#
+# Converted to the BrandUnit authoring shape. The old tarkov_scavs
+# brand had one "rusher" that felt generic; this split breaks it
+# into three scav loadouts (pistol/shotgun/melee) that share the
+# Rusher AI but feel distinct in hp/speed/damage, plus a Scav Sniper
+# (Marksman-backed) that deliberately contrasts the Half-Life
+# Combine Soldier — same archetype, very different cadence (slow
+# deliberate single shots vs 4-round SMG bursts). That's the
+# showcase of "archetype is the sim primitive; the brand authors
+# the unit."
 
 id = "tarkov_scavs"
 name = "Tarkov — Scavs + Operators"
 description = "Patient scav fire teams. Rare Killa sightings mean run."
 
-spawn_pool = ["rusher", "marksman", "pmc", "sentinel", "killa", "sapper"]
+spawn_pool = [
+    "pistol_scav",
+    "shotgun_scav",
+    "melee_scav",
+    "scav_sniper",
+    "operator",
+    "fortified_dshk",
+    "killa",
+    "scav_bomber",
+]
 miniboss = "killa"
 
-# Grounded mil-sim movement → slide. Perk pool biases toward
-# survivability + sustained trigger discipline: more armor, flanks
-# that punch past low-HP moments, QuickHands to win the cross-map
-# trade.
 signature_traversal = "slide"
 signature_perks = ["survivor", "last_stand", "quick_hands"]
 
 [spawn_weights]
-# Fodder scavs — the "player-1 Mosin" tier.
-rusher = 3
-# Tactical long-range riflemen — THE Tarkov sniper fantasy. Weight
-# bumped so a scav sightline from across the arena feels real, not
-# rare. Paired with the extended 2.4× engagement range in
-# try_ranged_attack, marksmen now credibly threaten from >200 tiles.
-marksman = 5
-# PMCs close the gap in kit.
-pmc = 3
-# Fixed DSHK positions — long-range sniper turrets. Preferred
-# distance cranked to 120 so they set up in a corner + shoot across
-# the arena.
-sentinel = 2
-# Killa rolls into the pool late-wave.
+# Loadout distribution: pistol scav is the fodder-tier, shotgun close
+# assault, melee a rare risk-heavy variant. Snipers show up less
+# often than the gun-scavs so the long-range threat feels earned.
+pistol_scav = 4
+shotgun_scav = 2
+melee_scav = 1
+scav_sniper = 3
+operator = 2
+fortified_dshk = 2
 killa = 1
-# Scav with a pipe-bomb.
-sapper = 1
+scav_bomber = 1
 
-# ── Brand sprite overrides ─────────────────────────────────────────
-# Muddy brown-beige scav fodder, plated BEAR/USEC operators.
-# Killa keeps his hardcoded sprite (already bespoke). Art files
-# in content/core/art/tarkov_scavs/.
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster.
+# ═══════════════════════════════════════════════════════════════════
 
-[sprite_overrides]
-rusher = "scav.art"
-marksman = "scav_sniper.art"
-pmc = "operator.art"
-
-# Scav — grubby balaclava + gas-mask filter, mismatched webbing.
-[sprite_palettes.rusher]
+# Pistol Scav — fodder tier. Lower HP than the base Rusher, slightly
+# faster (balaclava hustles), pistol-damage contact via
+# touch_damage. Backed by Rusher AI so they close-and-shoot like
+# the archetype intends.
+[units.pistol_scav]
+archetype = "rusher"
+display_name = "Pistol Scav"
+hp = 55
+speed = 24.0
+touch_damage = 12
+sprite = "scav.art"
+[units.pistol_scav.palette]
 H = "#4a3a24"
 M = "#1e1a14"
 F = "#786244"
@@ -59,8 +72,66 @@ A = "#2a1e10"
 P = "#4a3828"
 S = "#141008"
 
-# Scav sniper — lanky silhouette + scoped long-barrel rifle held sideways.
-[sprite_palettes.marksman]
+# Shotgun Scav — more HP, slower, devastating touch damage at
+# contact range (the pump-shotgun slug reads as melee in the sim's
+# contact-damage layer).
+[units.shotgun_scav]
+archetype = "rusher"
+display_name = "Shotgun Scav"
+hp = 95
+speed = 18.0
+touch_damage = 24
+hit_radius = 2.6
+reach = 2.6
+sprite = "scav.art"
+[units.shotgun_scav.palette]
+H = "#5a3420"
+M = "#1a140e"
+F = "#8a6a4a"
+V = "#2e2214"
+T = "#5c3c24"
+D = "#3a2212"
+J = "#4a3622"
+B = "#746040"
+A = "#2e1e10"
+P = "#503c28"
+S = "#141008"
+
+# Melee Scav — no firearm, commits hard. Fastest scav variant,
+# fragile, but high contact damage. The "scav with a wrench" type.
+[units.melee_scav]
+archetype = "rusher"
+display_name = "Melee Scav"
+hp = 42
+speed = 28.0
+touch_damage = 20
+sprite = "scav.art"
+[units.melee_scav.palette]
+H = "#6a4830"
+M = "#1e1610"
+F = "#9a7850"
+V = "#32261a"
+T = "#6c4a30"
+D = "#402818"
+J = "#544030"
+B = "#826a48"
+A = "#322414"
+P = "#5c4230"
+S = "#181008"
+
+# Scav Sniper — THE Tarkov sniper fantasy. Scoped in on the far
+# edge of the arena, fires one deliberate shot every ~4 seconds,
+# doesn't reposition. Contrasts the Half-Life Combine Soldier which
+# uses the SAME Marksman archetype but a burst-fire loadout.
+[units.scav_sniper]
+archetype = "marksman"
+display_name = "Scav Sniper"
+hp = 50
+speed = 6.0
+ranged_damage = 36
+preferred_distance = 110.0
+sprite = "scav_sniper.art"
+[units.scav_sniper.palette]
 H = "#4a3a24"
 M = "#1e1a14"
 F = "#786244"
@@ -75,9 +146,27 @@ K = "#4a4238"
 O = "#6a6254"
 P = "#4a3828"
 S = "#141008"
+[units.scav_sniper.ranged_profile]
+# Long deliberate scope-in, single heavy shot, slow reacquire.
+# Mag 1 = single shot per cycle, reload unused.
+tell = 1.0
+shot_cooldown = 3.8
+mag_size = 1
+reload = 0.0
 
-# PMC operator — heavy plate carrier, ballistic helmet, night-vision mounts.
-[sprite_palettes.pmc]
+# Operator — BEAR/USEC PMC. Plated, ranged-capable, close-combat
+# heavy. Backed by Pmc archetype (default tactical stats) with a
+# 3-round rifle burst override and night-vision silhouette art.
+[units.operator]
+archetype = "pmc"
+display_name = "Operator"
+hp = 260
+speed = 12.0
+touch_damage = 22
+ranged_damage = 9
+preferred_distance = 26.0
+sprite = "operator.art"
+[units.operator.palette]
 H = "#3a4432"
 N = "#1a1e18"
 V = "#4c5c48"
@@ -90,4 +179,42 @@ K = "#8a983a"
 G = "#787050"
 B = "#1c201a"
 S = "#0a0c08"
+[units.operator.ranged_profile]
+# AK burst fire — 3-round shots, a beat between for recoil control.
+tell = 0.3
+shot_cooldown = 0.14
+mag_size = 3
+reload = 2.2
 
+# Fortified DShK — dug-in heavy machine gun emplacement. Backed by
+# Sentinel archetype (stationary + hitscan). Fires faster than the
+# default Sentinel to read as sustained suppression rather than
+# sniper fire.
+[units.fortified_dshk]
+archetype = "sentinel"
+display_name = "Fortified DShK"
+hp = 200
+ranged_damage = 18
+preferred_distance = 120.0
+[units.fortified_dshk.ranged_profile]
+# Beltfed — 8-round burst, longer reload. The "oh god, that corner
+# is a kill-zone" feel.
+tell = 0.3
+shot_cooldown = 0.15
+mag_size = 8
+reload = 2.8
+
+# Killa — Tarkov boss. Archetype already tuned for the 60-round
+# RPK-16 hail-of-bullets cadence; keep the archetype default here.
+[units.killa]
+archetype = "killa"
+display_name = "Killa"
+
+# Scav Bomber — the "pipe-bomb scav" variant. Sapper-backed with
+# a faster approach so the suicide rush feels panicked rather than
+# plodding.
+[units.scav_bomber]
+archetype = "sapper"
+display_name = "Scav Bomber"
+hp = 45
+speed = 22.0

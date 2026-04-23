@@ -431,6 +431,18 @@ pub struct Enemy {
     /// the `growth_into` self-swap when the threshold is reached;
     /// unused by enemies whose Consume declares no growth.
     pub consumed_hp: u32,
+    /// BrandUnit identity. When a brand's `[units.<id>]` roster spawned
+    /// this enemy, `unit_id` holds the unit id (e.g. "pistol_scav")
+    /// for sprite lookup, kill-feed display name, and corpse
+    /// coherence. `None` for enemies spawned via legacy
+    /// archetype-only paths or for convert-swap results in brands
+    /// with no matching unit.
+    pub unit_id: Option<crate::tag::Tag>,
+    /// Per-unit ranged-fire cadence override. Populated at spawn
+    /// from [`BrandUnit::ranged_profile`] when present; takes
+    /// precedence over the archetype default in
+    /// [`Enemy::ranged_profile`].
+    pub ranged_profile_override: Option<RangedProfile>,
 }
 
 impl Enemy {
@@ -487,14 +499,15 @@ impl Enemy {
                 crate::tag::Tag::new(TEAM_FLOOD)
             } else if matches!(archetype, Archetype::PlayerTurret) {
                 crate::tag::Tag::new(TEAM_SURVIVOR)
-            } else if matches!(archetype, Archetype::Headcrab | Archetype::Floodling) {
-                // Both Floodling and Headcrab are parasites — one team
-                // so cross-faction targeting doesn't pick other
-                // parasites as prey when they're in the same bucket.
-                // Pre-B6 Floodling was on "horde" team with a
-                // hardcoded dispatch that ignored team routing; the
-                // generic dispatch respects teams, so Floodlings need
-                // their own bucket.
+            } else if matches!(
+                archetype,
+                Archetype::Headcrab | Archetype::Floodling | Archetype::Zombie
+            ) {
+                // Floodling + Headcrab are parasites. Zombie joins
+                // the parasite team too — the headcrab that mounted
+                // it IS the zombie's head, so headcrabs shouldn't
+                // consider their own creations prey. Semantically
+                // they're all "infected" together.
                 crate::tag::Tag::new("parasite")
             } else if matches!(archetype, Archetype::Rat | Archetype::DireRat) {
                 crate::tag::Tag::new("swarm")
@@ -505,13 +518,16 @@ impl Enemy {
                 crate::tag::TagSet::from_strs(&[TEAM_SURVIVOR, TEAM_HORDE])
             } else if matches!(archetype, Archetype::PlayerTurret) {
                 crate::tag::TagSet::from_strs(&[TEAM_HORDE, TEAM_FLOOD])
-            } else if matches!(archetype, Archetype::Headcrab | Archetype::Floodling) {
-                // Parasites hunt both survivors + horde. Floodling
-                // previously relied on a hardcoded dispatch that
-                // ignored the hostile set; post-B6 the generic
-                // Convert path respects hostiles, so the Floodling's
-                // target pool has to be declared.
-                crate::tag::TagSet::from_strs(&[TEAM_SURVIVOR, TEAM_HORDE])
+            } else if matches!(
+                archetype,
+                Archetype::Headcrab | Archetype::Floodling | Archetype::Zombie
+            ) {
+                // Parasite faction hunts survivors + horde + swarm,
+                // skipping their own team ("parasite") so a headcrab
+                // doesn't bite the zombie it just made. Rats (swarm)
+                // are still hostile — the parasite vs vermin rivalry
+                // is on-brand.
+                crate::tag::TagSet::from_strs(&[TEAM_SURVIVOR, TEAM_HORDE, "swarm"])
             } else if matches!(archetype, Archetype::Rat | Archetype::DireRat) {
                 // Starving rats eat literally everything alive — the
                 // one archetype in the game with a 4-way hostile list.
@@ -524,13 +540,48 @@ impl Enemy {
             } else {
                 crate::tag::TagSet::from_strs(&[TEAM_SURVIVOR])
             },
-            mag: if matches!(archetype, Archetype::Killa) { 60 } else { 0 },
+            // Burst-fire archetypes start with a full mag. The generic
+            // try_ranged_attack loop tops up via reload when the mag
+            // empties. Single-shot archetypes stay at 0; the mag
+            // field is ignored for them.
+            mag: match archetype {
+                Archetype::Killa => 60,
+                Archetype::Revenant => 2,
+                _ => 0,
+            },
             reload_timer: 0.0,
             grenade_cooldown: if matches!(archetype, Archetype::Killa) { 4.0 } else { 0.0 },
             director_override: None,
             infection_state: None,
             consumed_hp: 0,
+            unit_id: None,
+            ranged_profile_override: None,
         }
+    }
+
+    /// Post-spawn builder: attach a BrandUnit identity (brand + unit
+    /// ids) plus an optional ranged-fire cadence override pulled
+    /// from the BrandUnit's `[ranged_profile]` table. Used by the
+    /// wave-spawn path and convert-swap terminals to keep sprite,
+    /// display name, and fire rhythm lore-coherent per brand unit.
+    pub fn with_brand_unit(
+        mut self,
+        brand_id: Option<crate::tag::Tag>,
+        unit_id: Option<crate::tag::Tag>,
+        ranged_profile_override: Option<RangedProfile>,
+    ) -> Self {
+        self.brand_id = brand_id;
+        self.unit_id = unit_id;
+        self.ranged_profile_override = ranged_profile_override;
+        // Mag size depends on the per-unit override's mag_size when
+        // present; otherwise the archetype default handled in spawn()
+        // above already set it. This keeps a brand unit like "SMG
+        // trooper" backed by the Marksman archetype but firing short
+        // bursts consistent with its override.
+        if let Some(p) = self.ranged_profile_override {
+            self.mag = p.mag_size;
+        }
+        self
     }
 
     pub fn speed(&self) -> f32 {
@@ -674,6 +725,28 @@ impl Enemy {
         self.touch_cooldown = (self.touch_cooldown - dt).max(0.0);
         self.attack_cooldown = (self.attack_cooldown - dt).max(0.0);
         self.hit_flash = (self.hit_flash - dt * 6.0).max(0.0);
+        // Burst-fire reload cycle. When reload_timer is live, firing
+        // is locked; on timer expiry we refill the mag back to the
+        // burst size — from the per-unit override when a BrandUnit
+        // supplied one, else the archetype default (Killa=60,
+        // Revenant=2).
+        if self.reload_timer > 0.0 {
+            self.reload_timer = (self.reload_timer - dt).max(0.0);
+            if self.reload_timer <= 0.0 {
+                let mag_size = if let Some(p) = self.ranged_profile_override {
+                    p.mag_size
+                } else {
+                    match self.archetype {
+                        Archetype::Killa => 60,
+                        Archetype::Revenant => 2,
+                        _ => 0,
+                    }
+                };
+                if mag_size > 0 {
+                    self.mag = mag_size;
+                }
+            }
+        }
         if self.tell_timer > 0.0 {
             self.tell_timer = (self.tell_timer - dt).max(0.0);
         }
@@ -811,6 +884,63 @@ impl Enemy {
             return None;
         }
 
+        // Per-archetype firing profile. Drives tell duration,
+        // inter-shot cooldown, burst size (mag), and reload time
+        // so each ranged archetype reads lore-accurate:
+        //   Marksman — scoped sniper (slow, deliberate).
+        //   Sentinel — mech turret (steady suppression).
+        //   PlayerTurret — fast auto-turret, smaller caliber.
+        //   Rocketeer — single-rocket windup cadence.
+        //   Revenant — Doom twin-cannon burst (2 rockets then reload).
+        //   Killa    — Tarkov LMG hail (60-round mag, 3s reload).
+        let profile = self.ranged_profile();
+
+        // Burst-fire path — used when mag_size > 1. Killa + Revenant
+        // both route here. First shot of a burst eats a short tell
+        // (shoulder-up for the LMG, shoulder-cannon warm-up for the
+        // Revenant); subsequent shots within the burst fire on
+        // `profile.shot_cooldown` with no per-shot tell. When the
+        // mag empties, `reload_timer` locks firing until `update`
+        // refills the mag.
+        if profile.mag_size > 1 {
+            if self.reload_timer > 0.0 {
+                return None;
+            }
+            if self.attack_cooldown > 0.0 {
+                return None;
+            }
+            // Fresh mag → one burst-start tell before the first shot.
+            if self.mag >= profile.mag_size
+                && self.tell_timer <= 0.0
+                && self.tell_target == (0.0, 0.0)
+            {
+                self.tell_timer = profile.tell;
+                self.tell_target = player;
+                return None;
+            }
+            if self.tell_timer > 0.0 {
+                return None;
+            }
+            // Fire. Clearing tell_target makes the "mag full && no
+            // target" guard above fire exactly once per reload
+            // cycle.
+            self.tell_target = (0.0, 0.0);
+            self.attack_cooldown = profile.shot_cooldown;
+            self.mag = self.mag.saturating_sub(1);
+            if self.mag == 0 {
+                self.reload_timer = profile.reload;
+            }
+            return Some(RangedShot {
+                from: (self.x, self.y),
+                to: player,
+                damage: self.ranged_damage(),
+            });
+        }
+
+        // Single-shot path — standard sniper/turret rhythm. Per-
+        // archetype tell + cooldown instead of the old global
+        // 0.45s / 2.2s defaults.
+
         // Mid-tell: keep winding up, no fire yet.
         if self.tell_timer > 0.0 {
             return None;
@@ -820,7 +950,7 @@ impl Enemy {
         if self.tell_target != (0.0, 0.0) {
             let target = self.tell_target;
             self.tell_target = (0.0, 0.0);
-            self.attack_cooldown = 2.2;
+            self.attack_cooldown = profile.shot_cooldown;
             if arena.has_line_of_sight((self.x, self.y), target) {
                 return Some(RangedShot {
                     from: (self.x, self.y),
@@ -833,10 +963,77 @@ impl Enemy {
 
         // No active tell and cooldown ready → start one.
         if self.attack_cooldown <= 0.0 {
-            self.tell_timer = 0.45;
+            self.tell_timer = profile.tell;
             self.tell_target = player;
         }
         None
+    }
+
+    /// Firing cadence for this ranged enemy. Per-unit
+    /// `ranged_profile_override` (installed by
+    /// [`Enemy::with_brand_unit`] from a BrandUnit's TOML) wins over
+    /// the archetype default table below — that's how Half-Life's
+    /// burst-firing Combine Soldier differs from Tarkov's
+    /// deliberate Scav Sniper despite both using the Marksman sim
+    /// archetype.
+    fn ranged_profile(&self) -> RangedProfile {
+        if let Some(p) = self.ranged_profile_override {
+            return p;
+        }
+        match self.archetype {
+            Archetype::Marksman => RangedProfile {
+                tell: 0.85,
+                shot_cooldown: 3.5,
+                mag_size: 1,
+                reload: 0.0,
+            },
+            Archetype::Sentinel => RangedProfile {
+                tell: 0.25,
+                shot_cooldown: 1.2,
+                mag_size: 1,
+                reload: 0.0,
+            },
+            Archetype::PlayerTurret => RangedProfile {
+                tell: 0.2,
+                shot_cooldown: 0.8,
+                mag_size: 1,
+                reload: 0.0,
+            },
+            // Rocketeer still fires via the Rocket projectile path
+            // in the sim (not try_ranged_attack's hitscan), but we
+            // keep a profile here for consistency with the table.
+            // The rocket-specific cooldown is in the sim-side
+            // dispatch; these values are unused today.
+            Archetype::Rocketeer => RangedProfile {
+                tell: 0.7,
+                shot_cooldown: 3.5,
+                mag_size: 1,
+                reload: 0.0,
+            },
+            Archetype::Revenant => RangedProfile {
+                tell: 0.3,
+                shot_cooldown: 0.5,
+                mag_size: 2,
+                reload: 2.0,
+            },
+            Archetype::Killa => RangedProfile {
+                tell: 0.25,
+                shot_cooldown: 0.1,
+                mag_size: 60,
+                reload: 3.0,
+            },
+            // Fallback for non-ranged archetypes — try_ranged_attack
+            // bails before this is consulted for them, but keep a
+            // safe default so any future ranged archetype added
+            // without an explicit tune doesn't get zero-cooldown
+            // spam.
+            _ => RangedProfile {
+                tell: 0.45,
+                shot_cooldown: 2.2,
+                mag_size: 1,
+                reload: 0.0,
+            },
+        }
     }
 
     pub fn is_ranged(&self) -> bool {
@@ -946,6 +1143,7 @@ impl Enemy {
             let mut s = sprite::enemy_sprite_branded(
                 self.archetype,
                 self.brand_id.map(|t| t.as_str()),
+                self.unit_id.map(|t| t.as_str()),
                 content,
             );
             if self.hit_flash > 0.0 {
@@ -1048,6 +1246,27 @@ fn sample_sprite_coord(seed: u64, w: u16, h: u16) -> (u16, u16) {
     let sx = (seed % w) as u16;
     let sy = ((seed / w) % h) as u16;
     (sx, sy)
+}
+
+/// Per-archetype firing cadence. Lets each ranged archetype read
+/// like its canon feel — sniper vs mech turret vs LMG — without
+/// the old one-size-fits-all 0.45s tell / 2.2s cooldown defaults.
+/// Also used as a per-unit override on Enemy when a BrandUnit
+/// declares `[units.<id>.ranged_profile]`.
+#[derive(Clone, Copy, Debug)]
+pub struct RangedProfile {
+    /// Shoulder-up / scope-acquisition telegraph before a shot.
+    /// For burst-fire archetypes (mag_size > 1), this is paid
+    /// once per full mag, not per shot.
+    pub tell: f32,
+    /// Seconds of `attack_cooldown` set after a shot lands.
+    pub shot_cooldown: f32,
+    /// Shots per mag. 1 = single-shot rhythm; >1 = burst-fire
+    /// (mag + reload semantics, see `try_ranged_attack`).
+    pub mag_size: u16,
+    /// Seconds of lockout after the mag empties, before the
+    /// `update` loop refills it. 0 when `mag_size = 1`.
+    pub reload: f32,
 }
 
 pub struct RangedShot {

@@ -447,23 +447,32 @@ pub fn enemy_sprite_from_content(
     archetype: Archetype,
     content: &crate::content::ContentDb,
 ) -> Sprite {
-    enemy_sprite_branded(archetype, None, content)
+    enemy_sprite_branded(archetype, None, None, content)
 }
 
-/// Resolve a sprite with a brand preference. Lookup order:
-///   1. `(brand_id, archetype)` brand-specific override.
-///   2. `archetype_sprites[archetype]` archetype-wide art.
-///   3. Hardcoded Rust builder.
-///
-/// Called from the render path with the enemy's `brand_id`. The
-/// first tier gives Doom-branded rushers a distinct imp silhouette
-/// while Tarkov-branded rushers keep the scav look, even though
-/// both resolve to `Archetype::Rusher` at the sim layer.
+/// Resolve a sprite with brand + unit preferences. Lookup order:
+///   1. `(brand_id, unit_id)` BrandUnit sprite — the strongest
+///      precedence. Lets a brand ship multiple distinct units
+///      backed by the same archetype (pistol_scav vs shotgun_scav
+///      both using Rusher) with distinct silhouettes each.
+///   2. `(brand_id, archetype)` legacy brand-level override from the
+///      pre-BrandUnit `sprite_overrides` table. Backward compat.
+///   3. `archetype_sprites[archetype]` archetype-wide art.
+///   4. Hardcoded Rust builder.
 pub fn enemy_sprite_branded(
     archetype: Archetype,
     brand_id: Option<&str>,
+    unit_id: Option<&str>,
     content: &crate::content::ContentDb,
 ) -> Sprite {
+    if let (Some(bid), Some(uid)) = (brand_id, unit_id) {
+        if let Some(art) = content
+            .brand_unit_sprites
+            .get(&(bid.to_string(), uid.to_string()))
+        {
+            return art.clone();
+        }
+    }
     if let Some(bid) = brand_id {
         if let Some(art) = content
             .brand_sprites

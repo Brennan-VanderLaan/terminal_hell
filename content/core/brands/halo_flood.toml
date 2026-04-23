@@ -1,98 +1,97 @@
-# Flood outbreak brand: Halo Flood / general parasitic-horror lineage.
-# Floodlings convert anything they touch into Flood combat forms;
-# Flood Carriers explode into more Floodlings. Splitters + swarmlings
-# round out the disposable-biomass roster — every death is another
-# conversion vector. The "emergent faction war" brand — watch the
-# Flood team (team=flood) attack regular horde + survivors alike.
+# Halo — Flood Outbreak. Infection Forms convert hosts into Flood
+# combat forms; Flood Carriers explode into more Infection Forms;
+# fresh Marines hold the line until they become Flood themselves.
+# The "emergent faction war" brand — Flood attacks BOTH players AND
+# the uninfected horde in the same pool.
+#
+# Converted to BrandUnit authoring shape. Pre-conversion Marines use
+# the Rusher archetype but fire UNSC assault-rifle bursts via a
+# Marksman-ish ranged_profile on a ranged_damage override — wait,
+# Rusher isn't ranged, so Marines stay melee. For the shooter feel,
+# a separate UNSC Marksman backed by Marksman with an MA5B burst
+# profile fills the "holding the line with rifles" slot.
 
 id = "halo_flood"
-name = "Flood Outbreak"
+name = "Halo — Flood Outbreak"
 description = "Parasitic conversion, factional chaos, every death spawning more death."
 
 spawn_pool = [
-    "floodling",
-    "flood",
+    "infection_form",
+    "flood_combat",
     "flood_carrier",
-    "splitter",
-    "swarmling",
-    "rusher",
-    "leaper",
-    "marksman",
+    "unsc_marine",
+    "unsc_rifleman",
+    "flood_warrior",
+    "flood_splitter",
+    "flood_swarm",
 ]
-miniboss = "miniboss"
+miniboss = "flood_tank"
 
-# Conversion-dread flavor → Blink: phase past the advancing wave of
-# infected instead of fighting through it. Perks lean into the
-# horror loop: GloomShroud resists the Flood miasma, LastStand for
-# the inevitable bad frames, CorpsePulse so the infinite-kill flow
-# keeps refilling your HP.
 signature_traversal = "blink"
 signature_perks = ["gloom_shroud", "last_stand", "corpse_pulse"]
 
 [spawn_weights]
-# Flood-faction members — team=flood, hostiles=[survivor,horde].
-# These are the ones that actually make the "Flood attacks everyone"
-# fantasy land: Floodlings convert anything nearby, regular Flood +
-# Carriers hunt BOTH players AND the uninfected horde. Bumped so
-# there's always a visible Flood presence, not an occasional one.
-floodling = 6
-flood = 4
-# Carriers are the walking grenades — bumped so the Floodling-burst
-# cascade triggers often enough to read as infection pressure.
+infection_form = 6
+flood_combat = 4
 flood_carrier = 2
-# Fresh uninfected human fodder for the Floodlings to convert. When
-# a Floodling touches a Rusher, it becomes a Flood combat form —
-# the wave LITERALLY gets stronger as time passes.
-rusher = 4
-# Marine riflemen holding the line + dying screaming.
-marksman = 2
-# Flood carrier leaping out of a dark hallway — jumps feel right
-# for the conversion-horror vibe.
-leaper = 2
-# Splitters cascade into swarmlings that Floodlings then convert.
-splitter = 2
-swarmling = 2
+unsc_marine = 4
+unsc_rifleman = 2
+flood_warrior = 2
+flood_splitter = 2
+flood_swarm = 2
 
-# ── Brand sprite overrides ─────────────────────────────────────────
-# Flood silhouettes: tiny tendril-legged Infection Forms, whip-armed
-# combat forms, bloated Carriers, and fresh-meat uninfected marines
-# that haven't been converted yet. Sickly green chitin + pale bone.
-# Art lives in content/core/art/halo_flood/.
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster.
+# ═══════════════════════════════════════════════════════════════════
 
-[sprite_overrides]
-floodling = "infection_form.art"
-flood = "flood_combat.art"
-flood_carrier = "flood_carrier.art"
-rusher = "marine.art"
-
-# Infection Form — pale bulb with two glowing eye-spots and a ring of
-# dangling tendrils. The crawling conversion vector.
-[sprite_palettes.floodling]
+# Infection Form — the conversion vector. Floodling archetype default
+# (team=parasite, leaps at hosts). Bulb palette, tendril silhouette.
+[units.infection_form]
+archetype = "floodling"
+display_name = "Infection Form"
+sprite = "infection_form.art"
+[units.infection_form.palette]
 B = "#d8d0a8"
 E = "#a8ff60"
 T = "#3a5a34"
 
-# Flood combat form — infected host, torso torn open, one huge whip
-# tentacle extending from the shoulder. W = whip arm, T = belly-tear.
-[sprite_palettes.flood]
+# Flood Combat Form — post-conversion infected marine, whip-tentacle
+# arm, lurching run. Default Flood archetype.
+[units.flood_combat]
+archetype = "flood"
+display_name = "Flood Combat Form"
+sprite = "flood_combat.art"
+[units.flood_combat.palette]
 B = "#8ca878"
 D = "#2a3c26"
 W = "#5a8a4a"
 T = "#6a1828"
 C = "#1a1a12"
 
-# Flood Carrier — walking bloated sac studded with infection-form
-# pods ready to burst. S = spore-pod, C = dark foot.
-[sprite_palettes.flood_carrier]
+# Flood Carrier — bloated sac that vents Infection Forms on death.
+# Default FloodCarrier archetype.
+[units.flood_carrier]
+archetype = "flood_carrier"
+display_name = "Flood Carrier"
+sprite = "flood_carrier.art"
+[units.flood_carrier.palette]
 B = "#a8c48c"
 D = "#3a4a2a"
 S = "#6a283a"
 T = "#78905a"
 C = "#1a2014"
 
-# Uninfected Marine — UNSC silhouette: olive-green fatigues, helmet,
-# assault rifle extending from the shoulder. W = rifle barrel.
-[sprite_palettes.rusher]
+# UNSC Marine — uninfected human fodder. Rusher-backed, tagged as
+# conversion-target. When an Infection Form touches them, they flip
+# to Flood Combat via the convert primitive (game.rs `resolve_convert_into`).
+[units.unsc_marine]
+archetype = "rusher"
+display_name = "UNSC Marine"
+hp = 75
+speed = 18.0
+touch_damage = 14
+sprite = "marine.art"
+[units.unsc_marine.palette]
 H = "#3a4a2a"
 F = "#d4b48c"
 E = "#2a2018"
@@ -100,3 +99,78 @@ A = "#5a6a3a"
 W = "#2a2820"
 D = "#2a2418"
 C = "#1a1408"
+
+# UNSC Rifleman — the marksmanship half of the line. Marksman-backed
+# but with an MA5B assault-rifle burst profile (short tell, 3-round
+# burst, quick reload) — reads as "spray cover fire" not sniper.
+[units.unsc_rifleman]
+archetype = "marksman"
+display_name = "UNSC Rifleman"
+hp = 90
+speed = 12.0
+ranged_damage = 8
+preferred_distance = 28.0
+sprite = "unsc_rifleman.art"
+[units.unsc_rifleman.palette]
+H = "#3a4a2a"
+F = "#d4b48c"
+A = "#5a6a3a"
+W = "#2a2820"
+D = "#2a2418"
+M = "#1a1408"
+E = "#ffe040"
+V = "#242820"
+B = "#485838"
+R = "#1a1008"
+S = "#0a0804"
+[units.unsc_rifleman.ranged_profile]
+tell = 0.22
+shot_cooldown = 0.13
+mag_size = 3
+reload = 1.6
+
+# Flood Warrior — leaping infected combat form. Leaper-backed for the
+# "it was on the ceiling" pounce. Reads distinctly from the shambling
+# Combat Form.
+[units.flood_warrior]
+archetype = "leaper"
+display_name = "Flood Warrior"
+hp = 70
+speed = 16.0
+touch_damage = 20
+sprite = "flood_warrior.art"
+[units.flood_warrior.palette]
+B = "#8ca878"
+D = "#2a3c26"
+W = "#5a8a4a"
+T = "#6a1828"
+C = "#1a1a12"
+
+# Flood Splitter — burst-sac form that cascades into Swarmlings on
+# death. Splitter archetype default.
+[units.flood_splitter]
+archetype = "splitter"
+display_name = "Infested Host"
+sprite = "flood_splitter.art"
+[units.flood_splitter.palette]
+B = "#a8c48c"
+D = "#3a4a2a"
+T = "#78905a"
+S = "#6a283a"
+C = "#1a2014"
+
+# Flood Swarmling — the drip-drip swarm that accompanies the bigger
+# forms. Swarmling archetype default.
+[units.flood_swarm]
+archetype = "swarmling"
+display_name = "Flood Spore"
+sprite = "flood_swarm.art"
+[units.flood_swarm.palette]
+B = "#b8d0a0"
+D = "#3a4a2a"
+E = "#a8ff60"
+
+# Flood Tank — the miniboss. Generic miniboss archetype, themed.
+[units.flood_tank]
+archetype = "miniboss"
+display_name = "Flood Tank Form"

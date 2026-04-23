@@ -29,6 +29,16 @@ pub struct Corpse {
     pub x: f32,
     pub y: f32,
     pub archetype: Archetype,
+    /// Brand the dying enemy belonged to. Keeps the corpse sprite
+    /// coherent with the enemy — a Combine Soldier corpse should
+    /// render as Combine Soldier, not as the archetype default
+    /// Marksman.
+    pub brand_id: Option<crate::tag::Tag>,
+    /// BrandUnit id the dying enemy carried. Takes precedence over
+    /// archetype in the sprite-lookup chain, so distinct units
+    /// backed by the same archetype (pistol_scav / shotgun_scav /
+    /// scav_sniper) all leave distinct corpses.
+    pub unit_id: Option<crate::tag::Tag>,
     /// Sprite-local pixel coords that have been punched out by hits.
     /// Kept as `(u8, u8)` — archetype sprites are all < 256 on either
     /// axis.
@@ -45,12 +55,21 @@ impl Corpse {
     /// hit_radius so shooting "at the body" still lands.
     pub const HIT_RADIUS: f32 = 2.6;
 
-    pub fn new(id: u32, archetype: Archetype, x: f32, y: f32) -> Self {
+    pub fn new(
+        id: u32,
+        archetype: Archetype,
+        x: f32,
+        y: f32,
+        brand_id: Option<crate::tag::Tag>,
+        unit_id: Option<crate::tag::Tag>,
+    ) -> Self {
         Self {
             id,
             x,
             y,
             archetype,
+            brand_id,
+            unit_id,
             holes: Vec::new(),
             hp: Self::MAX_HP,
         }
@@ -60,6 +79,12 @@ impl Corpse {
     /// deterministic layout, decrement hp, and return the gore color the
     /// caller should spawn gibs in. Host + clients call this with the
     /// *same* seed → identical hole patterns.
+    ///
+    /// Sprite template comes from the archetype's hardcoded Rust
+    /// builder (not the brand-unit override path) so hole-layout
+    /// coordinates are stable across host/client even when the
+    /// client hasn't received brand/unit id via the net proto yet.
+    /// Visual render uses the branded sprite separately.
     pub fn apply_hit(&mut self, seed: u64) -> Pixel {
         let tmpl = sprite::enemy_sprite(self.archetype);
         let w = tmpl.w.max(1) as u64;
@@ -132,7 +157,17 @@ impl Corpse {
         let gib = gib_color(self.archetype);
 
         if mip.shows_sprite() {
-            let mut s: Sprite = sprite::enemy_sprite_from_content(self.archetype, content);
+            // Branded + unit-scoped sprite lookup. Preserves the
+            // enemy's in-life appearance into the corpse — a Combine
+            // Soldier's corpse stays a Combine Soldier, a shotgun_scav
+            // stays a shotgun_scav, rather than reverting to the
+            // archetype-default silhouette when it dies.
+            let mut s: Sprite = sprite::enemy_sprite_branded(
+                self.archetype,
+                self.brand_id.as_ref().map(|t| t.as_str()),
+                self.unit_id.as_ref().map(|t| t.as_str()),
+                content,
+            );
             // Tint toward dead-tones: most of the base tint collapses to
             // the archetype's gib color + a darkening pass.
             s.tint_toward(gib, 0.6);

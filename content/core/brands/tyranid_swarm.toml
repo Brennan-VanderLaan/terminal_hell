@@ -1,68 +1,54 @@
-# Warhammer 40K — Tyranid Swarm. Hive-fleet biomass fantasy at its
-# purest. Termagants by the hundreds, Hormagaunts leaping from the
-# shadows, Warriors anchoring waves, Zoanthropes floating overhead,
-# Lictors ambushing from cover. The "consume everything" brand — the
-# shadow in the warp grows closer with every kill.
+# Warhammer 40K — Tyranid Hive Fleet. Biomass fantasy at its purest.
+# Termagants by the hundreds with spitter fleshborers, Hormagaunts
+# leaping scythes-first, Warriors anchoring waves, Zoanthropes floating
+# overhead pulsing psychic bolts, Lictors ambushing, Rippers cascading,
+# Carnifex charging. The "consume everything" brand.
+#
+# Converted to BrandUnit authoring shape.
 
 id = "tyranid_swarm"
 name = "Warhammer 40K — Tyranid Hive Fleet"
 description = "Termagants. Hormagaunts. Warriors. Zoanthropes. The swarm consumes."
 
 spawn_pool = [
-    "swarmling",
-    "leaper",
-    "charger",
-    "orb",
-    "splitter",
-    "pinkie",
-    "howler",
-    "phaser",
-    "marksman",
+    "termagant",
+    "hormagaunt",
+    "tyranid_warrior",
+    "zoanthrope",
+    "ripper",
+    "lictor",
+    "fleshborer_termagant",
+    "lictor_shriek",
 ]
-miniboss = "pinkie"
+miniboss = "carnifex"
 
-# Jump-infantry bio-surge feel → Dash. Perks lean into attritional
-# survival: Survivor for plate, Rampage because the killing just
-# keeps feeding you, GloomShroud resisting the shadow-in-the-warp
-# sanity drain.
 signature_traversal = "dash"
 signature_perks = ["survivor", "rampage", "gloom_shroud"]
 
 [spawn_weights]
-# Termagants — the endless fleshtide.
-swarmling = 8
-# Hormagaunt leap — scythes-first, from the shadows, EVERY wave.
-leaper = 6
-# Tyranid Warrior — anchor-class mid-tier charge.
-charger = 3
-# Zoanthrope — floating psychic artillery.
-orb = 2
-# Ripper swarm — burst into more rippers.
-splitter = 3
-# Lictor shadowstep — hive ambush, flickers through cover.
-phaser = 3
-# Termagant with fleshborer — long-range spitter.
-marksman = 2
-# Carnifex — the "oh no" Fex moment.
-pinkie = 1
-# Lictor shriek luring the swarm to a player's position.
-howler = 1
+termagant = 8
+hormagaunt = 6
+tyranid_warrior = 3
+zoanthrope = 2
+ripper = 3
+lictor = 3
+fleshborer_termagant = 2
+lictor_shriek = 1
 
-# ── Brand sprite overrides ─────────────────────────────────────────
-# Tyranid silhouettes: slender Termagants, leaping scythe-armed
-# Hormagaunts, four-armed Warriors, and the towering Carnifex.
-# Purple/red chitin + bone-white carapace + acid-green ichor glow.
-# Art lives in content/core/art/tyranid_swarm/.
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster.
+# ═══════════════════════════════════════════════════════════════════
 
-[sprite_overrides]
-swarmling = "termagant.art"
-leaper = "hormagaunt.art"
-charger = "tyranid_warrior.art"
-pinkie = "carnifex.art"
-
-# Termagant — slender chitinous gaunt clutching a fleshborer
-# spinefist (W = weapon, G = acid-green muzzle glow).
-[sprite_palettes.swarmling]
+# Termagant — slender purple-chitin gaunt. Swarmling-backed for the
+# endless fleshtide pressure.
+[units.termagant]
+archetype = "swarmling"
+display_name = "Termagant"
+hp = 22
+speed = 28.0
+touch_damage = 6
+sprite = "termagant.art"
+[units.termagant.palette]
 H = "#f0e8c8"
 C = "#f0e0b8"
 B = "#782838"
@@ -71,9 +57,16 @@ W = "#3a1a2a"
 G = "#a8ff40"
 D = "#1a0814"
 
-# Hormagaunt — mid-pounce, four scythe-blades trailing purple chitin.
-# S = bone scythe, C = pale carapace, B = purple chitin body.
-[sprite_palettes.leaper]
+# Hormagaunt — scythes-first pouncer. Leaper-backed; bone scythes
+# trailing purple chitin, the "hormagaunt leap" moment every wave.
+[units.hormagaunt]
+archetype = "leaper"
+display_name = "Hormagaunt"
+hp = 50
+speed = 17.0
+touch_damage = 22
+sprite = "hormagaunt.art"
+[units.hormagaunt.palette]
 H = "#f4ecd0"
 S = "#e8dcb0"
 C = "#f0e0b8"
@@ -82,9 +75,16 @@ E = "#a8ff40"
 D = "#1a0a1a"
 A = "#0a0410"
 
-# Tyranid Warrior — four-armed mid-tier bioform with talons reaching
-# wide (T = talon tip), bone-plated skull, acid-green compound eyes.
-[sprite_palettes.charger]
+# Tyranid Warrior — four-armed anchor, bone-plated skull. Charger-
+# backed for the mid-tier committed rush.
+[units.tyranid_warrior]
+archetype = "charger"
+display_name = "Tyranid Warrior"
+hp = 140
+speed = 20.0
+touch_damage = 22
+sprite = "tyranid_warrior.art"
+[units.tyranid_warrior.palette]
 H = "#f0e0b8"
 C = "#e4d8a8"
 B = "#5a1830"
@@ -93,9 +93,88 @@ M = "#1a0810"
 T = "#f8ecc8"
 A = "#1a0614"
 
-# Carnifex — massive bone-plated head crown (P = bone plate), huge
-# purple chitin bulk, and a side-mounted bio-cannon (W = cannon).
-[sprite_palettes.pinkie]
+# Zoanthrope — floating psychic artillery. Orb-backed; shock-chain on
+# death pulses the warp.
+[units.zoanthrope]
+archetype = "orb"
+display_name = "Zoanthrope"
+hp = 110
+sprite = "zoanthrope.art"
+[units.zoanthrope.palette]
+B = "#5a1028"
+H = "#f0e0b8"
+E = "#a8ff40"
+D = "#14040a"
+
+# Ripper — worm-class bio-form. Splitter-backed; bursts into more
+# rippers on death, cascading pressure.
+[units.ripper]
+archetype = "splitter"
+display_name = "Ripper Swarm"
+hp = 40
+speed = 16.0
+sprite = "ripper.art"
+[units.ripper.palette]
+B = "#5a1028"
+C = "#f4ecd0"
+E = "#a8ff40"
+D = "#0a0410"
+
+# Lictor — ambush shadowstep. Phaser-backed; flickers through hive
+# fog, lands next to the player.
+[units.lictor]
+archetype = "phaser"
+display_name = "Lictor"
+hp = 80
+speed = 11.0
+touch_damage = 28
+sprite = "lictor.art"
+[units.lictor.palette]
+C = "#e4d8a8"
+B = "#5a1030"
+E = "#a8ff40"
+M = "#1a0614"
+T = "#f8ecc8"
+
+# Fleshborer Termagant — long-range spitter variant. Marksman-backed
+# with a fast bio-spit profile (short tell, mid-range, moderate dmg).
+[units.fleshborer_termagant]
+archetype = "marksman"
+display_name = "Fleshborer Termagant"
+hp = 30
+speed = 10.0
+ranged_damage = 10
+preferred_distance = 45.0
+sprite = "fleshborer_termagant.art"
+[units.fleshborer_termagant.palette]
+H = "#f0e8c8"
+C = "#f0e0b8"
+B = "#782838"
+E = "#ffd040"
+W = "#3a1a2a"
+G = "#a8ff40"
+D = "#1a0814"
+[units.fleshborer_termagant.ranged_profile]
+tell = 0.3
+shot_cooldown = 1.2
+mag_size = 1
+reload = 0.0
+
+# Lictor Shriek — the off-screen shadow-in-the-warp noise-caller.
+# Howler-backed.
+[units.lictor_shriek]
+archetype = "howler"
+display_name = "Lictor Shriek"
+hp = 45
+
+# Carnifex — the towering bio-tank miniboss.
+[units.carnifex]
+archetype = "miniboss"
+display_name = "Carnifex"
+hp = 1400
+touch_damage = 42
+sprite = "carnifex.art"
+[units.carnifex.palette]
 H = "#f4ecd0"
 P = "#e8dcb0"
 C = "#d8c898"

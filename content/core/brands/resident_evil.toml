@@ -1,46 +1,52 @@
-# Resident Evil — Villa Outbreak. Shambling infected (rushers) with
-# occasional mutations — leapers from second-floor cover, pinkies
-# that tank shotgun blasts, sapper-style regenerators that explode
-# into sub-forms.
+# Resident Evil — Villa Outbreak. Slow shambling infected (ganados),
+# skinless Lickers pouncing from second-floor cover, bloated
+# Regenerators bursting into sub-forms, towering Tyrants tanking
+# shotgun blasts, Las Plagas parasites erupting from decapitated
+# necks. Body-horror mutation brand — every kill might bring
+# something worse.
+#
+# Converted to BrandUnit authoring shape. Each unit id matches the
+# RE canonical monster name.
 
 id = "resident_evil"
 name = "Resident Evil — Villa Outbreak"
 description = "Slow infected, mutations, body-horror surprises."
 
-spawn_pool = ["rusher", "pinkie", "leaper", "splitter", "sapper", "floodling"]
-miniboss = "miniboss"
+spawn_pool = [
+    "ganado",
+    "licker",
+    "regenerator",
+    "tyrant",
+    "las_plagas",
+    "crimson_head",
+]
+miniboss = "tyrant"
 
-# Survival-horror flavor → Phase: duck into the adjacent hallway
-# before the lickers reach you. Perks lean conservation: IronWill
-# for sanity under Carcosa pressure, Survivor armor pad, LastStand
-# clutch when the herb pouch runs empty.
 signature_traversal = "phase"
 signature_perks = ["iron_will", "survivor", "last_stand"]
 
 [spawn_weights]
-rusher = 4
-pinkie = 2
-leaper = 2
-# Splitter = Regenerator bursting into sub-forms.
-splitter = 2
-sapper = 1
-# Las Plagas / parasite head.
-floodling = 1
+ganado = 4
+licker = 2
+regenerator = 2
+crimson_head = 1
+las_plagas = 1
+tyrant = 1
 
-# ── Brand sprite overrides ─────────────────────────────────────────
-# Resident Evil — biohazard body horror. Dark decay-purple + lab-
-# green ooze + blood-red + sepia-beige. Each silhouette leans into
-# iconic RE monster shapes.
+# ═══════════════════════════════════════════════════════════════════
+# Unit roster.
+# ═══════════════════════════════════════════════════════════════════
 
-[sprite_overrides]
-rusher = "ganado.art"
-leaper = "licker.art"
-splitter = "regenerator.art"
-pinkie = "tyrant.art"
-floodling = "las_plagas.art"
-
-# Ganado / Majini — infected rural human in dirty clothes, red eyes.
-[sprite_palettes.rusher]
+# Ganado — rural infected villager. Slower than base Rusher (RE4
+# ganados shamble, they don't sprint), but harder-hitting.
+[units.ganado]
+archetype = "rusher"
+display_name = "Ganado"
+hp = 70
+speed = 16.0
+touch_damage = 14
+sprite = "ganado.art"
+[units.ganado.palette]
 B = "#8a6a48"
 D = "#2e1c18"
 E = "#ff3820"
@@ -49,8 +55,34 @@ M = "#2a1410"
 P = "#4a2c40"
 R = "#702418"
 
-# Licker — skinless muscle, whipping tongue, exposed brain, no eyes.
-[sprite_palettes.leaper]
+# Crimson Head — the enraged Classic-RE zombie variant. Rusher-backed,
+# faster than a Ganado, more aggressive. The "the zombie you didn't
+# burn came back" threat.
+[units.crimson_head]
+archetype = "rusher"
+display_name = "Crimson Head"
+hp = 95
+speed = 26.0
+touch_damage = 20
+sprite = "crimson_head.art"
+[units.crimson_head.palette]
+B = "#7a3028"
+D = "#2a0a08"
+E = "#ff2020"
+H = "#a82820"
+M = "#1a0404"
+R = "#c82020"
+
+# Licker — skinless, blind, whip-tongue. Leaper-backed for the "drops
+# from the ceiling" pounce. Low HP but devastating on impact.
+[units.licker]
+archetype = "leaper"
+display_name = "Licker"
+hp = 55
+speed = 18.0
+touch_damage = 28
+sprite = "licker.art"
+[units.licker.palette]
 B = "#a82820"
 D = "#4a1008"
 R = "#e83828"
@@ -58,24 +90,31 @@ G = "#d8d0b8"
 M = "#6a1808"
 C = "#6a4020"
 
-# Regenerator — stretched emaciated figure, dripping purple veins.
-[sprite_palettes.splitter]
+# Regenerator — stretched emaciated figure, parasites visible through
+# the skin. Splitter-backed because burst-killed Regenerators vent
+# sub-parasites that come after you.
+[units.regenerator]
+archetype = "splitter"
+display_name = "Regenerator"
+hp = 70
+speed = 11.0
+sprite = "regenerator.art"
+[units.regenerator.palette]
 B = "#b0a088"
 D = "#3a2a28"
 E = "#ffe830"
 M = "#4a1a40"
 P = "#6a2a60"
 
-# Tyrant — towering humanoid in long grey trench coat, scarred face.
-[sprite_palettes.pinkie]
-B = "#c8b498"
-D = "#2e2018"
-E = "#ff2020"
-H = "#a89078"
-C = "#3a3842"
-
-# Las Plagas head — parasite burst from the neck stump, tentacles.
-[sprite_palettes.floodling]
+# Las Plagas — parasite head that erupts from a killed host's neck.
+# Floodling-backed; hostile to everything, leaps at any nearby
+# survivor, dies on contact. The "peeled-open neck" swap-form.
+[units.las_plagas]
+archetype = "floodling"
+display_name = "Las Plagas"
+speed = 30.0
+sprite = "las_plagas.art"
+[units.las_plagas.palette]
 B = "#8a6a48"
 D = "#2e1c18"
 R = "#a82018"
@@ -83,3 +122,19 @@ G = "#58a830"
 M = "#2a1410"
 T = "#c02830"
 
+# Tyrant — grey-trenchcoated bioweapon pushing through walls. Pinkie-
+# backed bulk + the Tyrant silhouette. Doubles as the brand miniboss
+# via spawn_pool weight + the `miniboss = "tyrant"` tag.
+[units.tyrant]
+archetype = "pinkie"
+display_name = "Tyrant"
+hp = 260
+speed = 14.0
+touch_damage = 28
+sprite = "tyrant.art"
+[units.tyrant.palette]
+B = "#c8b498"
+D = "#2e2018"
+E = "#ff2020"
+H = "#a89078"
+C = "#3a3842"

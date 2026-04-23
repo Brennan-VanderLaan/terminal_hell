@@ -13,7 +13,7 @@
 //! the pool the director samples from.
 
 use crate::arena::Arena;
-use crate::content::{BrandDef, ContentDb};
+use crate::content::{BrandDef, ContentDb, ResolvedUnit as ContentDbResolvedUnit};
 use crate::enemy::{Archetype, Enemy};
 use rand::Rng;
 use rand::SeedableRng;
@@ -96,7 +96,12 @@ pub struct WaveDirector {
     /// director advances to the intermission even if hostiles remain.
     /// Left at zero while not in `Clearing`.
     pub clear_timer: f32,
-    weighted_pool: Vec<(Archetype, u32)>,
+    /// Weighted pool of (brand_id, spawn_id, weight) triples. The
+    /// spawn_id is either a BrandUnit id declared under
+    /// `[units.<id>]` OR a raw archetype snake name (legacy brands).
+    /// `ContentDb::resolve_unit` handles both cases at spawn time
+    /// and returns a merged ResolvedUnit.
+    weighted_pool: Vec<(String, String, u32)>,
     rng: SmallRng,
 }
 
@@ -151,13 +156,18 @@ impl WaveDirector {
             WaveState::Spawning => {
                 self.spawn_timer -= dt;
                 while self.wave_budget > 0 && self.spawn_timer <= 0.0 {
-                    let archetype = self.next_archetype();
+                    let Some((brand_id, spawn_id)) = self.next_spawn() else {
+                        break;
+                    };
+                    let Some(resolved) = content.resolve_unit(&brand_id, &spawn_id) else {
+                        self.wave_budget = self.wave_budget.saturating_sub(1);
+                        continue;
+                    };
+                    let archetype = resolved.archetype;
                     // Swarm archetypes fire multiple clusters at once
                     // across the perimeter instead of a single spawn.
-                    // Zerg rush: dense melee biomass.
-                    // Flood tide: parasites that convert anything they
-                    // touch — terrifying in volume because each one
-                    // can turn the horde against itself.
+                    // Zerg rush: dense melee biomass. Flood tide:
+                    // parasites that convert anything they touch.
                     if let Some(params) = swarm_params(archetype) {
                         let cluster_count =
                             self.rng.gen_range(params.clusters.0..=params.clusters.1);
@@ -175,16 +185,9 @@ impl WaveDirector {
                                     self.rng.gen_range(-params.spread..params.spread);
                                 let oy: f32 =
                                     self.rng.gen_range(-params.spread..params.spread);
-                                let stats = content.stats(archetype);
                                 let sx = cx + ox;
                                 let sy = cy + oy;
-                                let brand_id = self
-                                    .pick_contributing_brand(
-                                        archetype, content, active_brands,
-                                    )
-                                    .map(|s| crate::tag::Tag::new(&s));
-                                let mut e = Enemy::spawn(archetype, stats, sx, sy);
-                                e.brand_id = brand_id;
+                                let e = build_unit_spawn(&resolved, sx, sy);
                                 enemies.push(e);
                                 crate::audio::emit(
                                     archetype.audio_id(),
@@ -200,12 +203,7 @@ impl WaveDirector {
                     }
 
                     if let Some((sx, sy)) = pick_spawn(&mut self.rng, arena, player_anchors) {
-                        let stats = content.stats(archetype);
-                        let brand_id = self
-                            .pick_contributing_brand(archetype, content, active_brands)
-                            .map(|s| crate::tag::Tag::new(&s));
-                        let mut e = Enemy::spawn(archetype, stats, sx, sy);
-                        e.brand_id = brand_id;
+                        let e = build_unit_spawn(&resolved, sx, sy);
                         enemies.push(e);
                         crate::audio::emit(
                             archetype.audio_id(),
@@ -283,11 +281,14 @@ impl WaveDirector {
         player_anchors: &[(f32, f32)],
     ) {
         if self.wave % 5 == 0 && self.wave > 0 {
-            if let Some(boss) = first_miniboss(content, active_brands) {
-                if let Some((sx, sy)) = pick_spawn(&mut self.rng, arena, player_anchors) {
-                    let stats = content.stats(boss);
-                    enemies.push(Enemy::spawn(boss, stats, sx, sy));
-                    crate::audio::emit(boss.audio_id(), "spawn", Some((sx, sy)));
+            if let Some((boss_brand, boss_id)) = first_miniboss(content, active_brands) {
+                if let Some(resolved) = content.resolve_unit(&boss_brand, &boss_id) {
+                    if let Some((sx, sy)) = pick_spawn(&mut self.rng, arena, player_anchors)
+                    {
+                        let archetype = resolved.archetype;
+                        enemies.push(build_unit_spawn(&resolved, sx, sy));
+                        crate::audio::emit(archetype.audio_id(), "spawn", Some((sx, sy)));
+                    }
                 }
             }
         }
@@ -301,102 +302,102 @@ impl WaveDirector {
         self.spawn_timer = 0.0;
     }
 
-    fn next_archetype(&mut self) -> Archetype {
+    /// Pick the next (brand_id, spawn_id) pair from the weighted
+    /// pool. Caller resolves the pair via ContentDb::resolve_unit.
+    fn next_spawn(&mut self) -> Option<(String, String)> {
         if self.weighted_pool.is_empty() {
-            return Archetype::Rusher;
+            return None;
         }
-        let total: u32 = self.weighted_pool.iter().map(|(_, w)| *w).sum();
+        let total: u32 = self.weighted_pool.iter().map(|(_, _, w)| *w).sum();
         if total == 0 {
-            return self.weighted_pool[0].0;
+            let e = &self.weighted_pool[0];
+            return Some((e.0.clone(), e.1.clone()));
         }
         let pick = self.rng.gen_range(0..total);
         let mut acc = 0u32;
-        for (arch, w) in &self.weighted_pool {
+        for (bid, sid, w) in &self.weighted_pool {
             acc += *w;
             if pick < acc {
-                return *arch;
+                return Some((bid.clone(), sid.clone()));
             }
         }
-        self.weighted_pool[0].0
+        let e = &self.weighted_pool[0];
+        Some((e.0.clone(), e.1.clone()))
     }
 
-    /// Pick which brand is attributed to a rolled spawn. When
-    /// multiple brands contribute the same archetype (e.g. both
-    /// Doom and Tarkov declaring a `rusher`), we pick one weighted
-    /// by that brand's declared weight for the archetype. This makes
-    /// sprite flavor follow the pool contribution — a brand that
-    /// weights rusher=8 gets 80% of the visual identity of rushers
-    /// spawned during a mixed wave.
-    pub fn pick_contributing_brand(
-        &mut self,
-        archetype: Archetype,
-        content: &ContentDb,
-        active_brands: &[String],
-    ) -> Option<String> {
-        // Build (brand_id, weight) list of brands that actually pool
-        // this archetype. Brands that don't pool it contribute 0.
-        let arch_name = archetype.snake_name();
-        let mut candidates: Vec<(String, u32)> = Vec::new();
-        let mut total: u32 = 0;
-        for id in active_brands {
-            let Some(brand) = content.brand(id) else {
-                continue;
-            };
-            if !brand.spawn_pool.iter().any(|a| a == arch_name) {
-                continue;
-            }
-            let weight = brand.spawn_weights.get(arch_name).copied().unwrap_or(1);
-            total += weight;
-            candidates.push((id.clone(), weight));
-        }
-        if candidates.is_empty() || total == 0 {
-            return active_brands.first().cloned();
-        }
-        let pick = self.rng.gen_range(0..total);
-        let mut acc = 0u32;
-        for (id, w) in &candidates {
-            acc += *w;
-            if pick < acc {
-                return Some(id.clone());
-            }
-        }
-        Some(candidates[0].0.clone())
-    }
+    // Previously: `pick_contributing_brand(archetype)` — picked a
+    // brand to attribute a rolled-archetype spawn to. Retired in
+    // the BrandUnit pass: brand attribution is now inherent to
+    // each weighted_pool entry (the tuple carries brand_id), so
+    // no post-hoc pick is needed.
 }
 
-fn merge_weights(content: &ContentDb, active_brands: &[String]) -> Vec<(Archetype, u32)> {
-    use std::collections::HashMap;
-    let mut combined: HashMap<Archetype, u32> = HashMap::new();
-    for id in active_brands {
-        let Some(brand) = content.brand(id) else {
+/// Construct an Enemy from a ResolvedUnit at the given position.
+/// Pulls merged stats + ranged profile override + brand/unit ids
+/// off the resolver output. Used by both the swarm-cluster path
+/// and the single-spawn path.
+fn build_unit_spawn(resolved: &ContentDbResolvedUnit, sx: f32, sy: f32) -> Enemy {
+    let ranged_override = resolved.ranged_profile.as_ref().map(|p| {
+        crate::enemy::RangedProfile {
+            tell: p.tell,
+            shot_cooldown: p.shot_cooldown,
+            mag_size: p.mag_size,
+            reload: p.reload,
+        }
+    });
+    Enemy::spawn(resolved.archetype, &resolved.stats, sx, sy)
+        .with_brand_unit(resolved.brand_id, resolved.unit_id, ranged_override)
+}
+
+/// Build the weighted spawn pool from active brands. Each brand
+/// contributes its `spawn_pool` entries as `(brand_id, spawn_id,
+/// weight)` tuples. Spawn ids can be BrandUnit ids (keys in
+/// `brand.units`) or legacy archetype snake names — both work
+/// because ContentDb::resolve_unit handles both at spawn time.
+/// Brand attribution is implicit in the tuple: when two brands
+/// both pool a Marksman-backed unit, each retains its own brand
+/// id and resolves to its own merged stats/sprite/behavior.
+fn merge_weights(
+    content: &ContentDb,
+    active_brands: &[String],
+) -> Vec<(String, String, u32)> {
+    let mut out: Vec<(String, String, u32)> = Vec::new();
+    for brand_id in active_brands {
+        let Some(brand) = content.brand(brand_id) else {
             continue;
         };
-        for arch_name in &brand.spawn_pool {
-            let Ok(arch) = archetype_from_name(arch_name) else {
+        for spawn_id in &brand.spawn_pool {
+            // Skip entries that don't resolve at all (unknown unit
+            // AND unknown archetype). Load-time validation should
+            // have caught these; the skip keeps the wave director
+            // robust if a brand is edited without a restart.
+            if content.resolve_unit(brand_id, spawn_id).is_none() {
+                tracing::warn!(
+                    brand = %brand_id,
+                    spawn_id = %spawn_id,
+                    "spawn_pool entry doesn't resolve — skipping"
+                );
                 continue;
-            };
-            let weight = brand.spawn_weights.get(arch_name).copied().unwrap_or(1);
-            *combined.entry(arch).or_insert(0) += weight;
+            }
+            let weight = brand.spawn_weights.get(spawn_id).copied().unwrap_or(1);
+            out.push((brand_id.clone(), spawn_id.clone(), weight));
         }
     }
-    combined.into_iter().collect()
+    out
 }
 
-fn first_miniboss(content: &ContentDb, active_brands: &[String]) -> Option<Archetype> {
+/// Returns `(brand_id, miniboss_spawn_id)`. The `miniboss` field on
+/// a brand can now be either a BrandUnit id OR a raw archetype
+/// name — resolver handles both.
+fn first_miniboss(content: &ContentDb, active_brands: &[String]) -> Option<(String, String)> {
     let brand_id = active_brands.first()?;
     let brand: &BrandDef = content.brand(brand_id)?;
-    archetype_from_name(&brand.miniboss).ok()
+    Some((brand_id.clone(), brand.miniboss.clone()))
 }
 
-fn archetype_from_name(name: &str) -> Result<Archetype, ()> {
-    // Delegate to the central lookup so every new archetype
-    // (Breacher, Rocketeer, Leaper, Sapper, Juggernaut, Howler,
-    // Sentinel, Splitter, and future adds) flows through here
-    // automatically. This function used to carry its own hardcoded
-    // list which silently dropped all the post-v0.6 archetypes from
-    // the spawn pool — huge content bug.
-    Archetype::from_name(name).ok_or(())
-}
+// `archetype_from_name` retired — merge_weights now lets
+// ContentDb::resolve_unit handle spawn-id → archetype (including
+// both BrandUnit ids and legacy archetype snake names).
 
 /// Swarm parameters for archetypes that spawn in mass clusters rather
 /// than as single units. Returning Some here triggers the multi-
