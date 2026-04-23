@@ -226,8 +226,8 @@ impl Archetype {
     }
 
     /// Exact inverse of [`from_name`]. Returns the TOML/brand snake
-    /// name for this archetype — callers that need to look up brand
-    /// `sprite_overrides` (keyed by snake name) start here.
+    /// name for this archetype — used wherever gameplay code needs to
+    /// refer to an archetype by its content-pack key.
     pub fn to_name(self) -> &'static str {
         match self {
             Archetype::Rusher => "rusher",

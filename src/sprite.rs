@@ -410,10 +410,10 @@ pub fn enemy_sprite(archetype: Archetype) -> Sprite {
         Archetype::FloodCarrier => flood_carrier(),
         // B4 new archetypes — MVP art: Headcrab reuses the Floodling
         // silhouette (they're mechanically cousins and visually similar),
-        // Zombie reuses the Flood silhouette. Brand-level sprite_overrides
-        // in half_life.toml point to distinct headcrab.art / headcrab_
-        // zombie.art files when that brand is active, so in practice
-        // players see dedicated art via the existing override path.
+        // Zombie reuses the Flood silhouette. Half-Life brand units point
+        // at dedicated headcrab.art / headcrab_zombie.art files so in
+        // practice players see dedicated art via the BrandUnit sprite
+        // path; this fallback is only used when no brand is active.
         Archetype::Headcrab => floodling(),
         Archetype::Zombie => flood(),
         // Rat + DireRat MVP art: reuse Swarmling (small scurrying) and
@@ -455,10 +455,8 @@ pub fn enemy_sprite_from_content(
 ///      precedence. Lets a brand ship multiple distinct units
 ///      backed by the same archetype (pistol_scav vs shotgun_scav
 ///      both using Rusher) with distinct silhouettes each.
-///   2. `(brand_id, archetype)` legacy brand-level override from the
-///      pre-BrandUnit `sprite_overrides` table. Backward compat.
-///   3. `archetype_sprites[archetype]` archetype-wide art.
-///   4. Hardcoded Rust builder.
+///   2. `archetype_sprites[archetype]` archetype-wide art.
+///   3. Hardcoded Rust builder.
 pub fn enemy_sprite_branded(
     archetype: Archetype,
     brand_id: Option<&str>,
@@ -469,14 +467,6 @@ pub fn enemy_sprite_branded(
         if let Some(art) = content
             .brand_unit_sprites
             .get(&(bid.to_string(), uid.to_string()))
-        {
-            return art.clone();
-        }
-    }
-    if let Some(bid) = brand_id {
-        if let Some(art) = content
-            .brand_sprites
-            .get(&(bid.to_string(), archetype))
         {
             return art.clone();
         }

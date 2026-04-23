@@ -103,16 +103,6 @@ pub struct BrandDef {
     /// player already has all of them, fall back to any unowned perk.
     #[serde(default)]
     pub signature_perks: Option<Vec<String>>,
-    /// Legacy per-archetype sprite overrides. Entry format:
-    /// `archetype_snake_name → art_filename.art`, paired with a
-    /// matching `[sprite_palettes.<arch>]` table. Deprecated in favor
-    /// of `[units.*]` BrandUnit entries which carry their own sprite
-    /// + palette alongside stat + behavior overrides. Kept working
-    /// so un-converted brands continue to load.
-    #[serde(default)]
-    pub sprite_overrides: HashMap<String, String>,
-    #[serde(default)]
-    pub sprite_palettes: HashMap<String, HashMap<String, String>>,
     /// Brand-authored unit roster. Keys are unit ids (e.g.
     /// "pistol_scav", "combine_soldier") that the brand's
     /// `spawn_pool` + `spawn_weights` reference. Each entry merges
@@ -235,12 +225,6 @@ pub struct ContentDb {
     /// Optional ASCII-art sprites keyed by archetype. When present,
     /// sprite.rs uses these instead of the hardcoded builders.
     pub archetype_sprites: HashMap<Archetype, crate::sprite::Sprite>,
-    /// Legacy brand-specific sprite overrides: `(brand_id, archetype)
-    /// → Sprite`. Authored via each brand's `sprite_overrides` +
-    /// `sprite_palettes` TOML sections. Deprecated in favor of per-
-    /// unit sprites in `brand_unit_sprites`; still consulted as a
-    /// fallback for un-converted brands.
-    pub brand_sprites: HashMap<(String, Archetype), crate::sprite::Sprite>,
     /// Per-unit sprite cache: `(brand_id, unit_id) → Sprite`. Built
     /// from each BrandUnit's `sprite` + `palette` at content load.
     /// Consulted first by the sprite lookup path — an enemy carrying
@@ -434,95 +418,6 @@ impl ContentDb {
             archetype_sprites.insert(*arch, sprite);
         }
 
-        // Brand-level sprite overrides. Each brand can declare a
-        // `[sprite_overrides]` map of archetype → art filename plus
-        // `[sprite_palettes.<arch>]` palette tables. When an enemy
-        // spawns from that brand and renders, the lookup tries this
-        // first. Art files live under `content/core/art/<brand_id>/`
-        // by convention, but any filename inside the art/ dir works.
-        let mut brand_sprites: HashMap<(String, Archetype), crate::sprite::Sprite> =
-            HashMap::new();
-        for (brand_id, brand) in &brands {
-            if brand.sprite_overrides.is_empty() {
-                continue;
-            }
-            let Some(dir) = art_dir else { continue };
-            for (arch_name, art_filename) in &brand.sprite_overrides {
-                let Some(arch) = Archetype::from_name(arch_name) else {
-                    tracing::warn!(
-                        brand = %brand_id,
-                        archetype = %arch_name,
-                        "sprite_overrides references unknown archetype"
-                    );
-                    continue;
-                };
-                // `include_dir`'s `get_entry` recurses but matches
-                // against each entry's FULL embed-root-relative path,
-                // so lookups must include the `art/` prefix even
-                // though we already have an `art_dir` handle — the
-                // handle is just a walk-starting-point, not a path
-                // rebase. Try the brand subdirectory first, then a
-                // loose filename at `art/<file>` as a fallback.
-                let sub = format!("art/{brand_id}/{art_filename}");
-                let file = dir
-                    .get_file(&sub)
-                    .or_else(|| dir.get_file(format!("art/{art_filename}")));
-                let Some(file) = file else {
-                    tracing::warn!(
-                        brand = %brand_id,
-                        archetype = %arch_name,
-                        art = %art_filename,
-                        "sprite_overrides art file missing"
-                    );
-                    continue;
-                };
-                let Some(pal_map) = brand.sprite_palettes.get(arch_name) else {
-                    tracing::warn!(
-                        brand = %brand_id,
-                        archetype = %arch_name,
-                        "sprite_overrides missing matching sprite_palettes entry"
-                    );
-                    continue;
-                };
-                let text = match file.contents_utf8() {
-                    Some(t) => t,
-                    None => {
-                        tracing::warn!(
-                            brand = %brand_id,
-                            archetype = %arch_name,
-                            "sprite_overrides art file not UTF-8"
-                        );
-                        continue;
-                    }
-                };
-                let palette = match crate::art::palette_from_toml(pal_map) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        tracing::warn!(
-                            brand = %brand_id,
-                            archetype = %arch_name,
-                            %e,
-                            "sprite_palettes parse failed"
-                        );
-                        continue;
-                    }
-                };
-                let sprite = match crate::art::parse_art(text, &palette) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        tracing::warn!(
-                            brand = %brand_id,
-                            archetype = %arch_name,
-                            %e,
-                            "sprite_overrides art parse failed"
-                        );
-                        continue;
-                    }
-                };
-                brand_sprites.insert((brand_id.clone(), arch), sprite);
-            }
-        }
-
         // BrandUnit sprite loading. Each unit's optional `sprite` +
         // `palette` fields produce a per-`(brand_id, unit_id)` sprite
         // entry that's consulted first in the render path. Missing
@@ -596,7 +491,6 @@ impl ContentDb {
             scorch_id,
             fire_id,
             archetype_sprites,
-            brand_sprites,
             brand_unit_sprites,
         })
     }
@@ -698,12 +592,9 @@ impl ContentDb {
     }
 
     /// Human-readable name for an enemy. When the enemy's brand has
-    /// a `sprite_overrides` entry for this archetype, we use the art
-    /// filename's stem as the flavor name (dead_space's `leaper =
-    /// "slasher.art"` → `"Slasher"`). Otherwise the bare archetype
-    /// name ("Charger", "Zergling"). No parenthetical brand suffix —
-    /// the flavor name already carries the theme, and when there's
-    /// no flavor the archetype is its own answer.
+    /// Archetype-only display name — when the caller doesn't know the
+    /// unit id, fall through to the archetype Debug name. Prefer
+    /// [`Self::enemy_display_name_with_unit`] when you have a unit id.
     pub fn enemy_display_name(
         &self,
         archetype: Archetype,
@@ -715,8 +606,7 @@ impl ContentDb {
     /// BrandUnit-aware display name. Lookup order:
     ///   1. BrandUnit's explicit `display_name` (e.g. "Combine Soldier").
     ///   2. Humanized unit id (e.g. "pistol_scav" → "Pistol Scav").
-    ///   3. Legacy `sprite_overrides` filename-stem fallback.
-    ///   4. Archetype Debug name.
+    ///   3. Archetype Debug name.
     /// Used by the kill feed + brand strip so a player sees
     /// "Combine Soldier" or "Pistol Scav" in chat, not "Marksman"
     /// or "Rusher".
@@ -733,18 +623,6 @@ impl ContentDb {
                         return name.to_string();
                     }
                     return humanize_snake(uid);
-                }
-            }
-        }
-        let arch_snake = archetype.to_name();
-        if let Some(bid) = brand_id {
-            if let Some(brand) = self.brands.get(bid) {
-                if let Some(art) = brand.sprite_overrides.get(arch_snake) {
-                    let stem = std::path::Path::new(art)
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or(art);
-                    return humanize_snake(stem);
                 }
             }
         }
@@ -960,19 +838,18 @@ mod tests {
         assert!(c_rp.shot_cooldown < s_rp.shot_cooldown);
     }
 
-    /// Legacy fallback: a brand that ships no `[units.*]` tables
-    /// still resolves via the archetype-snake-name path. This is the
-    /// backward-compat promise for un-converted brands.
+    /// Archetype-snake-name fallback: even when a brand's spawn_pool
+    /// doesn't list a given archetype as a unit, callers that pass
+    /// a raw archetype id (e.g. for miniboss wrappers or test scaffolds)
+    /// still get back a resolved unit with sensible defaults.
     #[test]
     fn resolve_unit_falls_back_to_archetype_name() {
         let db = ContentDb::load_core().expect("core content loads");
-        // doom_inferno hasn't been converted to BrandUnit yet —
-        // spawn_pool still uses archetype names.
         let r = db
             .resolve_unit("doom_inferno", "rusher")
-            .expect("legacy archetype id resolves");
+            .expect("archetype id resolves as fallback");
         assert_eq!(r.archetype, Archetype::Rusher);
-        assert!(r.unit_id.is_none(), "legacy fallback has no unit_id");
+        assert!(r.unit_id.is_none(), "archetype fallback has no unit_id");
     }
 
     /// Unknown ids return None — both for unknown unit ids AND
@@ -982,5 +859,30 @@ mod tests {
         let db = ContentDb::load_core().expect("core content loads");
         assert!(db.resolve_unit("half_life", "not_a_unit").is_none());
         assert!(db.resolve_unit("half_life", "not_an_archetype").is_none());
+    }
+
+    /// Every BrandUnit that declares a `sprite` + `palette` must parse
+    /// to a loaded entry in `brand_unit_sprites`. Catches typos,
+    /// missing art files, and palette/art key drift between the TOML
+    /// and the .art payload.
+    #[test]
+    fn every_declared_brand_unit_sprite_loads() {
+        let db = ContentDb::load_core().expect("core content loads");
+        let mut missing = Vec::new();
+        for (brand_id, brand) in &db.brands {
+            for (unit_id, unit) in &brand.units {
+                if unit.sprite.is_none() || unit.palette.is_none() {
+                    continue;
+                }
+                let key = (brand_id.clone(), unit_id.clone());
+                if !db.brand_unit_sprites.contains_key(&key) {
+                    missing.push(format!("{brand_id}/{unit_id}"));
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "BrandUnit sprites declared but not loaded: {missing:?}"
+        );
     }
 }
